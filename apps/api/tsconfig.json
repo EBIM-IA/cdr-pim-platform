@@ -1,0 +1,9 @@
+{
+  "extends": "@cdr/tsconfig/nest.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.config.ts"]
+}
