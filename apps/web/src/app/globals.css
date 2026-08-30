@@ -1,0 +1,61 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Declared as CSS custom properties (the shadcn/ui convention) and exposed to Tailwind v4
+ * through @theme, so `bg-primary`, `text-muted-foreground` etc. resolve against them. This
+ * is what makes components added later by the shadcn CLI fit in without modification.
+ */
+:root {
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.21 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 260);
+  --primary: oklch(0.46 0.17 22);
+  --primary-foreground: oklch(0.99 0 0);
+  --muted: oklch(0.96 0.005 260);
+  --muted-foreground: oklch(0.52 0.02 260);
+  --border: oklch(0.9 0.01 260);
+  --ring: oklch(0.46 0.17 22);
+  --destructive: oklch(0.55 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.18 0.015 260);
+    --foreground: oklch(0.96 0.005 260);
+    --card: oklch(0.22 0.018 260);
+    --card-foreground: oklch(0.96 0.005 260);
+    --primary: oklch(0.62 0.18 22);
+    --primary-foreground: oklch(0.15 0.01 260);
+    --muted: oklch(0.26 0.018 260);
+    --muted-foreground: oklch(0.72 0.015 260);
+    --border: oklch(0.32 0.02 260);
+    --ring: oklch(0.62 0.18 22);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
