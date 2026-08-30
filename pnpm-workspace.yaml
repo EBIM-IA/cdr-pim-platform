@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm >=10 requires explicit approval for dependency lifecycle scripts.
+# Keep this list minimal and reviewed — it is a supply-chain surface.
+onlyBuiltDependencies:
+  - '@swc/core'
+  - esbuild
+  - sharp
+  - unrs-resolver

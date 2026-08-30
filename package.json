@@ -1,0 +1,32 @@
+{
+  "name": "cdr-pim-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Casa del Rulim\u00e1n \u2014 PIM / Cat\u00e1logo Maestro de Productos con IA",
+  "packageManager": "pnpm@10.19.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,yml,yaml}\"",
+    "db:migrate": "pnpm --filter @cdr/api db:migrate",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:new": "pnpm --filter @cdr/api db:new"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.8",
+    "typescript": "^5.9.3"
+  }
+}
