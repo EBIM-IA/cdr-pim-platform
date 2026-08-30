@@ -1,0 +1,32 @@
+{
+  "name": "@cdr/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "dotenv -e ../../.env -- tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo coverage"
+  },
+  "dependencies": {
+    "@cdr/config": "workspace:*",
+    "@cdr/contracts": "workspace:*",
+    "@cdr/messaging": "workspace:*",
+    "@cdr/shared": "workspace:*",
+    "@cdr/storage": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cdr/eslint-config": "workspace:*",
+    "@cdr/tsconfig": "workspace:*",
+    "@types/node": "^24.7.0",
+    "dotenv-cli": "^10.0.0",
+    "eslint": "^9.38.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

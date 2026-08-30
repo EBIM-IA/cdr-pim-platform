@@ -1,0 +1,5 @@
+{
+  "extends": "@cdr/tsconfig/library.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "dist", "types": ["node"] },
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"]
+}
