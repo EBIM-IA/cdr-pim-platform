@@ -9,8 +9,8 @@ import {
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { type IndexProductUseCase } from '../application/index-product.use-case';
-import { type SemanticSearchUseCase } from '../application/semantic-search.use-case';
+import { IndexProductUseCase } from '../application/index-product.use-case';
+import { SemanticSearchUseCase } from '../application/semantic-search.use-case';
 
 @ApiTags('search')
 @Controller('search')

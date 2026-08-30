@@ -3,8 +3,8 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { type EnqueueProductEmbeddingUseCase } from '../application/enqueue-product-embedding.use-case';
-import { type EnqueueSkeletonPingUseCase } from '../application/enqueue-skeleton-ping.use-case';
+import { EnqueueProductEmbeddingUseCase } from '../application/enqueue-product-embedding.use-case';
+import { EnqueueSkeletonPingUseCase } from '../application/enqueue-skeleton-ping.use-case';
 
 const skeletonPingBodySchema = z.object({
   message: z.string().min(1).max(500).default('ping desde la API'),

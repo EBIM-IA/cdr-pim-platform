@@ -1,5 +1,5 @@
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from '@nestjs/common';
-import { type Reflector } from '@nestjs/core';
+import { Reflector } from '@nestjs/core';
 import { ForbiddenError } from '@cdr/shared';
 import type { Request } from 'express';
 

@@ -17,7 +17,7 @@ import { Res } from '@nestjs/common';
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { API_ENV } from '../../../shared/tokens';
-import { type CheckReadinessUseCase } from '../application/check-readiness.use-case';
+import { CheckReadinessUseCase } from '../application/check-readiness.use-case';
 
 /**
  * Two probes with two different jobs:

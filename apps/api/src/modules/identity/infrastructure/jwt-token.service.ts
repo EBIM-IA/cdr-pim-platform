@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { type JwtService, type JwtSignOptions } from '@nestjs/jwt';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import type { ApiEnv } from '@cdr/config';
 import { ForbiddenError } from '@cdr/shared';
 

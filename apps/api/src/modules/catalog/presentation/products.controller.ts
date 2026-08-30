@@ -13,9 +13,9 @@ import {
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { type CreateProductUseCase } from '../application/create-product.use-case';
-import { type GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
-import { type ListProductsUseCase } from '../application/list-products.use-case';
+import { CreateProductUseCase } from '../application/create-product.use-case';
+import { GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
+import { ListProductsUseCase } from '../application/list-products.use-case';
 import { toProductDto } from './product.presenter';
 
 /**
