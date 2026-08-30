@@ -11,7 +11,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: false,
-    include: ['src/**/*.spec.ts', 'test/architecture/**/*.spec.ts'],
+    include: ['src/**/*.spec.ts', 'test/architecture/**/*.spec.ts', 'test/bootstrap/**/*.spec.ts'],
     coverage: { provider: 'v8', reporter: ['text', 'lcov'], include: ['src/**'] },
   },
 });
