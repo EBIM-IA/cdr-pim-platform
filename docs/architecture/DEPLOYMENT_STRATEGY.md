@@ -33,23 +33,44 @@ graph LR
     uat --> prd["PRD<br/><b>same digest</b>, manual approval"]
 ```
 
-**The image is never rebuilt for PRD.** Promotion updates the PRD ECS service to the digest
-already validated in QAS. Rebuilding would produce a different artefact — different base
-image patches, different transitive dependencies — and silently invalidate the testing.
+**The image is never rebuilt for PRD.** Promotion resolves the requested tag to an
+immutable **ECR digest**, registers a new ECS task definition revision pointing at that
+digest, and updates the service to it. Rebuilding would produce a different artefact —
+different base image patches, different transitive dependencies — and silently invalidate
+the testing.
 
-Tagging: `<git-sha>` always, plus `v<semver>` on a release tag. Never `latest` for a
-deployment; ECR repositories use immutable tags so a tag cannot be moved under a running
-service.
+Mechanically (`promote.yml`), per application:
 
-### The one exception: `web`
+1. reject mutable tags (`latest`, `main`, `qas`, `prd`, …);
+2. `ecr describe-images` → `imageDigest`;
+3. `ecs describe-task-definition` on the revision currently in use, so CPU, memory,
+   environment, secrets and IAM roles are carried over untouched;
+4. replace only `containerDefinitions[0].image` with `<repo>@<digest>`;
+5. `register-task-definition` → new revision;
+6. `update-service --task-definition <new revision>`;
+7. after `services-stable`, read back the running image and assert it equals the promoted
+   digest.
 
-`NEXT_PUBLIC_*` variables are inlined into the client bundle at **build** time. Since QAS
-and PRD have different public API URLs, the web image is built once per environment with the
-appropriate `--build-arg`. The `api` and `worker` images follow strict build-once-promote.
+Step 7 is what makes `IMAGE_QAS == IMAGE_PRD` verifiable rather than assumed: promote the
+same tag to both environments and the assertion prints the same digest in each run.
 
-This is a real asymmetry, called out here so nobody assumes otherwise. It could be removed
-by serving public configuration from a runtime endpoint — worth doing if environment count
-grows.
+Tagging: `<git-sha>` always, plus `v<semver>` on a release tag. **`latest` is never
+published at all** — the build workflow emits only those two tags, and the ECR repositories
+are `IMMUTABLE`, so a tag cannot be moved under a running service.
+
+Terraform's `image_tag` variable is therefore required and has no default: it sets only the
+first task definition. Every deployment after that is a revision registered by the promote
+workflow, which is why the services declare `ignore_changes = [task_definition]`.
+
+### All three images are promotable
+
+There is no exception. The web image is environment-agnostic because every API call is made
+server-side by `createServerApiClient()`, which reads `API_BASE_URL` at **runtime**. No
+`NEXT_PUBLIC_*` value carrying an environment-specific URL is baked into the bundle.
+
+Keep it that way. `NEXT_PUBLIC_*` is inlined at build time, so introducing
+`NEXT_PUBLIC_API_BASE_URL` would bake QAS into the artefact and make it unpromotable. If a
+browser-side component needs the API, proxy it through a Next route handler.
 
 ### Architecture footgun
 

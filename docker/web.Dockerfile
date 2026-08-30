@@ -4,10 +4,16 @@
 # =============================================================================
 #   docker build -f docker/web.Dockerfile -t cdr-pim-web .   (context: repo root)
 #
-# IMPORTANT: `NEXT_PUBLIC_*` variables are inlined into the client bundle at BUILD time,
-# not read at runtime. That means QAS and PRD need separate builds *unless* the public API
-# URL is identical — it is not. The image is therefore built once per environment with the
-# right --build-arg, while the API and worker images follow strict build-once-promote.
+# The image is ENVIRONMENT-AGNOSTIC, so it follows the same build-once-promote rule as the
+# api and worker images (audit finding H-3).
+#
+# That holds because every API call is made server-side, by `createServerApiClient()`, which
+# reads `API_BASE_URL` from the environment at RUNTIME. No `NEXT_PUBLIC_*` value carrying an
+# environment-specific URL is baked into the bundle.
+#
+# If a browser-side component ever needs to call the API directly, do NOT reintroduce a
+# `NEXT_PUBLIC_API_BASE_URL` build arg: that would bake QAS into the artefact and make it
+# unpromotable. Proxy through a Next route handler, or serve the value at runtime.
 # See docs/architecture/DEPLOYMENT_STRATEGY.md.
 # =============================================================================
 
@@ -33,9 +39,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter @cdr/web... --filter .
 
 FROM deps AS build
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
+# The only inlined public value is the application name, identical in every environment.
 ARG NEXT_PUBLIC_APP_NAME="Casa del Rulimán · PIM"
-ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
