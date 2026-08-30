@@ -1,0 +1,109 @@
+# =============================================================================
+# Promote an existing image digest to an environment
+# =============================================================================
+# BUILD ONCE — PROMOTE THE SAME ARTEFACT.
+#
+# This workflow never builds anything. It points an ECS service at a digest that already
+# exists in ECR and has already run in QAS. Rebuilding for production would produce a
+# different artefact and silently invalidate whatever testing was done.
+#
+# PRD is guarded by a GitHub Environment with required reviewers, so the deployment waits
+# for a human even though the workflow itself is automated.
+# =============================================================================
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [qas, prd]
+      image_tag:
+        description: Image tag or digest to promote (git SHA, or sha256:...)
+        required: true
+        type: string
+      run_migrations:
+        description: Run database migrations before updating the services
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    name: Deploy ${{ inputs.image_tag }} to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Reviewers configured on the `prd` GitHub Environment gate this job.
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify the image exists before touching anything
+        run: |
+          set -euo pipefail
+          for app in api worker web; do
+            aws ecr describe-images \
+              --repository-name "cdr-pim-$app" \
+              --image-ids imageTag=${{ inputs.image_tag }} \
+              --query 'imageDetails[0].imageDigest' --output text
+          done
+
+      - name: Run database migrations
+        if: ${{ inputs.run_migrations }}
+        # A one-off task from the SAME image as the service, run BEFORE the service is
+        # updated. Never from inside a serving container.
+        run: |
+          set -euo pipefail
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "cdr-pim-${{ inputs.environment }}" \
+            --task-definition "cdr-pim-${{ inputs.environment }}-migrate" \
+            --launch-type FARGATE \
+            --network-configuration "${{ vars.MIGRATION_NETWORK_CONFIGURATION }}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["node","dist/database/migrate.cli.js"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "cdr-pim-${{ inputs.environment }}" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "cdr-pim-${{ inputs.environment }}" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+
+          if [[ "$EXIT_CODE" != "0" ]]; then
+            echo "::error::Migration task exited with $EXIT_CODE — services were NOT updated."
+            exit 1
+          fi
+
+      - name: Update ECS services
+        run: |
+          set -euo pipefail
+          for app in api worker web; do
+            aws ecs update-service \
+              --cluster "cdr-pim-${{ inputs.environment }}" \
+              --service "cdr-pim-${{ inputs.environment }}-$app" \
+              --force-new-deployment >/dev/null
+          done
+
+      - name: Wait for the deployment to stabilise
+        # ECS's deployment circuit breaker rolls back automatically if the new tasks fail
+        # their health checks; this step makes that visible instead of silent.
+        run: |
+          aws ecs wait services-stable \
+            --cluster "cdr-pim-${{ inputs.environment }}" \
+            --services \
+              "cdr-pim-${{ inputs.environment }}-api" \
+              "cdr-pim-${{ inputs.environment }}-worker" \
+              "cdr-pim-${{ inputs.environment }}-web"

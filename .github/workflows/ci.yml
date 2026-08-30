@@ -1,0 +1,149 @@
+# =============================================================================
+# Pull-request verification
+# =============================================================================
+# Everything that must be true before code reaches `main`. No deployment happens here and
+# no AWS credential is available to this workflow — see build-and-publish.yml.
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24.19.0'
+
+jobs:
+  verify:
+    name: Lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # Integration tests run against a real PostgreSQL with pgvector, because the
+      # behaviour they cover (upserts, cascades, partial unique indexes, cosine distance)
+      # does not exist in a fake.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: cdr
+          POSTGRES_PASSWORD: cdr_ci
+          POSTGRES_DB: cdr_pim_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U cdr -d cdr_pim_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        # --frozen-lockfile fails if package.json and pnpm-lock.yaml disagree, which is the
+        # only way to guarantee CI resolves exactly what the developer resolved.
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit and architecture tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Integration tests
+        env:
+          TEST_DATABASE_URL: postgres://cdr:cdr_ci@localhost:5432/cdr_pim_test
+        run: pnpm --filter @cdr/api test:integration
+
+  security:
+    name: Dependency and secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan commits, not just the working tree.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Known vulnerabilities in dependencies
+        # Fails on high/critical only. Moderate findings are reported without blocking a
+        # pull request, so the gate stays credible instead of being routinely bypassed.
+        run: pnpm audit --audit-level high
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Container images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Build only — nothing is pushed from a pull request. This catches Dockerfile
+      # breakage before it reaches main, where the publish workflow would fail instead.
+      - name: Build api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/api.Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/worker.Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/web.Dockerfile
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
