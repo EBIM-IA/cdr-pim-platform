@@ -1,14 +1,22 @@
 # =============================================================================
-# Promote an existing image digest to an environment
+# Promote an already-built artefact to an environment
 # =============================================================================
 # BUILD ONCE — PROMOTE THE SAME ARTEFACT.
 #
-# This workflow never builds anything. It points an ECS service at a digest that already
-# exists in ECR and has already run in QAS. Rebuilding for production would produce a
-# different artefact and silently invalidate whatever testing was done.
+# This workflow never builds anything. It takes an image tag that already exists in ECR,
+# resolves it to an immutable **digest**, registers a new ECS task definition revision
+# pointing at that digest, and updates the service to it.
 #
-# PRD is guarded by a GitHub Environment with required reviewers, so the deployment waits
-# for a human even though the workflow itself is automated.
+# Why the digest and not the tag: a digest is content-addressed, so `IMAGE_QAS == IMAGE_PRD`
+# is verifiable by inspection rather than by trust. The ECR repositories are also IMMUTABLE,
+# which means a tag cannot be moved under a running service — but the digest makes the
+# guarantee independent of that setting.
+#
+# Audit finding H-3: the previous version called `update-service --force-new-deployment`,
+# which restarts the tasks with the SAME task definition. It verified the image existed and
+# then deployed whatever was already running.
+#
+# PRD is guarded by a GitHub Environment with required reviewers.
 # =============================================================================
 name: Promote
 
@@ -21,7 +29,7 @@ on:
         type: choice
         options: [qas, prd]
       image_tag:
-        description: Image tag or digest to promote (git SHA, or sha256:...)
+        description: Image tag to promote — the git SHA published by build-and-publish
         required: true
         type: string
       run_migrations:
@@ -34,12 +42,14 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  APPS: api worker web
+
 jobs:
   promote:
-    name: Deploy ${{ inputs.image_tag }} to ${{ inputs.environment }}
+    name: Promote ${{ inputs.image_tag }} to ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Reviewers configured on the `prd` GitHub Environment gate this job.
     environment: ${{ inputs.environment }}
 
     steps:
@@ -51,35 +61,78 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Verify the image exists before touching anything
+      - name: Reject mutable tags
+        # A tag that can be moved makes "the same artefact" unverifiable.
+        run: |
+          case "${{ inputs.image_tag }}" in
+            latest|main|master|dev|qas|prd|stable)
+              echo "::error::'${{ inputs.image_tag }}' is a mutable tag. Promote a git SHA."
+              exit 1 ;;
+          esac
+
+      - name: Resolve immutable digests
+        id: digests
+        # The single source of truth for what gets deployed. Both environments resolve the
+        # same input tag through this step, so promoting SHA X to QAS and later to PRD
+        # yields byte-identical digests.
         run: |
           set -euo pipefail
-          for app in api worker web; do
-            aws ecr describe-images \
+          REGISTRY="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com"
+          {
+            echo "### Promoting to \`${{ inputs.environment }}\`"
+            echo ""
+            echo "| app | image (immutable) |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for app in $APPS; do
+            digest=$(aws ecr describe-images \
               --repository-name "cdr-pim-$app" \
-              --image-ids imageTag=${{ inputs.image_tag }} \
-              --query 'imageDetails[0].imageDigest' --output text
+              --image-ids imageTag="${{ inputs.image_tag }}" \
+              --query 'imageDetails[0].imageDigest' --output text)
+
+            if [[ -z "$digest" || "$digest" == "None" ]]; then
+              echo "::error::cdr-pim-$app:${{ inputs.image_tag }} does not exist in ECR."
+              exit 1
+            fi
+
+            echo "${app}_image=$REGISTRY/cdr-pim-$app@$digest" >> "$GITHUB_OUTPUT"
+            echo "| \`$app\` | \`cdr-pim-$app@$digest\` |" >> "$GITHUB_STEP_SUMMARY"
           done
 
       - name: Run database migrations
         if: ${{ inputs.run_migrations }}
-        # A one-off task from the SAME image as the service, run BEFORE the service is
-        # updated. Never from inside a serving container.
+        # A one-off task from the SAME image as the API, BEFORE the services are updated.
+        # The task definition is re-registered too, so migrations never run from a stale image.
         run: |
           set -euo pipefail
+          CLUSTER="cdr-pim-${{ inputs.environment }}"
+          FAMILY="cdr-pim-${{ inputs.environment }}-migrate"
+
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query taskDefinition > td.json
+
+          jq --arg image "${{ steps.digests.outputs.api_image }}" '
+            .containerDefinitions[0].image = $image
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' td.json > migrate-td.json
+
+          MIGRATE_TD=$(aws ecs register-task-definition \
+            --cli-input-json file://migrate-td.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
           TASK_ARN=$(aws ecs run-task \
-            --cluster "cdr-pim-${{ inputs.environment }}" \
-            --task-definition "cdr-pim-${{ inputs.environment }}-migrate" \
+            --cluster "$CLUSTER" \
+            --task-definition "$MIGRATE_TD" \
             --launch-type FARGATE \
             --network-configuration "${{ vars.MIGRATION_NETWORK_CONFIGURATION }}" \
-            --overrides '{"containerOverrides":[{"name":"migrate","command":["node","dist/database/migrate.cli.js"]}]}' \
             --query 'tasks[0].taskArn' --output text)
 
           echo "Migration task: $TASK_ARN"
-          aws ecs wait tasks-stopped --cluster "cdr-pim-${{ inputs.environment }}" --tasks "$TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
 
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "cdr-pim-${{ inputs.environment }}" --tasks "$TASK_ARN" \
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
             --query 'tasks[0].containers[0].exitCode' --output text)
 
           if [[ "$EXIT_CODE" != "0" ]]; then
@@ -87,19 +140,45 @@ jobs:
             exit 1
           fi
 
-      - name: Update ECS services
+      - name: Register task definitions and update services
         run: |
           set -euo pipefail
-          for app in api worker web; do
+          CLUSTER="cdr-pim-${{ inputs.environment }}"
+
+          for app in $APPS; do
+            case "$app" in
+              api)    image="${{ steps.digests.outputs.api_image }}" ;;
+              worker) image="${{ steps.digests.outputs.worker_image }}" ;;
+              web)    image="${{ steps.digests.outputs.web_image }}" ;;
+            esac
+
+            # Start from the task definition currently in use, so CPU, memory, environment,
+            # secrets and IAM roles are carried over untouched. Only the image changes.
+            aws ecs describe-task-definition \
+              --task-definition "cdr-pim-${{ inputs.environment }}-$app" \
+              --query taskDefinition > "td-$app.json"
+
+            jq --arg image "$image" '
+              .containerDefinitions[0].image = $image
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                    .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+            ' "td-$app.json" > "new-td-$app.json"
+
+            NEW_TD=$(aws ecs register-task-definition \
+              --cli-input-json "file://new-td-$app.json" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+
+            echo "cdr-pim-$app -> $NEW_TD"
+
             aws ecs update-service \
-              --cluster "cdr-pim-${{ inputs.environment }}" \
+              --cluster "$CLUSTER" \
               --service "cdr-pim-${{ inputs.environment }}-$app" \
-              --force-new-deployment >/dev/null
+              --task-definition "$NEW_TD" >/dev/null
           done
 
       - name: Wait for the deployment to stabilise
         # ECS's deployment circuit breaker rolls back automatically if the new tasks fail
-        # their health checks; this step makes that visible instead of silent.
+        # their health checks; this makes that visible instead of silent.
         run: |
           aws ecs wait services-stable \
             --cluster "cdr-pim-${{ inputs.environment }}" \
@@ -107,3 +186,34 @@ jobs:
               "cdr-pim-${{ inputs.environment }}-api" \
               "cdr-pim-${{ inputs.environment }}-worker" \
               "cdr-pim-${{ inputs.environment }}-web"
+
+      - name: Verify the running images match the promoted digests
+        # Closes the loop: asserts what is actually RUNNING is the artefact we promoted.
+        # Running this after a QAS and a PRD promotion of the same tag is the proof that
+        # IMAGE_QAS == IMAGE_PRD.
+        run: |
+          set -euo pipefail
+          CLUSTER="cdr-pim-${{ inputs.environment }}"
+          status=0
+
+          for app in $APPS; do
+            case "$app" in
+              api)    expected="${{ steps.digests.outputs.api_image }}" ;;
+              worker) expected="${{ steps.digests.outputs.worker_image }}" ;;
+              web)    expected="${{ steps.digests.outputs.web_image }}" ;;
+            esac
+
+            td=$(aws ecs describe-services --cluster "$CLUSTER" \
+              --services "cdr-pim-${{ inputs.environment }}-$app" \
+              --query 'services[0].taskDefinition' --output text)
+            running=$(aws ecs describe-task-definition --task-definition "$td" \
+              --query 'taskDefinition.containerDefinitions[0].image' --output text)
+
+            if [[ "$running" != "$expected" ]]; then
+              echo "::error::$app is running $running, expected $expected"
+              status=1
+            else
+              echo "OK  $app  $running"
+            fi
+          done
+          exit $status
