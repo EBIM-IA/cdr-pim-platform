@@ -20,7 +20,6 @@ function identifierAttribute(
     label: identifierLabels[identifier.type] ?? identifier.type,
     value: identifier.value,
     rawValue: identifier.value,
-    source: 'Catálogo maestro',
   };
 }
 
@@ -41,8 +40,8 @@ export function toProductView(product: ProductDto): Product {
     status: product.status,
     completeness: null,
     providerCode: manufacturerCode,
-    source: 'API del catálogo',
-    sourceReference: product.id,
+    queryChannel: 'API del catálogo',
+    technicalId: product.id,
     updatedAt: product.updatedAt,
     attributes: product.identifiers.map(identifierAttribute),
   };

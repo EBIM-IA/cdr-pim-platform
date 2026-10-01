@@ -12,7 +12,9 @@ import {
 } from '@cdr/contracts';
 
 import { openApiSchema } from '../../../shared/http/openapi';
+import { RequireRole } from '../../../shared/http/role.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { Role } from '../../identity/domain/entities/role';
 import { CreateProductUseCase } from '../application/create-product.use-case';
 import { GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
@@ -26,6 +28,7 @@ import { toProductDto } from './product.presenter';
  */
 @ApiTags('catalog')
 @Controller('products')
+@RequireRole(Role.Viewer)
 export class ProductsController {
   constructor(
     private readonly getProductById: GetProductByIdUseCase,
@@ -56,6 +59,7 @@ export class ProductsController {
   }
 
   @Post()
+  @RequireRole(Role.Editor)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a draft product' })
   @ApiCreatedResponse({ schema: openApiSchema(productSchema) })

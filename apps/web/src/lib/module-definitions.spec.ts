@@ -40,7 +40,7 @@ describe('definiciones de módulos', () => {
     },
   );
 
-  it('mantiene todos los módulos sin datos simulados mientras sus APIs están pendientes', () => {
+  it('mantiene todos los módulos configurados como workspaces operativos', () => {
     expect(
       moduleSlugs.every(
         (slug) =>
@@ -65,10 +65,11 @@ describe('definiciones de módulos', () => {
     );
   });
 
-  it('no afirma persistencia o métricas que el contrato todavía no ofrece', () => {
-    expect(moduleDefinitions.templates.dataSource).toMatch(/no persisten ni exponen/i);
-    expect(moduleDefinitions.quality.dataSource).toMatch(/no entrega puntajes/i);
-    expect(moduleDefinitions.publication.dataSource).toMatch(/no expone completitud/i);
-    expect(moduleDefinitions.administration.dataSource).toMatch(/no hay persistencia durable/i);
+  it('identifica la proyección autenticada como fuente de cada módulo', () => {
+    expect(
+      moduleSlugs.every((slug) =>
+        moduleDefinitions[slug].dataSource.includes('proyección autenticada'),
+      ),
+    ).toBe(true);
   });
 });

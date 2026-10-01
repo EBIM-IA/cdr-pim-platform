@@ -12,6 +12,7 @@
     "test:watch": "vitest --config vitest.config.ts",
     "test:integration": "dotenv -e ../../.env -- vitest run --config vitest.integration.config.ts",
     "db:migrate": "dotenv -e ../../.env -- tsx src/database/migrate.cli.ts",
+    "db:seed:demo": "dotenv -e ../../.env -- tsx src/database/seed-demo.cli.ts",
     "clean": "rm -rf dist .turbo coverage",
     "db:new": "tsx src/database/new-migration.cli.ts"
   },

@@ -7,12 +7,15 @@ import {
   type ProductStatus,
   type ReadinessResponse,
   type SemanticSearchResponse,
+  type WorkspaceDto,
+  type WorkspaceSlug,
   apiErrorSchema,
   livenessResponseSchema,
   productListSchema,
   productSchema,
   readinessResponseSchema,
   semanticSearchResponseSchema,
+  workspaceSchema,
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
 
@@ -81,6 +84,10 @@ export class ApiClient {
       `/search/semantic?q=${encodeURIComponent(query)}&limit=${limit}`,
       semanticSearchResponseSchema,
     );
+  }
+
+  getWorkspace(slug: WorkspaceSlug): Promise<WorkspaceDto> {
+    return this.get(`/workspaces/${encodeURIComponent(slug)}`, workspaceSchema);
   }
 
   private async get<T extends ZodTypeAny>(

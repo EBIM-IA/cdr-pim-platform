@@ -228,7 +228,7 @@ export function ProductsCatalog({
       <PageHeader
         eyebrow="Catálogo"
         title="Productos"
-        description="Consulta la identidad, códigos, estado y procedencia disponible de cada producto."
+        description="Consulta la identidad, los códigos y el estado disponible de cada producto."
         actions={
           <Button variant="outline" onClick={reload} disabled={loading}>
             <RefreshCw aria-hidden="true" className={cn('size-4', loading && 'animate-spin')} />

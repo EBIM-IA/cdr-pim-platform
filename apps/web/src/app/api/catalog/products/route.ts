@@ -2,10 +2,16 @@ import { productListQuerySchema } from '@cdr/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { ApiClientError, createServerApiClient } from '@/lib/api-client';
+import { getAccessToken } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    return NextResponse.json({ message: 'Debes iniciar sesión.' }, { status: 401 });
+  }
+
   const parsed = productListQuerySchema.safeParse(
     Object.fromEntries(request.nextUrl.searchParams.entries()),
   );
@@ -18,7 +24,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const { page, pageSize, q, brand, status } = parsed.data;
-    const result = await createServerApiClient().listProducts(page, pageSize, {
+    const result = await createServerApiClient({ accessToken }).listProducts(page, pageSize, {
       q,
       brand,
       status,

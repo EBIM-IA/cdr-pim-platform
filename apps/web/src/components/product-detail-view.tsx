@@ -34,7 +34,7 @@ const tabs: Array<{ id: DetailTab; label: string; icon: typeof Database }> = [
   { id: 'applications', label: 'Aplicaciones', icon: PackageCheck },
   { id: 'equivalences', label: 'Equivalencias', icon: Link2 },
   { id: 'documents', label: 'Imágenes y documentos', icon: FileText },
-  { id: 'sources', label: 'Fuentes', icon: Database },
+  { id: 'sources', label: 'Canal e ID', icon: Database },
   { id: 'history', label: 'Historial', icon: History },
 ];
 
@@ -306,27 +306,29 @@ function SourcesPanel({ product }: { product: Product }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Procedencia de la ficha</CardTitle>
-        <CardDescription>Evidencia disponible en el contrato actual para este SKU.</CardDescription>
+        <CardTitle>Canal e identificación técnica</CardTitle>
+        <CardDescription>
+          Datos de transporte de la ficha; no representan procedencia de negocio.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-lg border bg-slate-50 p-4">
-            <dt className="text-xs text-muted-foreground">Fuente</dt>
+            <dt className="text-xs text-muted-foreground">Canal de consulta</dt>
             <dd className="mt-1 break-words text-sm font-semibold">
-              {product.source ?? 'No informada'}
+              {product.queryChannel ?? 'No informado'}
             </dd>
           </div>
           <div className="rounded-lg border bg-slate-50 p-4">
-            <dt className="text-xs text-muted-foreground">Referencia</dt>
+            <dt className="text-xs text-muted-foreground">ID técnico</dt>
             <dd className="mt-1 break-words text-sm font-semibold">
-              {product.sourceReference ?? 'Sin referencia registrada'}
+              {product.technicalId ?? 'No informado'}
             </dd>
           </div>
         </dl>
         <p className="mt-4 rounded-lg bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
-          La trazabilidad por atributo se habilitará cuando la API entregue procedencia y versión
-          para cada valor.
+          El contrato actual no entrega procedencia de negocio ni versión por atributo. La
+          trazabilidad se habilitará cuando la API publique esos datos.
         </p>
       </CardContent>
     </Card>
@@ -356,7 +358,7 @@ function HistoryPanel({ product }: { product: Product }) {
               {formatDate(product.updatedAt)}
             </span>
             <span className="mt-2 block break-words text-xs text-muted-foreground">
-              Fuente: {product.source ?? 'No informada'}
+              Canal de consulta: {product.queryChannel ?? 'No informado'}
             </span>
           </div>
         </div>
@@ -456,14 +458,14 @@ export function ProductDetailView({ productId }: { productId: string }) {
       </nav>
 
       <ScreenGuide
-        objective="Reúne identidad, códigos y procedencia del producto para revisar la información disponible hoy."
+        objective="Reúne la identidad, los códigos y el estado del producto que el contrato permite revisar hoy."
         actions={[
           'Consulta las seis secciones para separar información técnica, relaciones, activos, fuentes e historial.',
           'Alterna entre métrico e imperial sin cambiar el valor registrado por la fuente.',
           'Vuelve al catálogo para continuar la consulta de otros productos.',
         ]}
         dataSource="La identidad, los identificadores, el estado y las fechas se obtienen del detalle publicado por la API del catálogo."
-        limitation="El contrato actual solo entrega la última actualización y procedencia general. Las aplicaciones heredadas por código unificador, los homólogos activos y aprobados, los activos documentales y la trazabilidad por atributo requieren los próximos contratos del backend."
+        limitation="El contrato actual entrega la última actualización, pero no la procedencia de negocio. Las aplicaciones heredadas por código unificador, los homólogos activos y aprobados, los activos documentales y la trazabilidad por atributo requieren los próximos contratos del backend."
       />
 
       <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)_320px]">
@@ -492,7 +494,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
             {product.description ??
-              'Ficha maestra preparada para consolidar información técnica, comercial y documental del producto.'}
+              'El contrato actual no entrega una descripción para este producto.'}
           </p>
 
           <dl className="mt-7 grid gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-2">
@@ -500,7 +502,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
               ['Marca', product.brand],
               ['Aplicación', product.application],
               ['Línea / categoría', product.category],
-              ['Dimensiones', product.dimensions ?? 'Según atributos técnicos'],
+              ['Dimensiones', product.dimensions ?? 'No disponibles en el contrato'],
               ['Código fabricante', product.providerCode ?? 'No disponible'],
               ['Código unificador', product.unifiedCode ?? 'No expuesto por el contrato'],
             ].map(([label, value]) => (
@@ -518,7 +520,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
               <CardTitle>Control PIM</CardTitle>
               <CheckCircle2 aria-hidden="true" className="size-5 text-primary" />
             </div>
-            <CardDescription>Estado y procedencia de la ficha.</CardDescription>
+            <CardDescription>Estado e identificación técnica de la ficha.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div>
@@ -542,15 +544,15 @@ export function ProductDetailView({ productId }: { productId: string }) {
                 <dd className="mt-1 font-semibold">{statusLabel(product.status)}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Fuente</dt>
+                <dt className="text-xs text-muted-foreground">Canal de consulta</dt>
                 <dd className="mt-1 break-words font-semibold">
-                  {product.source ?? 'No informada'}
+                  {product.queryChannel ?? 'No informado'}
                 </dd>
               </div>
-              {product.sourceReference ? (
+              {product.technicalId ? (
                 <div>
-                  <dt className="text-xs text-muted-foreground">Referencia</dt>
-                  <dd className="mt-1 break-words font-semibold">{product.sourceReference}</dd>
+                  <dt className="text-xs text-muted-foreground">ID técnico</dt>
+                  <dd className="mt-1 break-words font-semibold">{product.technicalId}</dd>
                 </div>
               ) : null}
               <div>

@@ -5,8 +5,12 @@ import { EnvironmentValidationError } from './env-error';
 
 const minimal = {
   DATABASE_URL: 'postgres://cdr:cdr@localhost:5432/cdr_pim',
+  AUTH_MODE: 'local',
+  AUTH_LOCAL_USER_ID: 'local-admin',
+  AUTH_LOCAL_EMAIL: 'admin@casadelruliman.com',
+  AUTH_LOCAL_PASSWORD: 'a-safe-local-password',
+  AUTH_LOCAL_ROLES: 'ADMIN',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
-  JWT_REFRESH_SECRET: 'b'.repeat(32),
 } as NodeJS.ProcessEnv;
 
 describe('loadApiEnv', () => {
@@ -16,6 +20,7 @@ describe('loadApiEnv', () => {
     expect(env.QUEUE_DRIVER).toBe('memory');
     expect(env.AI_PROVIDER).toBe('fake');
     expect(env.AI_EMBEDDING_DIMENSIONS).toBe(1536);
+    expect(env.AUTH_LOCAL_ROLES).toEqual(['ADMIN']);
   });
 
   it('rejects a short JWT secret', () => {
@@ -28,6 +33,27 @@ describe('loadApiEnv', () => {
     expect(() => loadApiEnv({ ...minimal, APP_ENV: 'prd', QUEUE_DRIVER: 'memory' })).toThrow(
       /must be "sqs" in qas\/prd/,
     );
+  });
+
+  it('requires all local credentials from the environment', () => {
+    const { AUTH_LOCAL_PASSWORD: _omitted, ...withoutPassword } = minimal;
+    expect(() => loadApiEnv(withoutPassword)).toThrow(/AUTH_LOCAL_PASSWORD/);
+    expect(() => loadApiEnv({ ...minimal, AUTH_LOCAL_ROLES: 'SUPERUSER' })).toThrow(
+      /AUTH_LOCAL_ROLES/,
+    );
+  });
+
+  it('refuses local authentication in qas and prd', () => {
+    for (const APP_ENV of ['qas', 'prd']) {
+      expect(() =>
+        loadApiEnv({
+          ...minimal,
+          APP_ENV,
+          QUEUE_DRIVER: 'sqs',
+          SQS_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/cdr-pim-jobs',
+        }),
+      ).toThrow(/AUTH_MODE.*local.*local\/test/s);
+    }
   });
 
   it('refuses wildcard CORS in prd', () => {

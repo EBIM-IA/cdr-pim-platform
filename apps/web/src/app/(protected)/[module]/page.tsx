@@ -35,5 +35,5 @@ export default async function ModulePage({ params }: ModulePageProps) {
 
   const definition = moduleDefinitions[module];
 
-  return <ModuleWorkspace definition={definition} />;
+  return <ModuleWorkspace key={definition.slug} definition={definition} />;
 }

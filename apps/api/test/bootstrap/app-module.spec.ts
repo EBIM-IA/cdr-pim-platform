@@ -12,13 +12,21 @@ import { PRODUCT_REPOSITORY } from '../../src/modules/catalog/domain/ports/produ
 import { ProductsController } from '../../src/modules/catalog/presentation/products.controller';
 import { EQUIVALENCE_GROUP_REPOSITORY } from '../../src/modules/equivalences/domain/ports/equivalence-group-repository.port';
 import { HealthController } from '../../src/modules/health/presentation/health.controller';
-import { TOKEN_SERVICE } from '../../src/modules/identity/domain/ports/token-service.port';
+import { Role } from '../../src/modules/identity/domain/entities/role';
+import { CREDENTIAL_VERIFIER } from '../../src/modules/identity/domain/ports/credential-verifier.port';
+import {
+  TOKEN_SERVICE,
+  type TokenServicePort,
+} from '../../src/modules/identity/domain/ports/token-service.port';
+import { AuthController } from '../../src/modules/identity/presentation/auth.controller';
 import { JwtAuthGuard } from '../../src/modules/identity/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../src/modules/identity/presentation/guards/roles.guard';
 import { ImportsController } from '../../src/modules/imports/presentation/imports.controller';
 import { ERP_PRODUCT_SOURCE } from '../../src/modules/integrations/domain/ports/erp-product-source.port';
 import { PRODUCT_VECTOR_INDEX } from '../../src/modules/search/domain/ports/product-vector-index.port';
 import { SearchController } from '../../src/modules/search/presentation/search.controller';
+import { WORKSPACE_READ_MODEL } from '../../src/modules/workspaces/domain/ports/workspace-read-model.port';
+import { WorkspacesController } from '../../src/modules/workspaces/presentation/workspaces.controller';
 import { API_ENV, CLOCK, DATABASE, DATABASE_SQL, LOGGER } from '../../src/shared/tokens';
 
 /**
@@ -50,8 +58,12 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   LOG_LEVEL: 'error',
   DATABASE_URL: 'postgres://cdr:not-used@127.0.0.1:5432/cdr_pim_bootstrap',
   DATABASE_SSL: 'false',
+  AUTH_MODE: 'local',
+  AUTH_LOCAL_USER_ID: 'bootstrap-admin',
+  AUTH_LOCAL_EMAIL: 'bootstrap-admin@casadelruliman.com',
+  AUTH_LOCAL_PASSWORD: 'bootstrap-local-password',
+  AUTH_LOCAL_ROLES: 'ADMIN',
   JWT_ACCESS_SECRET: 'bootstrap-test-access-secret-32-chars-min',
-  JWT_REFRESH_SECRET: 'bootstrap-test-refresh-secret-32-chars-min',
   QUEUE_DRIVER: 'memory',
   STORAGE_DRIVER: 'memory',
   AI_PROVIDER: 'fake',
@@ -88,8 +100,10 @@ describe('AppModule bootstrap', () => {
   it.each([
     ['ProductsController', ProductsController],
     ['HealthController', HealthController],
+    ['AuthController', AuthController],
     ['SearchController', SearchController],
     ['ImportsController', ImportsController],
+    ['WorkspacesController', WorkspacesController],
   ])('resolves %s with its type-injected dependencies', (_name, controller) => {
     expect(app.get(controller)).toBeInstanceOf(controller);
   });
@@ -109,9 +123,11 @@ describe('AppModule bootstrap', () => {
     ['EQUIVALENCE_GROUP_REPOSITORY', EQUIVALENCE_GROUP_REPOSITORY],
     ['ERP_PRODUCT_SOURCE', ERP_PRODUCT_SOURCE],
     ['TOKEN_SERVICE', TOKEN_SERVICE],
+    ['CREDENTIAL_VERIFIER', CREDENTIAL_VERIFIER],
     ['AUDIT_PORT', AUDIT_PORT],
     ['QUEUE_PORT', QUEUE_PORT],
     ['OBJECT_STORAGE', OBJECT_STORAGE],
+    ['WORKSPACE_READ_MODEL', WORKSPACE_READ_MODEL],
     ['API_ENV', API_ENV],
     ['LOGGER', LOGGER],
     ['CLOCK', CLOCK],
@@ -131,6 +147,76 @@ describe('AppModule bootstrap', () => {
     expect(response.body).toMatchObject({ status: 'ok', service: expect.any(String) });
     // The correlation middleware must be wired for every route, health included.
     expect(response.headers['x-correlation-id']).toBeTypeOf('string');
+  });
+
+  it('protects the API by default with 401, not 403', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/products').expect(401);
+
+    expect(response.body.error).toMatchObject({
+      code: 'UNAUTHORIZED',
+      message: 'Missing bearer token',
+    });
+  });
+
+  it('returns 403 when an authenticated VIEWER attempts an EDITOR mutation', async () => {
+    const tokens = app.get<TokenServicePort>(TOKEN_SERVICE);
+    const { accessToken } = await tokens.issue({
+      id: 'bootstrap-viewer',
+      email: 'bootstrap-viewer@casadelruliman.com',
+      roles: [Role.Viewer],
+    });
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/products')
+      .set('authorization', `Bearer ${accessToken}`)
+      .send({})
+      .expect(403);
+
+    expect(response.body.error).toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'Insufficient role',
+      details: { required: 'EDITOR' },
+    });
+  });
+
+  it('authenticates the local account and exposes the current actor', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({
+        email: TEST_ENV.AUTH_LOCAL_EMAIL,
+        password: TEST_ENV.AUTH_LOCAL_PASSWORD,
+      })
+      .expect(200);
+
+    expect(login.body).toMatchObject({
+      actor: {
+        id: TEST_ENV.AUTH_LOCAL_USER_ID,
+        email: TEST_ENV.AUTH_LOCAL_EMAIL,
+        roles: ['ADMIN'],
+      },
+      accessToken: expect.any(String),
+      expiresIn: '15m',
+    });
+    expect(login.body).not.toHaveProperty('refreshToken');
+
+    const me = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('authorization', `Bearer ${login.body.accessToken as string}`)
+      .expect(200);
+
+    expect(me.body).toEqual({ actor: login.body.actor });
+  });
+
+  it('does not reveal which local credential was invalid', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: TEST_ENV.AUTH_LOCAL_EMAIL, password: 'definitely-wrong' })
+      .expect(401);
+
+    expect(response.body.error).toMatchObject({
+      code: 'UNAUTHORIZED',
+      message: 'Invalid email or password',
+    });
   });
 
   it('returns the shared error envelope for an unknown route', async () => {

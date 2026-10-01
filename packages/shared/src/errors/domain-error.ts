@@ -57,6 +57,14 @@ export class ConflictError extends DomainError {
   }
 }
 
+/** The request did not carry valid authentication credentials. */
+export class UnauthorizedError extends DomainError {
+  readonly code = ErrorCode.UNAUTHORIZED;
+  constructor(message = 'Authentication required') {
+    super(message);
+  }
+}
+
 export class ForbiddenError extends DomainError {
   readonly code = ErrorCode.FORBIDDEN;
   constructor(message = 'Operation not permitted', details: Record<string, unknown> = {}) {

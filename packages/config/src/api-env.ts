@@ -22,19 +22,32 @@ const apiOnlySchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   SWAGGER_ENABLED: booleanEnv(true),
 
+  /**
+   * Local credentials are an intentionally temporary source until CDR chooses its real
+   * identity provider. They are required environment values: no credential is embedded in
+   * source code or silently invented by a default.
+   */
+  AUTH_MODE: z.literal('local').default('local'),
+  AUTH_LOCAL_USER_ID: z.string().min(1).max(120),
+  AUTH_LOCAL_EMAIL: z.string().email().max(254),
+  AUTH_LOCAL_PASSWORD: z.string().min(12).max(1_024),
+  AUTH_LOCAL_ROLES: z
+    .string()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((role) => role.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.enum(['ADMIN', 'EDITOR', 'VIEWER'])).min(1)),
+
   JWT_ACCESS_SECRET: z.string().min(32),
-  JWT_REFRESH_SECRET: z.string().min(32),
   // `<number><unit>` (ms format). Constrained here so the JWT adapter can rely on the
   // shape instead of hoping the operator typed something the signing library accepts.
   JWT_ACCESS_TTL: z
     .string()
     .regex(/^\d+(ms|s|m|h|d|w|y)$/, 'must be a duration such as "15m" or "7d"')
     .default('15m'),
-  JWT_REFRESH_TTL: z
-    .string()
-    .regex(/^\d+(ms|s|m|h|d|w|y)$/, 'must be a duration such as "15m" or "7d"')
-    .default('7d'),
-
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
   SQS_JOBS_QUEUE_URL: z.string().optional(),
 
@@ -71,6 +84,15 @@ export const apiEnvSchema = baseEnvSchema
     }
     // Guard-rails that only apply once we are outside a developer laptop.
     if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
+      // Local static credentials are only a development bridge. Until an enterprise
+      // identity source is implemented, QAS/PRD refuse to start instead of falling back.
+      if (env.AUTH_MODE === 'local') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AUTH_MODE'],
+          message: '"local" is allowed only when APP_ENV is local/test',
+        });
+      }
       if (env.QUEUE_DRIVER !== 'sqs') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

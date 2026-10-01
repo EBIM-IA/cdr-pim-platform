@@ -13,6 +13,7 @@ import {
   Gauge,
   Home,
   Link2,
+  LogOut,
   Menu,
   PackageCheck,
   PackageSearch,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import type { AuthActor } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 interface NavigationItem {
@@ -184,10 +186,21 @@ function Sidebar({
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+function actorInitials(email: string): string {
+  const segments = (email.split('@')[0] ?? '').split(/[._-]+/u).filter(Boolean);
+  return (
+    segments
+      .slice(0, 2)
+      .map((segment) => segment.charAt(0))
+      .join('') || 'US'
+  ).toUpperCase();
+}
+
+export function AppShell({ children, actor }: { children: ReactNode; actor: AuthActor }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const navigationId = useId();
   const menuButton = useRef<HTMLButtonElement>(null);
+  const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
 
   const closeMenu = () => {
     setMenuOpen(false);
@@ -195,14 +208,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-dvh bg-slate-100">
+    <div className="min-h-dvh bg-white">
       <a
         href="#main-content"
         className="sr-only z-[100] rounded-md bg-cdr-ink px-4 py-2 text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
       >
         Saltar al contenido
       </a>
-      <div className="mx-auto flex min-h-dvh max-w-[1920px] bg-white shadow-sm">
+      <div className="flex min-h-dvh w-full bg-white">
         <Sidebar open={menuOpen} onClose={closeMenu} labelledBy={navigationId} />
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-8">
@@ -238,16 +251,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 </Link>
               </Button>
-              <div className="hidden text-right leading-tight md:block">
-                <strong className="block text-sm">Usuario demo</strong>
-                <span className="text-xs text-muted-foreground">Entorno local</span>
+              <div className="hidden max-w-[220px] text-right leading-tight md:block">
+                <strong className="block truncate text-sm" title={actor.email}>
+                  {actor.email}
+                </strong>
+                <span className="block truncate text-xs text-muted-foreground" title={roleLabel}>
+                  {roleLabel}
+                </span>
               </div>
               <span
                 className="grid size-10 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs font-semibold text-white"
-                aria-label="Perfil: Usuario demo"
+                aria-label={`Perfil: ${actor.email}`}
               >
-                UD
+                {actorInitials(actor.email)}
               </span>
+              <form action="/api/auth/logout" method="post">
+                <input type="hidden" name="returnTo" value="/login" />
+                <Button
+                  type="submit"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Cerrar sesión"
+                  title="Cerrar sesión"
+                >
+                  <LogOut aria-hidden="true" className="size-4" />
+                </Button>
+              </form>
             </div>
           </header>
 

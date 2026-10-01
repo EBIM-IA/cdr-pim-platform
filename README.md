@@ -21,17 +21,24 @@ cp .env.example .env     # placeholders locales — sin secretos reales
 
 docker compose up -d     # PostgreSQL 16 + pgvector
 pnpm db:migrate          # aplica drizzle/*.sql
+pnpm db:seed:demo        # opcional: 7 registros locales respaldados por la fuente
 pnpm dev                 # web :3000 · api :3001 · worker :3002
 ```
 
 Abre <http://localhost:3000>. La portada consulta el catálogo mediante la API y presenta un
 estado de error explícito si el servicio no está disponible.
 
-La interfaz incluye catálogo y detalle de productos, además de espacios navegables para
+El acceso requiere iniciar sesión con `AUTH_LOCAL_EMAIL` y `AUTH_LOCAL_PASSWORD` de tu
+`.env`. La cuenta local es únicamente para desarrollo: la API rechaza `AUTH_MODE=local` en
+QAS/PRD hasta que se conecte la fuente de identidad acordada con CDR.
+
+La interfaz incluye catálogo y detalle de productos, además de workspaces conectados al backend para
 Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Importaciones, IA y
-Calidad, Publicación, Integraciones, Reportes y Administración. El navegador consume la
-API mediante route handlers de Next y `API_BASE_URL` se resuelve en runtime, por lo que la
-misma imagen puede promoverse entre ambientes.
+Calidad, Publicación, Integraciones, Reportes y Administración. Cada workspace consulta una
+proyección autenticada; cuando una operación de escritura aún carece de reglas o persistencia,
+el backend la declara bloqueada y explica la dependencia. El navegador consume la API
+mediante route handlers de Next y `API_BASE_URL` se resuelve en runtime, por lo que la misma
+imagen puede promoverse entre ambientes.
 
 |                   |                                      |
 | ----------------- | ------------------------------------ |
@@ -73,7 +80,8 @@ packages/
 ```
 
 Los módulos delimitados de la API son `catalog`, `categories`, `attributes`,
-`equivalences`, `search`, `ai`, `imports`, `integrations`, `identity`, `audit` y `health`.
+`equivalences`, `search`, `ai`, `imports`, `integrations`, `identity`, `audit`, `health` y
+el read model transversal `workspaces`.
 El estado real de cada uno está en
 [`docs/architecture/MODULE_ARCHITECTURE.md`](docs/architecture/MODULE_ARCHITECTURE.md).
 
@@ -97,6 +105,7 @@ pnpm verify             # format + lint + typecheck + test + build (lo que corre
 
 pnpm db:new <nombre>    # crea la siguiente migración numerada
 pnpm db:migrate         # aplica las migraciones pendientes
+pnpm db:seed:demo       # seed local/test idempotente; no sobrescribe datos existentes
 ```
 
 Para un solo workspace: `pnpm --filter @cdr/api <script>`.
@@ -149,8 +158,10 @@ Documentación de arquitectura completa en [`docs/architecture/`](docs/architect
   nombran la variable, nunca su valor.
 - El logger redacta centralmente `password`, `secret`, `token`, `api key`, `authorization`,
   `psk` y similares, a cualquier profundidad.
-- **JWT + RBAC están implementados pero no activados**: no existe todavía un almacén de
-  usuarios ni endpoint de login. El motivo y los dos cambios necesarios están en
+- **JWT + RBAC están activados y la API es privada por defecto.** Solo login y health usan
+  `@Public()`. Para desarrollo existe una cuenta configurada íntegramente por entorno;
+  QAS/PRD la rechazan y permanecen fail-closed hasta integrar la identidad definitiva. Los
+  límites de esta etapa están en
   [`SECURITY_BASELINE.md`](docs/architecture/SECURITY_BASELINE.md).
 
 ---
@@ -164,7 +175,7 @@ Deliberado, no olvidado. Cada punto está justificado en la documentación enlaz
 | Dynamics AX            | Adapter real (hoy es un stub que falla con un error documentado) | Superficie de integración, mapeo de entidades y VPN — pendientes de CDR |
 | PrestaShop / pedidos   | Adapters reales                                                  | Acceso a API, mapeo de campos, ubicación de red                         |
 | Categorías y atributos | Persistencia (solo existen los tipos de dominio)                 | La taxonomía y el diccionario de atributos son entregables de CDR       |
-| Autenticación          | Almacén de usuarios, login, revocación                           | ¿Cuentas locales o Active Directory de CDR?                             |
+| Autenticación          | Fuente empresarial, refresh y revocación                         | ¿Cuentas administradas en el PIM o Active Directory/OIDC de CDR?        |
 | Auditoría              | Tabla `audit_entries` duradera (hoy va al log estructurado)      | Requisitos de retención y reporte                                       |
 | IA                     | Control de presupuesto y rate limiting                           | Debe existir antes de generar en volumen con una clave real             |
 | AWS                    | `terraform plan` / `apply`                                       | No se entregaron credenciales; no se inventó ninguna                    |

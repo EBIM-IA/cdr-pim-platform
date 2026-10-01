@@ -7,7 +7,6 @@ export interface ProductAttribute {
   rawValue: string | number | boolean;
   unit?: string;
   required?: boolean;
-  source?: string;
 }
 
 /**
@@ -30,8 +29,8 @@ export interface Product {
   unifiedCode?: string;
   providerCode?: string;
   dimensions?: string;
-  source?: string;
-  sourceReference?: string;
+  queryChannel?: string;
+  technicalId?: string;
   templateKey?: string;
   updatedAt?: string;
   attributes: ProductAttribute[];

@@ -19,11 +19,12 @@ cp .env.example .env         # local placeholders — no real secrets
 
 docker compose up -d         # PostgreSQL 16 + pgvector
 pnpm db:migrate              # applies drizzle/*.sql
+pnpm db:seed:demo            # inserts the 7 source-backed demo products (optional)
 pnpm dev                     # web :3000 · api :3001 · worker :3002
 ```
 
-Then open <http://localhost:3000>. The dashboard renders live API health and the product
-list — if it is green, the whole vertical slice works.
+Then open <http://localhost:3000>. After login, the dashboard, product catalogue and eleven
+operational workspaces read through the authenticated Next.js BFF and the NestJS API.
 
 Useful URLs:
 
@@ -43,6 +44,16 @@ variables come from the ECS task definition and Secrets Manager.
 Defaults are chosen so a fresh clone works with no accounts and no keys:
 `AI_PROVIDER=fake`, `QUEUE_DRIVER=memory`, `STORAGE_DRIVER=memory`.
 
+### Optional source-backed demo catalogue
+
+After migrations, `pnpm db:seed:demo` adds the seven non-illustrative records traced to
+`PLANTILLAS_PIM.xlsx` by the earlier platform seed. It populates only the current schema:
+products, SKU/supplier identifiers, unified-code groups and memberships. The command is
+idempotent and never updates a row that already exists; curated local changes are kept.
+Stable UUIDs make database resets reproducible. The command refuses to run unless
+`APP_ENV` is `local` or `test`. The earlier `REVIEW` and `APPROVED` values map to the
+current `in_review` and `published` lifecycle states, respectively.
+
 ## Exercising the asynchronous path for real
 
 `QUEUE_DRIVER=memory` is in-process, so the API and the worker do not share a queue. To run
@@ -59,8 +70,10 @@ AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 
 pnpm dev
+# Define TOKEN with the login command in «The walking skeleton by hand» below.
 curl -X POST http://localhost:3001/api/v1/imports/skeleton-ping \
   -H 'content-type: application/json' \
+  -H "authorization: Bearer $TOKEN" \
   -H 'x-correlation-id: my-trace' \
   -d '{"message":"hola"}'
 ```
@@ -84,6 +97,7 @@ pnpm verify             # format + lint + typecheck + test + build (what CI runs
 
 pnpm db:new <name>      # scaffold the next migration
 pnpm db:migrate         # apply pending migrations
+pnpm db:seed:demo       # optional local/test demo catalogue; safe to rerun
 ```
 
 Filter to one workspace with `pnpm --filter @cdr/api <script>`.
@@ -91,17 +105,27 @@ Filter to one workspace with `pnpm --filter @cdr/api <script>`.
 ## The walking skeleton by hand
 
 ```bash
+# 0 · obtain a local access token (credentials come from the untracked .env)
+set -a; source .env; set +a
+TOKEN=$(curl -sS -X POST http://localhost:3001/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"$AUTH_LOCAL_EMAIL\",\"password\":\"$AUTH_LOCAL_PASSWORD\"}" \
+  | jq -r '.accessToken')
+
 # 1 · create a product   (HTTP → use case → port → Drizzle → PostgreSQL)
 curl -X POST http://localhost:3001/api/v1/products \
   -H 'content-type: application/json' \
+  -H "authorization: Bearer $TOKEN" \
   -d '{"sku":"6205-2rs","name":"Rodamiento rígido de bolas 6205-2RS",
        "description":"Sellado por ambos lados.","brand":"SKF"}'
 
 # 2 · index it           (→ EmbeddingProviderPort → pgvector)
-curl -X POST http://localhost:3001/api/v1/search/index/<id>
+curl -X POST http://localhost:3001/api/v1/search/index/<id> \
+  -H "authorization: Bearer $TOKEN"
 
 # 3 · semantic search    (cosine similarity over vector(1536))
-curl "http://localhost:3001/api/v1/search/semantic?q=rodamiento%20sellado&limit=5"
+curl "http://localhost:3001/api/v1/search/semantic?q=rodamiento%20sellado&limit=5" \
+  -H "authorization: Bearer $TOKEN"
 ```
 
 ## Troubleshooting

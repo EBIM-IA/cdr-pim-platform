@@ -27,7 +27,8 @@ describe('product view adapter', () => {
       providerCode: '6205-2RS/C3',
       status: 'in_review',
       completeness: null,
-      source: 'API del catálogo',
+      queryChannel: 'API del catálogo',
+      technicalId: product.id,
     });
   });
 

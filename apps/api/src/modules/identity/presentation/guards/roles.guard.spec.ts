@@ -13,15 +13,23 @@ function contextWith(actor?: AuthenticatedActor) {
   } as never;
 }
 
-function guardRequiring(role: Role | undefined): RolesGuard {
+function guardRequiring(role: Role | undefined, isPublic = false): RolesGuard {
   const reflector = new Reflector();
-  vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(role);
+  const lookup = vi.spyOn(reflector, 'getAllAndOverride');
+  lookup.mockReturnValueOnce(isPublic);
+  if (!isPublic) lookup.mockReturnValueOnce(role);
   return new RolesGuard(reflector);
 }
 
 const editor: AuthenticatedActor = { id: 'u-1', email: 'e@cdr.ec', roles: [Role.Editor] };
 
 describe('RolesGuard', () => {
+  it('skips RBAC metadata for a route explicitly marked public', () => {
+    const guard = guardRequiring(Role.Admin, true);
+
+    expect(guard.canActivate(contextWith())).toBe(true);
+  });
+
   it('allows a route that declares no role requirement', () => {
     expect(guardRequiring(undefined).canActivate(contextWith())).toBe(true);
   });

@@ -1,5 +1,6 @@
 import { productListSchema, productSchema } from '@cdr/contracts';
 
+import { authenticatedBffFetch } from '@/lib/bff-client';
 import { toProductListView, toProductView } from '@/lib/product-view';
 import type { Product, ProductListResult, ProductQuery } from '@/lib/types';
 
@@ -38,7 +39,7 @@ export async function fetchProducts(
   if (query.brand) params.set('brand', query.brand);
   if (query.status) params.set('status', query.status);
 
-  const response = await fetch(`${PRODUCTS_PROXY_PATH}?${params.toString()}`, {
+  const response = await authenticatedBffFetch(`${PRODUCTS_PROXY_PATH}?${params.toString()}`, {
     headers: { accept: 'application/json' },
     cache: 'no-store',
     signal,
@@ -51,7 +52,7 @@ export async function fetchProducts(
 }
 
 export async function fetchProduct(id: string, signal?: AbortSignal): Promise<Product> {
-  const response = await fetch(`${PRODUCTS_PROXY_PATH}/${encodeURIComponent(id)}`, {
+  const response = await authenticatedBffFetch(`${PRODUCTS_PROXY_PATH}/${encodeURIComponent(id)}`, {
     headers: { accept: 'application/json' },
     cache: 'no-store',
     signal,

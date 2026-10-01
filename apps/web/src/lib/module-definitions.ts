@@ -36,24 +36,25 @@ export interface ModuleDefinition {
   dependencies: readonly string[];
 }
 
+const workspaceReadActions = [
+  'Consulta los indicadores y registros publicados por el backend.',
+  'Busca cualquier valor dentro de las filas cargadas.',
+  'Revisa los avisos operativos y qué capacidades están soportadas o bloqueadas.',
+] as const;
+
 export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
   categories: {
     slug: 'categories',
     label: 'Categorías',
     eyebrow: 'Estructura del catálogo',
-    description:
-      'Explora las líneas presentes en el catálogo y su cobertura de productos y marcas.',
+    description: 'Consulta la distribución de marcas y estados disponible en el catálogo actual.',
     objective:
-      'Resume la clasificación disponible para detectar líneas con baja cobertura o datos pendientes.',
-    actions: [
-      'Consulta productos y marcas por línea.',
-      'Identifica categorías presentes en la muestra actual.',
-      'Abre el catálogo para revisar sus productos.',
-    ],
+      'Presenta la clasificación que el backend puede respaldar hoy sin inferir una taxonomía aún no aprobada.',
+    actions: workspaceReadActions,
     dataSource:
-      'La API actual entrega productos y marcas; la taxonomía todavía no forma parte del contrato HTTP.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de categorías.',
     limitation:
-      'La taxonomía comercial jerárquica todavía no está aprobada; se muestra la clasificación plana vigente.',
+      'La taxonomía comercial jerárquica todavía no está aprobada; la pantalla muestra agregados por marca y estado, no categorías inferidas.',
     kind: 'workspace',
     capabilities: [
       {
@@ -78,16 +79,13 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'templates',
     label: 'Plantillas',
     eyebrow: 'Gobierno de atributos',
-    description: 'Espacio para versionar plantillas, definiciones de atributos y reglas por línea.',
+    description:
+      'Consulta el estado de la persistencia y las dependencias requeridas para gobernar plantillas.',
     objective:
-      'Centraliza la estructura técnica que determina qué información requiere cada familia de productos.',
-    actions: [
-      'Revisar versiones y estado de cada plantilla.',
-      'Agregar, quitar o renombrar atributos sin cambiar el código de la aplicación.',
-      'Definir unidades, obligatoriedad, orden y si cada atributo es replicable.',
-    ],
+      'Presenta el estado operativo de plantillas y explicita qué capacidades de gobierno todavía están bloqueadas.',
+    actions: workspaceReadActions,
     dataSource:
-      'El dominio contiene definiciones tipadas de atributos; PostgreSQL y la API todavía no persisten ni exponen plantillas.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de plantillas.',
     limitation:
       'La edición y aprobación se habilitarán después de definir permisos, versionado y compatibilidad de plantillas.',
     kind: 'workspace',
@@ -95,7 +93,7 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       {
         title: 'Definiciones tipadas',
         description: 'Atributos, unidades, obligatoriedad y prioridad de fuentes por plantilla.',
-        status: 'available',
+        status: 'blocked',
       },
       {
         title: 'Versionado y publicación',
@@ -122,14 +120,10 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     description:
       'Espacio preparado para las relaciones de aplicación compartidas por código unificador.',
     objective:
-      'Organiza la compatibilidad automotriz e industrial que comparten los SKU de un mismo grupo.',
-    actions: [
-      'Buscar por SKU como acceso rápido al grupo correspondiente.',
-      'Registrar aplicaciones de forma manual o mediante carga masiva.',
-      'Revisar qué SKU heredan cada aplicación por código unificador.',
-    ],
+      'Presenta el estado real de la persistencia de aplicaciones y los grupos unificadores disponibles en el backend.',
+    actions: workspaceReadActions,
     dataSource:
-      'El contrato actual no expone aplicaciones; el espacio documenta el alcance confirmado sin simular compatibilidades.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de aplicaciones.',
     limitation:
       'No se muestran compatibilidades inventadas. El backend grupal se implementará mediante el código unificador.',
     kind: 'workspace',
@@ -159,15 +153,10 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     description:
       'Explica el modelo disponible de grupos internos y el alcance previsto de sus homólogos.',
     objective:
-      'Separa claramente los SKU comercializados por CDR de los códigos homólogos externos usados para búsqueda.',
-    actions: [
-      'Consultar los grupos unificadores disponibles.',
-      'Revisar los SKU miembros de cada grupo.',
-      'Registrar homólogos externos manualmente o por carga masiva.',
-      'Revisar conteos y preparar solo homólogos activos y aprobados para búsqueda.',
-    ],
+      'Presenta las relaciones respaldadas por el backend y distingue los SKU comercializados de los homólogos externos.',
+    actions: workspaceReadActions,
     dataSource:
-      'La base contiene el modelo inicial de grupos, pero todavía no existe una API de equivalencias u homólogos.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de equivalencias.',
     limitation:
       'Solo los homólogos simultáneamente activos y aprobados serán elegibles cuando se habilite la búsqueda ampliada.',
     kind: 'workspace',
@@ -201,17 +190,12 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Documentos',
     eyebrow: 'Activos digitales',
     description:
-      'Espacio para administrar imágenes, fichas técnicas, certificados, planos y hojas de seguridad.',
+      'Consulta el estado del almacenamiento y la persistencia previstos para los activos digitales.',
     objective:
-      'Gobierna activos versionados por SKU y prepara su publicación hacia los canales externos.',
-    actions: [
-      'Consultar activos por SKU, tipo y estado.',
-      'Gestionar una carga individual desde la ficha del SKU.',
-      'Preparar cargas masivas mediante ZIP y una convención que identifique el SKU.',
-      'Revisar reemplazos, errores y versiones anteriores.',
-    ],
+      'Presenta el estado real del almacenamiento y de la persistencia de activos, junto con las dependencias pendientes para su gestión.',
+    actions: workspaceReadActions,
     dataSource:
-      'El contrato HTTP actual no expone activos; existen el modelo de metadatos y el puerto de almacenamiento, sin persistencia ni API.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de documentos.',
     limitation:
       'No se habilitan cargas hasta definir storage, análisis de seguridad, límites y versionado.',
     kind: 'workspace',
@@ -242,17 +226,13 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'imports',
     label: 'Importaciones',
     eyebrow: 'Ingreso de información',
-    description: 'Centro de cargas con vista previa, validación por fila y confirmación explícita.',
+    description:
+      'Consulta la preparación técnica necesaria para habilitar cargas trazables y seguras.',
     objective:
-      'Concentra los lotes de productos, aplicaciones, homólogos y documentos con resultados trazables.',
-    actions: [
-      'Crear una carga y validar su estructura.',
-      'Revisar errores, advertencias y cambios propuestos.',
-      'Consultar quién cargó el archivo, cuándo, su estado y resultado.',
-      'Confirmar únicamente registros válidos y descargar resultados.',
-    ],
+      'Presenta el estado real de la cola, el almacenamiento temporal y la persistencia requerida para implementar lotes trazables.',
+    actions: workspaceReadActions,
     dataSource:
-      'La interfaz se conectará a un recurso común de trabajos de importación; actualmente no existe ese endpoint.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de importaciones.',
     limitation:
       'La escritura permanece deshabilitada hasta contar con idempotencia, auditoría, permisos y procesamiento asíncrono.',
     kind: 'workspace',
@@ -279,16 +259,13 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'quality',
     label: 'IA y Calidad',
     eyebrow: 'Enriquecimiento gobernado',
-    description: 'Bandeja para conflictos, sugerencias y controles de calidad con revisión humana.',
+    description:
+      'Hallazgos deterministas sobre los campos base del catálogo y alcance futuro de revisión humana.',
     objective:
-      'Prioriza problemas de información y conserva evidencia para cada sugerencia automática o externa.',
-    actions: [
-      'Revisar conflictos y atributos incompletos.',
-      'Comparar candidatos por fuente y confianza.',
-      'Aceptar, rechazar o corregir propuestas con auditoría.',
-    ],
+      'Presenta los controles y alertas de calidad disponibles sin ejecutar decisiones que el backend no soporte.',
+    actions: workspaceReadActions,
     dataSource:
-      'La API actual no entrega puntajes de calidad; candidatos, confianza y conflictos requieren contratos adicionales.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de calidad.',
     limitation:
       'No se conecta ningún proveedor de IA o TecDoc hasta disponer de licencia, credenciales y reglas de persistencia.',
     kind: 'workspace',
@@ -320,18 +297,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Publicación',
     eyebrow: 'Salida a canales',
     description:
-      'Control de productos elegibles, bloqueos y sincronización hacia canales comerciales.',
+      'Consulta estados persistidos y las dependencias pendientes para definir la publicabilidad.',
     objective:
-      'Explica por qué una ficha puede publicarse y conserva el resultado de cada intento de salida.',
-    actions: [
-      'Revisar elegibilidad y bloqueos por producto.',
-      'Preparar lotes de publicación y desactivación.',
-      'Consultar resultados, reintentos y última versión enviada.',
-    ],
+      'Presenta los estados persistidos de los productos y deja claro que aún no equivalen a elegibilidad de publicación.',
+    actions: workspaceReadActions,
     dataSource:
-      'La API actual entrega el estado del producto; todavía no expone completitud ni decisión de publicabilidad.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de publicación.',
     limitation:
-      'La publicación automática por completitud fue validada, pero el override por SKU, ownership y contrato con ICOM siguen pendientes.',
+      'La regla exacta de publicabilidad, el override por SKU, el ownership y el contrato con ICOM siguen pendientes.',
     kind: 'workspace',
     capabilities: [
       {
@@ -361,16 +334,13 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'integrations',
     label: 'Integraciones',
     eyebrow: 'Conectividad',
-    description: 'Monitor de intercambio con ERP, PrestaShop y futuras fuentes externas.',
+    description:
+      'Consulta la configuración conocida de ERP, PrestaShop y otras integraciones todavía bloqueadas.',
     objective:
-      'Hace visible la salud, contratos, lotes y errores de cada conexión sin acoplarlos al núcleo del catálogo.',
-    actions: [
-      'Consultar estado y última actividad por integración.',
-      'Revisar lotes, errores y reintentos.',
-      'Validar contratos antes de activar credenciales reales.',
-    ],
+      'Presenta la configuración y capacidades que el backend conoce, sin ejecutar adaptadores externos todavía bloqueados.',
+    actions: workspaceReadActions,
     dataSource:
-      'El entorno local solo dispone de API y PostgreSQL; los adaptadores externos todavía no están conectados.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de integraciones.',
     limitation:
       'ERP/Sismetic, ICOM, TecDoc e IA esperan contratos, ambientes, ownership y credenciales.',
     kind: 'workspace',
@@ -402,18 +372,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Reportes',
     eyebrow: 'Seguimiento',
     description:
-      'Indicadores de cobertura, calidad y estado calculados sobre el catálogo disponible.',
+      'Agregados globales de productos, marcas, estados y grupos unificadores calculados en PostgreSQL.',
     objective:
-      'Ofrece una lectura operativa del catálogo sin presentar una muestra como si fuera un agregado global.',
-    actions: [
-      'Consultar distribución por estado y calidad.',
-      'Identificar líneas con productos incompletos.',
-      'Distinguir los totales de API de los cálculos sobre la muestra.',
-    ],
+      'Ofrece una lectura operativa del catálogo distinguiendo las filas cargadas del total informado por el backend.',
+    actions: workspaceReadActions,
     dataSource:
-      'La API permite consultar totales y estados de productos; calidad, categorías y exportaciones aún no tienen agregados propios.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de reportes.',
     limitation:
-      'Los agregados globales y exportaciones requieren un endpoint de analítica dedicado.',
+      'Los indicadores de calidad dependen de reglas aprobadas; las exportaciones e históricos todavía no están implementados.',
     kind: 'workspace',
     capabilities: [
       {
@@ -443,16 +409,12 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Administración',
     eyebrow: 'Gobierno y seguridad',
     description:
-      'Espacio para usuarios, roles, permisos, catálogos auxiliares y configuración auditada.',
+      'Consulta de la sesión, actor y roles efectivos, con el alcance administrativo pendiente claramente delimitado.',
     objective:
-      'Centraliza los controles administrativos que protegen cambios, aprobaciones e integraciones.',
-    actions: [
-      'Gestionar usuarios, roles y permisos por capacidad.',
-      'Configurar catálogos auxiliares y políticas.',
-      'Consultar eventos de auditoría y retención.',
-    ],
+      'Presenta los controles administrativos que el backend puede consultar y deja explícitas las operaciones no habilitadas.',
+    actions: workspaceReadActions,
     dataSource:
-      'Existe un puerto de auditoría con salida temporal a logs; no hay persistencia durable, autenticación ni APIs administrativas.',
+      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de administración.',
     limitation:
       'No se habilitan cambios administrativos sin proveedor de identidad, RBAC y política de retención aprobada.',
     kind: 'workspace',
