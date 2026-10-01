@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createProductSchema, productSchema } from './product';
+import { createProductSchema, productListQuerySchema, productSchema } from './product';
 
 describe('product contracts', () => {
   it('rejects an empty SKU', () => {
@@ -21,5 +21,23 @@ describe('product contracts', () => {
     };
     expect(productSchema.parse(base).sku).toBe('6205-2RS');
     expect(() => productSchema.parse({ ...base, createdAt: '30/08/2026' })).toThrow();
+  });
+
+  it('validates product-list filters at the shared boundary', () => {
+    expect(
+      productListQuerySchema.parse({
+        page: '2',
+        pageSize: '25',
+        q: 'rodamiento',
+        brand: 'FAG',
+        status: 'in_review',
+      }),
+    ).toEqual({
+      page: 2,
+      pageSize: 25,
+      q: 'rodamiento',
+      brand: 'FAG',
+      status: 'in_review',
+    });
   });
 });

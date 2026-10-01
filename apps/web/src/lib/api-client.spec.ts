@@ -64,4 +64,25 @@ describe('ApiClient', () => {
 
     await expect(client.readiness()).resolves.toMatchObject({ status: 'down' });
   });
+
+  it('serializes supported catalog filters', async () => {
+    const fetchMock = mockFetch(200, {
+      items: [],
+      page: 2,
+      pageSize: 25,
+      total: 0,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client.listProducts(2, 25, {
+      q: 'rodamiento',
+      brand: 'FAG',
+      status: 'in_review',
+    });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'http://api.test/api/v1/products?page=2&pageSize=25&q=rodamiento&brand=FAG&status=in_review',
+    );
+  });
 });

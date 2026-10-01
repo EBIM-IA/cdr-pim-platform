@@ -1,6 +1,14 @@
 import type { Uuid } from '@cdr/shared';
 
-import type { Product } from '../entities/product';
+import type { Product, ProductStatus } from '../entities/product';
+
+export interface ProductListOptions {
+  readonly page: number;
+  readonly pageSize: number;
+  readonly q?: string;
+  readonly brand?: string;
+  readonly status?: ProductStatus;
+}
 
 /**
  * Outbound port for catalog persistence.
@@ -16,7 +24,7 @@ export interface ProductRepositoryPort {
   findBySku(sku: string): Promise<Product | null>;
   /** Insert-or-update of the whole aggregate, including its identifiers. */
   save(product: Product): Promise<void>;
-  list(options: { page: number; pageSize: number }): Promise<{ items: Product[]; total: number }>;
+  list(options: ProductListOptions): Promise<{ items: Product[]; total: number }>;
 }
 
 /** Nest DI token. Lives beside the port so adapters and modules cannot invent their own. */

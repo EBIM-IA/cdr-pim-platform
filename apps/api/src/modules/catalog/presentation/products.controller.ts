@@ -2,11 +2,11 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type CreateProductInput,
-  type PaginationQuery,
+  type ProductListQuery,
   type ProductDto,
   type ProductListDto,
   createProductSchema,
-  paginationQuerySchema,
+  productListQuerySchema,
   productListSchema,
   productSchema,
 } from '@cdr/contracts';
@@ -37,7 +37,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'List products (offset pagination)' })
   @ApiOkResponse({ schema: openApiSchema(productListSchema) })
   async list(
-    @Query(new ZodValidationPipe(paginationQuerySchema)) query: PaginationQuery,
+    @Query(new ZodValidationPipe(productListQuerySchema)) query: ProductListQuery,
   ): Promise<ProductListDto> {
     const { items, total } = await this.listProducts.execute(query);
     return {

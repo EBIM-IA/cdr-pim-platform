@@ -4,6 +4,7 @@ import {
   type LivenessResponse,
   type ProductDto,
   type ProductListDto,
+  type ProductStatus,
   type ReadinessResponse,
   type SemanticSearchResponse,
   apiErrorSchema,
@@ -59,8 +60,16 @@ export class ApiClient {
     return this.get('/health/ready', readinessResponseSchema, [200, 503]);
   }
 
-  listProducts(page = 1, pageSize = 10): Promise<ProductListDto> {
-    return this.get(`/products?page=${page}&pageSize=${pageSize}`, productListSchema);
+  listProducts(
+    page = 1,
+    pageSize = 10,
+    filters: { q?: string; brand?: string; status?: ProductStatus } = {},
+  ): Promise<ProductListDto> {
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (filters.q) query.set('q', filters.q);
+    if (filters.brand) query.set('brand', filters.brand);
+    if (filters.status) query.set('status', filters.status);
+    return this.get(`/products?${query.toString()}`, productListSchema);
   }
 
   getProduct(id: string): Promise<ProductDto> {

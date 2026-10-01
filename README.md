@@ -3,9 +3,10 @@
 Plataforma especializada en información de productos (PIM) con capacidades de IA,
 **independiente del ERP**. Monorepo con la aplicación web, la API y el worker.
 
-> **Estado: foundation.** La base técnica está construida, verificada y documentada.
-> No incluye las funcionalidades de negocio del PIM — incluye el esqueleto sobre el que se
-> construyen. Ver [KNOWN GAPS](#known-gaps).
+> **Estado: foundation + primera interfaz operativa.** La base técnica y la navegación del
+> PIM están construidas, verificadas y documentadas. Los módulos distinguen la base ya
+> disponible, las reglas funcionales confirmadas y las capacidades todavía pendientes.
+> Ver [KNOWN GAPS](#known-gaps).
 
 ---
 
@@ -23,8 +24,14 @@ pnpm db:migrate          # aplica drizzle/*.sql
 pnpm dev                 # web :3000 · api :3001 · worker :3002
 ```
 
-Abre <http://localhost:3000>. El panel muestra el estado real de la API y el catálogo: si
-está en verde, todo el recorrido vertical funciona.
+Abre <http://localhost:3000>. La portada consulta el catálogo mediante la API y presenta un
+estado de error explícito si el servicio no está disponible.
+
+La interfaz incluye catálogo y detalle de productos, además de espacios navegables para
+Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Importaciones, IA y
+Calidad, Publicación, Integraciones, Reportes y Administración. El navegador consume la
+API mediante route handlers de Next y `API_BASE_URL` se resuelve en runtime, por lo que la
+misma imagen puede promoverse entre ambientes.
 
 |                   |                                      |
 | ----------------- | ------------------------------------ |
@@ -101,7 +108,7 @@ Para un solo workspace: `pnpm --filter @cdr/api <script>`.
 Verificado end to end contra servicios reales:
 
 **Síncrono** — `GET /api/v1/products/:id`
-navegador → Next.js (server component) → cliente API → NestJS → caso de uso →
+navegador → route handler de Next.js → cliente API → NestJS → caso de uso →
 `ProductRepositoryPort` → adapter Drizzle → PostgreSQL
 
 **Semántico** — `GET /api/v1/search/semantic?q=...`
@@ -116,18 +123,19 @@ con el mismo `correlationId` en todos los logs
 
 ## Decisiones
 
-| ADR                                                           | Decisión                                  |
-| ------------------------------------------------------------- | ----------------------------------------- |
-| [001](docs/adr/ADR-001-modular-monolith.md)                   | Modular monolith, no microservicios       |
-| [002](docs/adr/ADR-002-hexagonal-architecture.md)             | Arquitectura hexagonal                    |
-| [003](docs/adr/ADR-003-monorepo-platform-two-repositories.md) | Monorepo + repo de infraestructura        |
-| [004](docs/adr/ADR-004-aws-ecs-fargate.md)                    | AWS ECS Fargate                           |
-| [005](docs/adr/ADR-005-postgresql-pgvector.md)                | PostgreSQL + pgvector                     |
-| [006](docs/adr/ADR-006-sqs-eventbridge-no-redis.md)           | SQS + EventBridge, sin Redis              |
-| [007](docs/adr/ADR-007-openai-provider-adapter.md)            | OpenAI detrás de puertos                  |
-| [008](docs/adr/ADR-008-site-to-site-vpn.md)                   | VPN Site-to-Site hacia la red CDR         |
-| [009](docs/adr/ADR-009-database-access-library.md)            | Drizzle + migraciones SQL escritas a mano |
-| [010](docs/adr/ADR-010-iac-terraform.md)                      | Terraform                                 |
+| ADR                                                                    | Decisión                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| [001](docs/adr/ADR-001-modular-monolith.md)                            | Modular monolith, no microservicios                     |
+| [002](docs/adr/ADR-002-hexagonal-architecture.md)                      | Arquitectura hexagonal                                  |
+| [003](docs/adr/ADR-003-monorepo-platform-two-repositories.md)          | Monorepo + repo de infraestructura                      |
+| [004](docs/adr/ADR-004-aws-ecs-fargate.md)                             | AWS ECS Fargate                                         |
+| [005](docs/adr/ADR-005-postgresql-pgvector.md)                         | PostgreSQL + pgvector                                   |
+| [006](docs/adr/ADR-006-sqs-eventbridge-no-redis.md)                    | SQS + EventBridge, sin Redis                            |
+| [007](docs/adr/ADR-007-openai-provider-adapter.md)                     | OpenAI detrás de puertos                                |
+| [008](docs/adr/ADR-008-site-to-site-vpn.md)                            | VPN Site-to-Site hacia la red CDR                       |
+| [009](docs/adr/ADR-009-database-access-library.md)                     | Drizzle + migraciones SQL escritas a mano               |
+| [010](docs/adr/ADR-010-iac-terraform.md)                               | Terraform                                               |
+| [011](docs/adr/ADR-011-unified-code-inheritance-and-homolog-search.md) | Herencia por código unificador y búsqueda por homólogos |
 
 Documentación de arquitectura completa en [`docs/architecture/`](docs/architecture/).
 

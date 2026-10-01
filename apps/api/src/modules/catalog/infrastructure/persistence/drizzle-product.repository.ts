@@ -1,18 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type Uuid, newUuid } from '@cdr/shared';
-import { count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
 import { Product, type ProductStatus } from '../../domain/entities/product';
 import { ProductIdentifier } from '../../domain/entities/product-identifier';
-import type { ProductRepositoryPort } from '../../domain/ports/product-repository.port';
+import type {
+  ProductListOptions,
+  ProductRepositoryPort,
+} from '../../domain/ports/product-repository.port';
 import {
   type ProductIdentifierRow,
   type ProductRow,
   productIdentifiers,
   products,
 } from './catalog.tables';
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
 
 /**
  * PostgreSQL adapter for `ProductRepositoryPort`.
@@ -39,19 +46,34 @@ export class DrizzleProductRepository implements ProductRepositoryPort {
     return this.toDomain(row, await this.loadIdentifiers([row.id]));
   }
 
-  async list(options: { page: number; pageSize: number }): Promise<{
+  async list(options: ProductListOptions): Promise<{
     items: Product[];
     total: number;
   }> {
     const offset = (options.page - 1) * options.pageSize;
+    const filters: SQL[] = [];
+    if (options.q) {
+      const pattern = `%${escapeLikePattern(options.q)}%`;
+      const search = or(
+        ilike(products.sku, pattern),
+        ilike(products.name, pattern),
+        ilike(products.description, pattern),
+        ilike(products.brand, pattern),
+      );
+      if (search) filters.push(search);
+    }
+    if (options.brand) filters.push(ilike(products.brand, escapeLikePattern(options.brand)));
+    if (options.status) filters.push(eq(products.status, options.status));
+    const where = filters.length > 0 ? and(...filters) : undefined;
     const rows = await this.db
       .select()
       .from(products)
+      .where(where)
       .orderBy(products.sku)
       .limit(options.pageSize)
       .offset(offset);
 
-    const totals = await this.db.select({ value: count() }).from(products);
+    const totals = await this.db.select({ value: count() }).from(products).where(where);
     const identifiers = await this.loadIdentifiers(rows.map((row) => row.id));
 
     return {

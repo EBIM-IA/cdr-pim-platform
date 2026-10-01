@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Product } from '../domain/entities/product';
 import {
   PRODUCT_REPOSITORY,
+  type ProductListOptions,
   type ProductRepositoryPort,
 } from '../domain/ports/product-repository.port';
 
@@ -10,7 +11,7 @@ import {
 export class ListProductsUseCase {
   constructor(@Inject(PRODUCT_REPOSITORY) private readonly products: ProductRepositoryPort) {}
 
-  execute(options: { page: number; pageSize: number }): Promise<{
+  execute(options: ProductListOptions): Promise<{
     items: Product[];
     total: number;
   }> {
