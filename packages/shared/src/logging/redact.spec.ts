@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { REDACTED, redact } from './redact';
+import { REDACTED, redact, sanitizeLogText } from './redact';
 
 describe('redact', () => {
   it('masks sensitive keys at any depth', () => {
@@ -39,6 +39,30 @@ describe('redact', () => {
     };
     expect(result.at).toBe('2026-01-01T00:00:00.000Z');
     expect(result.boom.message).toBe('nope');
+  });
+
+  it('scrubs credentials embedded in free-form errors and stacks', () => {
+    const cause = new Error('Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature');
+    const error = new Error(
+      'connection to postgres://cdr:super-secret@db.internal:5432/pim failed?token=abc123',
+      { cause },
+    );
+    const result = redact({ error, path: '/callback?access_token=visible' }) as {
+      error: { message: string; stack: string; cause: { message: string } };
+      path: string;
+    };
+
+    expect(JSON.stringify(result)).not.toContain('super-secret');
+    expect(JSON.stringify(result)).not.toContain('abc123');
+    expect(JSON.stringify(result)).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+    expect(result.error.message).toContain(REDACTED);
+    expect(result.path).toContain(REDACTED);
+  });
+
+  it('scrubs common vendor key formats in log messages', () => {
+    expect(sanitizeLogText('OpenAI failed for sk-live_1234567890')).toBe(
+      `OpenAI failed for ${REDACTED}`,
+    );
   });
 
   it('does not recurse forever on cyclic structures', () => {

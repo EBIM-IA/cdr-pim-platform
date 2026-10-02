@@ -2,17 +2,20 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type CreateProductInput,
-  type PaginationQuery,
+  type ProductListQuery,
   type ProductDto,
   type ProductListDto,
   createProductSchema,
-  paginationQuerySchema,
+  productListQuerySchema,
   productListSchema,
   productSchema,
 } from '@cdr/contracts';
 
 import { openApiSchema } from '../../../shared/http/openapi';
+import { CurrentActor } from '../../../shared/http/current-actor.decorator';
+import { RequireRole } from '../../../shared/http/role.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { type AuthenticatedActor, Role } from '../../identity/domain/entities/role';
 import { CreateProductUseCase } from '../application/create-product.use-case';
 import { GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
@@ -26,6 +29,7 @@ import { toProductDto } from './product.presenter';
  */
 @ApiTags('catalog')
 @Controller('products')
+@RequireRole(Role.Viewer)
 export class ProductsController {
   constructor(
     private readonly getProductById: GetProductByIdUseCase,
@@ -37,7 +41,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'List products (offset pagination)' })
   @ApiOkResponse({ schema: openApiSchema(productListSchema) })
   async list(
-    @Query(new ZodValidationPipe(paginationQuerySchema)) query: PaginationQuery,
+    @Query(new ZodValidationPipe(productListQuerySchema)) query: ProductListQuery,
   ): Promise<ProductListDto> {
     const { items, total } = await this.listProducts.execute(query);
     return {
@@ -56,12 +60,14 @@ export class ProductsController {
   }
 
   @Post()
+  @RequireRole(Role.Editor)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a draft product' })
   @ApiCreatedResponse({ schema: openApiSchema(productSchema) })
   async create(
     @Body(new ZodValidationPipe(createProductSchema)) body: CreateProductInput,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ProductDto> {
-    return toProductDto(await this.createProduct.execute(body));
+    return toProductDto(await this.createProduct.execute(body, actor));
   }
 }

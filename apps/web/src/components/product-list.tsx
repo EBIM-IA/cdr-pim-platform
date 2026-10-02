@@ -1,11 +1,23 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { createServerApiClient } from '@/lib/api-client';
+import { getAccessToken } from '@/lib/server-auth';
 
 /** Reads the catalog through the shared contract. Deliberately minimal: this is a probe,
  *  not the product grid the PIM will eventually need. */
 export async function ProductList() {
-  const client = createServerApiClient();
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Productos</CardTitle>
+          <CardDescription>Debes iniciar sesión para consultar el catálogo.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  const client = createServerApiClient({ accessToken });
 
   try {
     const page = await client.listProducts(1, 5);
@@ -16,7 +28,7 @@ export async function ProductList() {
           <CardTitle>Productos</CardTitle>
           <CardDescription>
             {page.total === 0
-              ? 'Aún no hay productos. Crea uno con POST /api/v1/products.'
+              ? 'Aún no hay productos disponibles.'
               : `${page.total} producto(s) en el catálogo`}
           </CardDescription>
         </CardHeader>

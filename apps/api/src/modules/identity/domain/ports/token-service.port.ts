@@ -6,9 +6,8 @@ import type { AuthenticatedActor, Role } from '../entities/role';
  * Expressed in terms of actors and roles, not of JWTs — so moving to opaque tokens, to
  * Cognito, or to the customer's Active Directory later is an adapter change.
  */
-export interface TokenPair {
+export interface IssuedAccessToken {
   readonly accessToken: string;
-  readonly refreshToken: string;
   readonly expiresIn: string;
 }
 
@@ -19,10 +18,9 @@ export interface AccessTokenClaims {
 }
 
 export interface TokenServicePort {
-  issue(actor: AuthenticatedActor): Promise<TokenPair>;
-  /** Throws `UnauthorizedError` semantics via a DomainError when the token is not usable. */
+  issue(actor: AuthenticatedActor): Promise<IssuedAccessToken>;
+  /** Throws `UnauthorizedError` when the token is missing, malformed or expired. */
   verifyAccessToken(token: string): Promise<AuthenticatedActor>;
-  verifyRefreshToken(token: string): Promise<AuthenticatedActor>;
 }
 
 export const TOKEN_SERVICE = Symbol('TokenServicePort');

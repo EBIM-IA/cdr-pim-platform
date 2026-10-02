@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 
 import { AUDIT_PORT } from './domain/ports/audit.port';
-import { LoggingAuditAdapter } from './infrastructure/logging-audit.adapter';
+import { PostgresAuditAdapter } from './infrastructure/persistence/postgres-audit.adapter';
 
 /**
  * Global because auditing is a cross-cutting concern that any bounded context may need,
@@ -9,7 +9,7 @@ import { LoggingAuditAdapter } from './infrastructure/logging-audit.adapter';
  */
 @Global()
 @Module({
-  providers: [{ provide: AUDIT_PORT, useClass: LoggingAuditAdapter }],
+  providers: [{ provide: AUDIT_PORT, useClass: PostgresAuditAdapter }],
   exports: [AUDIT_PORT],
 })
 export class AuditModule {}

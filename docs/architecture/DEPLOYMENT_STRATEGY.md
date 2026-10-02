@@ -12,7 +12,8 @@ main ─────────────────────────
 feature/…   fix/…            chore/…      short-lived, squash-merged via PR
 ```
 
-- `main` is protected: pull request, green CI, one approval.
+- Repository administration must protect `main`: pull request, green CI, and at least one
+  approval. This is a release prerequisite, not a setting created by the workflow.
 - Environments are **not** branches. QAS and PRD are the same commit at different stages of
   promotion. A `dev`/`qas`/`main` branch triple would guarantee drift between them and add
   merge work that buys nothing.
@@ -27,7 +28,7 @@ The principle that makes "it worked in QAS" mean something:
 graph LR
     pr[Pull request] -->|CI: lint · typecheck · test · build · audit| main[merge to main]
     main --> build["docker build<br/>--platform linux/amd64"]
-    build --> ecr["ECR<br/>tag: git SHA + semver"]
+    build --> ecr["ECR<br/>tag: full git SHA<br/>provenance + SBOM"]
     ecr --> qas["QAS<br/>deploy by digest"]
     qas --> uat[UAT sign-off]
     uat --> prd["PRD<br/><b>same digest</b>, manual approval"]
@@ -41,7 +42,7 @@ the testing.
 
 Mechanically (`promote.yml`), per application:
 
-1. reject mutable tags (`latest`, `main`, `qas`, `prd`, …);
+1. accept only a complete, lowercase 40-character git commit SHA;
 2. `ecr describe-images` → `imageDigest`;
 3. `ecs describe-task-definition` on the revision currently in use, so CPU, memory,
    environment, secrets and IAM roles are carried over untouched;
@@ -54,9 +55,10 @@ Mechanically (`promote.yml`), per application:
 Step 7 is what makes `IMAGE_QAS == IMAGE_PRD` verifiable rather than assumed: promote the
 same tag to both environments and the assertion prints the same digest in each run.
 
-Tagging: `<git-sha>` always, plus `v<semver>` on a release tag. **`latest` is never
-published at all** — the build workflow emits only those two tags, and the ECR repositories
-are `IMMUTABLE`, so a tag cannot be moved under a running service.
+Tagging: `<full-git-sha>` always. A strictly validated `v<semver>` release event may add an
+alias only after proving the tagged commit belongs to `main`; it reuses the existing OCI
+index without rebuilding, preserving its provenance and SBOM. **`latest` is never published
+at all**, and promotion never accepts the SemVer alias.
 
 Terraform's `image_tag` variable is therefore required and has no default: it sets only the
 first task definition. Every deployment after that is a revision registered by the promote
@@ -81,14 +83,15 @@ corrupted image.
 
 ## Pipelines
 
-| Workflow                | Trigger                      | Does                                                                                                                                                                            |
-| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                | PR, push to `main`           | install → format:check → lint → typecheck → unit + architecture tests → integration tests (PostgreSQL service container) → build → `pnpm audit` → gitleaks → Docker build check |
-| `build-and-publish.yml` | push to `main`, release tag  | Builds `linux/amd64` images, pushes to ECR tagged with the git SHA, records the digest                                                                                          |
-| `promote.yml`           | manual (`workflow_dispatch`) | Deploys an existing digest to QAS or PRD. **PRD requires a GitHub Environment approval**                                                                                        |
+| Workflow                | Trigger                      | Does                                                                                                                                                                                   |
+| ----------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`                | PR, push to `main`           | install → format:check → lint → typecheck → unit + architecture tests → integration tests (PostgreSQL service container) → build → `pnpm audit` → gitleaks → Docker build check        |
+| `build-and-publish.yml` | push to `main`, release tag  | Builds `linux/amd64` once per main commit with provenance/SBOM; a validated release tag only aliases the existing OCI index                                                            |
+| `promote.yml`           | manual (`workflow_dispatch`) | Validates a full commit SHA before OIDC, resolves immutable digests and deploys to QAS/PRD. **PRD fails closed unless its GitHub Environment has a reviewer and prevents self-review** |
 
 `build-and-publish.yml` and `promote.yml` authenticate to AWS via **OIDC** — no long-lived
-access keys in GitHub secrets.
+access keys in GitHub secrets. Every third-party Action is pinned to a full commit SHA, and
+CI rejects mutable Action, Dockerfile and service-image references.
 
 ## Database migrations
 

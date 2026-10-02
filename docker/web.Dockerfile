@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # =============================================================================
 # apps/web — Next.js
 # =============================================================================
@@ -17,7 +17,7 @@
 # See docs/architecture/DEPLOYMENT_STRATEGY.md.
 # =============================================================================
 
-FROM node:24-alpine AS base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -48,7 +48,7 @@ COPY . .
 # order — and only those, which is exactly the set the filtered install provided.
 RUN pnpm --filter @cdr/web... run build
 
-FROM node:24-alpine AS runtime
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
@@ -62,6 +62,6 @@ COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz',{redirect:'manual'}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "apps/web/server.js"]

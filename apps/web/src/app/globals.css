@@ -1,40 +1,23 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
-/*
- * Design tokens.
- *
- * Declared as CSS custom properties (the shadcn/ui convention) and exposed to Tailwind v4
- * through @theme, so `bg-primary`, `text-muted-foreground` etc. resolve against them. This
- * is what makes components added later by the shadcn CLI fit in without modification.
- */
 :root {
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0.21 0.02 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 260);
-  --primary: oklch(0.46 0.17 22);
-  --primary-foreground: oklch(0.99 0 0);
-  --muted: oklch(0.96 0.005 260);
-  --muted-foreground: oklch(0.52 0.02 260);
-  --border: oklch(0.9 0.01 260);
-  --ring: oklch(0.46 0.17 22);
-  --destructive: oklch(0.55 0.2 27);
-  --destructive-foreground: oklch(0.99 0 0);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.18 0.015 260);
-    --foreground: oklch(0.96 0.005 260);
-    --card: oklch(0.22 0.018 260);
-    --card-foreground: oklch(0.96 0.005 260);
-    --primary: oklch(0.62 0.18 22);
-    --primary-foreground: oklch(0.15 0.01 260);
-    --muted: oklch(0.26 0.018 260);
-    --muted-foreground: oklch(0.72 0.015 260);
-    --border: oklch(0.32 0.02 260);
-    --ring: oklch(0.62 0.18 22);
-  }
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --card: #ffffff;
+  --card-foreground: #1a1a1a;
+  --primary: #ff6903;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f7;
+  --secondary-foreground: #282b30;
+  --muted: #f7f8fa;
+  --muted-foreground: #6f7782;
+  --accent: #ff6903;
+  --accent-foreground: #ffffff;
+  --destructive: #e45858;
+  --destructive-foreground: #ffffff;
+  --border: #e7e9ed;
+  --input: #dfe2e7;
+  --ring: #1a1a1a;
 }
 
 @theme inline {
@@ -44,18 +27,69 @@
   --color-card-foreground: var(--card-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-border: var(--border);
-  --color-ring: var(--ring);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-cdr-orange: #f3722c;
+  --color-cdr-ink: #1a1a1a;
+  --color-cdr-green: #20a66a;
+  --color-cdr-amber: #d89216;
+  --color-cdr-red: #dc5555;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 4%);
+  --shadow-sidebar: 8px 0 24px rgb(16 24 40 / 10%);
+  --font-sans: Arial, Helvetica, sans-serif;
 }
 
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    min-width: 320px;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  ::selection {
+    background: rgba(255, 105, 3, 0.2);
+  }
+
+  :focus-visible {
+    scroll-margin: 7rem;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd0d7 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

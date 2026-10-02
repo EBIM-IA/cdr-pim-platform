@@ -16,6 +16,7 @@ import type { Response } from 'express';
 import { Res } from '@nestjs/common';
 
 import { openApiSchema } from '../../../shared/http/openapi';
+import { Public } from '../../../shared/http/public.decorator';
 import { API_ENV } from '../../../shared/tokens';
 import { CheckReadinessUseCase } from '../application/check-readiness.use-case';
 
@@ -28,6 +29,7 @@ import { CheckReadinessUseCase } from '../application/check-readiness.use-case';
  *    answers 503 when it cannot serve, which drains the target instead of failing requests.
  */
 @ApiTags('health')
+@Public()
 @Controller('health')
 export class HealthController {
   private readonly startedAt = Date.now();

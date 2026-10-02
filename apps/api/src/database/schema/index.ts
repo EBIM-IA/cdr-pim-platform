@@ -6,6 +6,7 @@ import {
   equivalenceGroupMembers,
   equivalenceGroups,
 } from '../../modules/equivalences/infrastructure/persistence/equivalences.tables';
+import { auditEntries } from '../../modules/audit/infrastructure/persistence/audit.tables';
 import { productEmbeddings } from '../../modules/search/infrastructure/persistence/search.tables';
 
 /**
@@ -16,6 +17,7 @@ import { productEmbeddings } from '../../modules/search/infrastructure/persisten
  * assembles the Nest modules.
  */
 export const schema = {
+  auditEntries,
   products,
   productIdentifiers,
   equivalenceGroups,
@@ -24,6 +26,7 @@ export const schema = {
 };
 
 export {
+  auditEntries,
   equivalenceGroupMembers,
   equivalenceGroups,
   productEmbeddings,
