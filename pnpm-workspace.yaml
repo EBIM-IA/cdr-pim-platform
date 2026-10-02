@@ -9,3 +9,11 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+
+# Security overrides. Each entry must name the advisory it closes and why upgrading the
+# owning package is not possible. Remove an entry as soon as the owner ships the fix.
+overrides:
+  # GHSA-6g55-p6wh-862q, GHSA-r28c-9q8g-f849 (high). Every next@15.5.x pins postcss to
+  # exactly 8.4.31; the fix needs >=8.5.18. Scoped to next's own copy, same major, and
+  # build-time only (webpack CSS pipeline) — @tailwindcss/postcss already runs on 8.5.x.
+  'next>postcss': ^8.5.18
