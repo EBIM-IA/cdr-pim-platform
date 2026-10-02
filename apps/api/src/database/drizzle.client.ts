@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
+import { databaseSslOption } from './database-tls';
 import { schema } from './schema';
 
 export type Database = ReturnType<typeof createDatabase>['db'];
@@ -10,6 +11,8 @@ export interface DatabaseOptions {
   readonly url: string;
   readonly poolMax: number;
   readonly ssl: boolean;
+  /** PEM bundle the server certificate must chain to; see `database-tls.ts`. */
+  readonly sslCaFile?: string;
 }
 
 /**
@@ -27,8 +30,8 @@ export function createDatabase(options: DatabaseOptions): {
   const sql = postgres(options.url, {
     max: options.poolMax,
     // Hosted environments validate both the certificate chain and server hostname. The
-    // configuration schema makes TLS mandatory in QAS/PRD.
-    ssl: options.ssl ? 'verify-full' : false,
+    // configuration schema makes TLS and the CA bundle mandatory in QAS/PRD.
+    ssl: databaseSslOption({ ssl: options.ssl, caFile: options.sslCaFile, url: options.url }),
     // Fail fast rather than let a request hang until the ALB times it out.
     connect_timeout: 10,
     idle_timeout: 30,

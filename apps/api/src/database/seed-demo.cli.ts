@@ -13,6 +13,7 @@ async function main(): Promise<void> {
     url: env.DATABASE_URL,
     poolMax: 1,
     ssl: env.DATABASE_SSL,
+    sslCaFile: env.DATABASE_SSL_CA_FILE,
   });
 
   try {

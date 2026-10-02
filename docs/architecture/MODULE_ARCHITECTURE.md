@@ -58,7 +58,8 @@ noise. They gain one when they gain persistence.
 
 `JwtAuthGuard` and `RolesGuard` are global `APP_GUARD` providers. Health and local login are
 the only routes marked public. The development credential adapter reads one account from
-validated environment variables and `AUTH_MODE=local` is rejected in QAS/PRD. See
+validated environment variables; `AUTH_MODE=local` is rejected in PRD and needs the explicit
+`ALLOW_LOCAL_AUTH_IN_QAS=true` opt-in in QAS. See
 `SECURITY_BASELINE.md` for the fail-closed boundary and pending identity-provider decision.
 
 ## The rules that keep this a modular monolith

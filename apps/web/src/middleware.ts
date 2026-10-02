@@ -1,13 +1,15 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { authCookieName } from '@/lib/auth';
+import { env } from '@/lib/env';
 import {
   applyBrowserSecurityHeaders,
   contentSecurityPolicy,
   securePrivateResponse,
 } from '@/lib/http-security';
 
-const PUBLIC_PATHS = new Set(['/login', '/api/auth/login', '/api/auth/logout']);
+// `/healthz` is the anonymous load-balancer probe: it must answer 200, never redirect.
+const PUBLIC_PATHS = new Set(['/healthz', '/login', '/api/auth/login', '/api/auth/logout']);
 
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -30,7 +32,8 @@ export function middleware(request: NextRequest) {
     } else if (pathname.startsWith('/api/')) {
       response = NextResponse.json({ message: 'Debes iniciar sesión.' }, { status: 401 });
     } else {
-      const login = new URL('/login', request.url);
+      // The public origin, not request.url: behind the ALB that is the bind address.
+      const login = new URL('/login', env.PUBLIC_APP_ORIGIN);
       login.searchParams.set('returnTo', `${pathname}${search}`);
       response = NextResponse.redirect(login);
     }

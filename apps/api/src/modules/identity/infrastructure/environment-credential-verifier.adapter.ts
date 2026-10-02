@@ -14,27 +14,34 @@ import type {
  * Local-only identity source backed entirely by validated environment variables.
  *
  * Both comparisons hash first and then use `timingSafeEqual`, so differing input lengths do
- * not throw or create an obvious early-exit timing signal. This adapter is deliberately
- * rejected by configuration in QAS/PRD; it is not a substitute for a user directory.
+ * not throw or create an obvious early-exit timing signal. Configuration rejects it in PRD
+ * and admits it in QAS only behind ALLOW_LOCAL_AUTH_IN_QAS; it is not a user directory.
  */
 @Injectable()
 export class EnvironmentCredentialVerifier implements CredentialVerifierPort {
   constructor(@Inject(API_ENV) private readonly env: ApiEnv) {}
 
   async verify(credentials: LoginCredentials): Promise<AuthenticatedActor | null> {
+    const { AUTH_LOCAL_EMAIL, AUTH_LOCAL_PASSWORD, AUTH_LOCAL_ROLES, AUTH_LOCAL_USER_ID } =
+      this.env;
+    // The schema requires all four when AUTH_MODE=local; fail closed if that ever changes.
+    if (!AUTH_LOCAL_EMAIL || !AUTH_LOCAL_PASSWORD || !AUTH_LOCAL_ROLES || !AUTH_LOCAL_USER_ID) {
+      return null;
+    }
+
     const emailMatches = constantTimeEqual(
       credentials.email.trim().toLowerCase(),
-      this.env.AUTH_LOCAL_EMAIL.trim().toLowerCase(),
+      AUTH_LOCAL_EMAIL.trim().toLowerCase(),
     );
-    const passwordMatches = constantTimeEqual(credentials.password, this.env.AUTH_LOCAL_PASSWORD);
+    const passwordMatches = constantTimeEqual(credentials.password, AUTH_LOCAL_PASSWORD);
 
     // Do not short-circuit either comparison above. Return one generic miss for both fields.
     if (!(emailMatches && passwordMatches)) return null;
 
     return {
-      id: this.env.AUTH_LOCAL_USER_ID,
-      email: this.env.AUTH_LOCAL_EMAIL.trim().toLowerCase(),
-      roles: [...this.env.AUTH_LOCAL_ROLES],
+      id: AUTH_LOCAL_USER_ID,
+      email: AUTH_LOCAL_EMAIL.trim().toLowerCase(),
+      roles: [...AUTH_LOCAL_ROLES],
     };
   }
 }

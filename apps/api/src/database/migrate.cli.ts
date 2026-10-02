@@ -2,6 +2,7 @@
 import postgres from 'postgres';
 import { sanitizeLogText } from '@cdr/shared';
 
+import { databaseSslOption } from './database-tls';
 import { defaultMigrationsDir, runMigrations } from './migrator';
 
 /**
@@ -21,11 +22,15 @@ async function main(): Promise<void> {
   const appEnv = process.env.APP_ENV ?? 'local';
   const hosted = appEnv === 'qas' || appEnv === 'prd';
   const databaseSsl = process.env.DATABASE_SSL === 'true';
+  const databaseSslCaFile = process.env.DATABASE_SSL_CA_FILE || undefined;
   if (process.env.NODE_ENV === 'production' && !hosted) {
     throw new Error('APP_ENV must be qas or prd when NODE_ENV=production.');
   }
   if (hosted && !databaseSsl) {
     throw new Error('DATABASE_SSL must be true in qas/prd.');
+  }
+  if (hosted && !databaseSslCaFile) {
+    throw new Error('DATABASE_SSL_CA_FILE must point at the database CA bundle in qas/prd.');
   }
   if (
     process.env.DATABASE_SSL &&
@@ -38,7 +43,8 @@ async function main(): Promise<void> {
   const directory = process.argv[2] ?? defaultMigrationsDir();
   const sql = postgres(url, {
     max: 1,
-    ssl: databaseSsl ? 'verify-full' : false,
+    // verify-full against the shipped RDS bundle — the same rule as the API itself.
+    ssl: databaseSslOption({ ssl: databaseSsl, caFile: databaseSslCaFile, url }),
     // `CREATE EXTENSION IF NOT EXISTS` emits a NOTICE that postgres.js would otherwise
     // dump to the console as if it were a failure.
     onnotice: () => undefined,

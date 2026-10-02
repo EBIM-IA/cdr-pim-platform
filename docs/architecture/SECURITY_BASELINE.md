@@ -35,9 +35,23 @@ from `AUTH_LOCAL_USER_ID`, `AUTH_LOCAL_EMAIL`, `AUTH_LOCAL_PASSWORD` and
 with Node's `timingSafeEqual`; failures always return the same message. Credentials are never
 stored in source code and the validated logger redacts them.
 
-`AUTH_MODE=local` is rejected when `APP_ENV` is `qas` or `prd`. No insecure fallback exists:
-those environments cannot start until the identity port has an enterprise adapter. This is
-intentional fail-closed behavior.
+`AUTH_MODE=local` is decided per environment, and every undecided case fails closed:
+
+| `APP_ENV`      | `AUTH_MODE=local`                                                  |
+| -------------- | ------------------------------------------------------------------ |
+| `local`/`test` | allowed                                                            |
+| `qas`          | allowed **only** with `ALLOW_LOCAL_AUTH_IN_QAS=true`; else no boot |
+| `prd`          | always rejected, even with `ALLOW_LOCAL_AUTH_IN_QAS=true`          |
+
+The QAS opt-in is a temporary bridge so the bootstrap environment can be exercised before
+CDR's identity provider exists; it must be removed when the enterprise adapter lands. PRD
+cannot start until the identity port has an enterprise adapter. In production builds the
+session cookie is always `__Host-` prefixed, `Secure`, `HttpOnly` and `SameSite=Lax`, so a
+QAS login works only over HTTPS on the configured `PUBLIC_APP_ORIGIN`.
+
+Login and logout accept a request only when its `Origin` header equals `PUBLIC_APP_ORIGIN`
+exactly (scheme, host and port). The comparison deliberately ignores the request URL: behind
+the ALB the web server only knows its bind address.
 
 The local login returns an actor, a short-lived access token and its TTL. It intentionally
 does **not** issue a refresh token: refreshing safely requires a durable source from which to
@@ -126,8 +140,11 @@ client IP. Semantic search and synchronous indexing have tighter actor-based bud
 Blocked requests return `429` and a standard `Retry-After` header; the BFF preserves it.
 
 These in-process counters protect one task. A public multi-task deployment still requires
-an ALB/WAF rule for a shared edge limit. `TRUST_PROXY_HOPS` must name the exact load-balancer
-hop count; QAS/PRD refuse to start when it is zero.
+an ALB/WAF rule for a shared edge limit. QAS/PRD require `TRUST_PROXY_HOPS=1` exactly: the
+API is reached either through the ALB or from the web BFF, and the BFF forwards only the
+client address the ALB appended to `X-Forwarded-For`. Zero would key every login on the
+proxy's address (one attacker could lock everybody out); more than one would let a client
+pick its own address.
 
 ## Business audit
 
@@ -152,11 +169,19 @@ repository; this application repository is not evidence that they are deployed:
   group, and only on the specific hosts and ports the integration needs.
 - S3 buckets have public access blocked; browsers reach an asset only via a short-lived
   presigned URL.
+- Database connections use TLS with `verify-full` (certificate chain and hostname) against
+  the AWS RDS CA bundle shipped in the API image (`DATABASE_SSL_CA_FILE`, see
+  `apps/api/certs/README.md`). The API and the migration task refuse to start in QAS/PRD
+  without TLS or without the bundle; nothing falls back to an unverified connection.
+- Swagger (`SWAGGER_ENABLED`) is refused in QAS/PRD.
+- The web target group health check uses `GET /healthz` (anonymous, always 200, no
+  dependency or version data). `/` redirects anonymous users to `/login`.
 
 ## Known gaps
 
-1. **Enterprise identity and revocation are pending.** QAS/PRD deliberately fail to start
-   until CDR chooses and configures its identity provider.
+1. **Enterprise identity and revocation are pending.** PRD deliberately fails to start until
+   CDR chooses and configures its identity provider; QAS runs on the temporary
+   `ALLOW_LOCAL_AUTH_IN_QAS` opt-in.
 2. **No shared edge limit/WAF is defined here.** The application limit is per running task;
    the AWS control belongs in the infrastructure repository.
 3. **Audit retention and archival are not defined.** CDR must specify the required period,

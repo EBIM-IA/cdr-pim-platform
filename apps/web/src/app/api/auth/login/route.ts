@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 import {
   authCookieName,
+  clientAddressFromForwardedFor,
   hasExpectedOrigin,
   loginFailureMessage,
   loginRequestSchema,
@@ -16,7 +17,8 @@ import { securePrivateResponse, upstreamTimeoutSignal } from '@/lib/http-securit
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  if (!hasExpectedOrigin(request.headers.get('origin'), request.nextUrl.origin)) {
+  // Compared with the configured public origin, never with the server's own bind address.
+  if (!hasExpectedOrigin(request.headers.get('origin'), env.PUBLIC_APP_ORIGIN)) {
     return securePrivateResponse(
       NextResponse.json({ message: 'Origen de solicitud no permitido.' }, { status: 403 }),
     );
@@ -33,14 +35,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    'content-type': 'application/json',
+  };
+  const clientAddress = clientAddressFromForwardedFor(request.headers.get('x-forwarded-for'));
+  if (clientAddress) headers['x-forwarded-for'] = clientAddress;
+
   let upstream: Response;
   try {
     upstream = await fetch(`${env.API_BASE_URL}${API_PREFIX}/auth/login`, {
       method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ email: parsed.data.email, password: parsed.data.password }),
       cache: 'no-store',
       signal: upstreamTimeoutSignal(),

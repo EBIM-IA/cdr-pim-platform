@@ -55,6 +55,23 @@ export function hasExpectedOrigin(originHeader: string | null, expectedOrigin: s
   }
 }
 
+/**
+ * The client address to forward to the API's login throttle.
+ *
+ * In QAS/PRD the web task is reachable only from the ALB, which APPENDS the address it saw
+ * to X-Forwarded-For. Anything to the left of that last entry was written by the client and
+ * is ignored. The API trusts exactly one hop (TRUST_PROXY_HOPS=1) — this BFF — so the value
+ * forwarded here becomes its `request.ip`; without it every login would share the web
+ * task's address and five failed attempts would lock everybody out. A local API trusts no
+ * hop and ignores the header.
+ */
+export function clientAddressFromForwardedFor(header: string | null): string | null {
+  const last = header?.split(',').at(-1)?.trim();
+  if (!last || last.length > 45) return null;
+  // IPv4 or IPv6 literal only: never forward arbitrary text into another service's header.
+  return /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:.]*:[0-9a-f:.]*)$/iu.test(last) ? last : null;
+}
+
 export function durationToSeconds(duration: string): number {
   const match = /^(\d+)(ms|s|m|h|d|w|y)$/u.exec(duration);
   if (!match) return 1;

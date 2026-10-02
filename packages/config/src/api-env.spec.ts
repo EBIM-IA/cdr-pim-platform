@@ -13,6 +13,22 @@ const minimal = {
   JWT_ACCESS_SECRET: 'a'.repeat(32),
 } as NodeJS.ProcessEnv;
 
+/** A QAS configuration that satisfies every hosted guard-rail except the auth opt-in. */
+const hostedQas = {
+  ...minimal,
+  NODE_ENV: 'production',
+  APP_ENV: 'qas',
+  JWT_ACCESS_SECRET: 'q'.repeat(48),
+  DATABASE_SSL: 'true',
+  DATABASE_SSL_CA_FILE: '/app/certs/rds-global-bundle.pem',
+  TRUST_PROXY_HOPS: '1',
+  QUEUE_DRIVER: 'sqs',
+  SQS_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/cdr-pim-qas-jobs',
+  STORAGE_DRIVER: 's3',
+  S3_BUCKET_ASSETS: 'cdr-pim-qas-assets',
+  CORS_ORIGINS: 'https://pim-qas.example.test',
+} as NodeJS.ProcessEnv;
+
 describe('loadApiEnv', () => {
   it('applies safe local defaults', () => {
     const env = loadApiEnv(minimal);
@@ -50,23 +66,65 @@ describe('loadApiEnv', () => {
 
   it('requires all local credentials from the environment', () => {
     const { AUTH_LOCAL_PASSWORD: _omitted, ...withoutPassword } = minimal;
-    expect(() => loadApiEnv(withoutPassword)).toThrow(/AUTH_LOCAL_PASSWORD/);
+    expect(() => loadApiEnv(withoutPassword)).toThrow(
+      /AUTH_LOCAL_PASSWORD.*required when AUTH_MODE=local/s,
+    );
     expect(() => loadApiEnv({ ...minimal, AUTH_LOCAL_ROLES: 'SUPERUSER' })).toThrow(
       /AUTH_LOCAL_ROLES/,
     );
   });
 
-  it('refuses local authentication in qas and prd', () => {
-    for (const APP_ENV of ['qas', 'prd']) {
+  describe('local authentication by environment', () => {
+    it.each(['local', 'test'])('allows local authentication in %s', (APP_ENV) => {
+      expect(loadApiEnv({ ...minimal, APP_ENV }).AUTH_MODE).toBe('local');
+    });
+
+    it('allows local authentication in qas only with the explicit opt-in', () => {
+      const env = loadApiEnv({ ...hostedQas, ALLOW_LOCAL_AUTH_IN_QAS: 'true' });
+      expect(env.AUTH_MODE).toBe('local');
+      expect(env.ALLOW_LOCAL_AUTH_IN_QAS).toBe(true);
+    });
+
+    it.each([undefined, 'false', '0'])(
+      'fails closed in qas when ALLOW_LOCAL_AUTH_IN_QAS=%s',
+      (ALLOW_LOCAL_AUTH_IN_QAS) => {
+        expect(() => loadApiEnv({ ...hostedQas, ALLOW_LOCAL_AUTH_IN_QAS })).toThrow(
+          /AUTH_MODE.*"local" requires ALLOW_LOCAL_AUTH_IN_QAS=true in qas/s,
+        );
+      },
+    );
+
+    it('always refuses local authentication in prd, even with the qas opt-in', () => {
+      expect(() => loadApiEnv({ ...hostedQas, APP_ENV: 'prd' })).toThrow(
+        /AUTH_MODE.*never allowed in prd/s,
+      );
       expect(() =>
-        loadApiEnv({
-          ...minimal,
-          APP_ENV,
-          QUEUE_DRIVER: 'sqs',
-          SQS_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/cdr-pim-jobs',
-        }),
-      ).toThrow(/AUTH_MODE.*local.*local\/test/s);
-    }
+        loadApiEnv({ ...hostedQas, APP_ENV: 'prd', ALLOW_LOCAL_AUTH_IN_QAS: 'true' }),
+      ).toThrow(/AUTH_MODE.*never allowed in prd.*ALLOW_LOCAL_AUTH_IN_QAS.*must not be set/s);
+    });
+
+    it('rejects an unknown authentication mode instead of falling back', () => {
+      expect(() => loadApiEnv({ ...minimal, AUTH_MODE: 'none' })).toThrow(/AUTH_MODE/);
+    });
+  });
+
+  it('requires the database CA bundle in hosted environments', () => {
+    const { DATABASE_SSL_CA_FILE: _omitted, ...withoutCa } = hostedQas;
+    expect(() => loadApiEnv({ ...withoutCa, ALLOW_LOCAL_AUTH_IN_QAS: 'true' })).toThrow(
+      /DATABASE_SSL_CA_FILE.*database CA bundle/s,
+    );
+  });
+
+  it.each(['0', '2'])('requires exactly one trusted proxy hop in qas (got %s)', (hops) => {
+    expect(() =>
+      loadApiEnv({ ...hostedQas, ALLOW_LOCAL_AUTH_IN_QAS: 'true', TRUST_PROXY_HOPS: hops }),
+    ).toThrow(/TRUST_PROXY_HOPS.*exactly 1/s);
+  });
+
+  it('refuses Swagger in hosted environments', () => {
+    expect(() =>
+      loadApiEnv({ ...hostedQas, ALLOW_LOCAL_AUTH_IN_QAS: 'true', SWAGGER_ENABLED: 'true' }),
+    ).toThrow(/SWAGGER_ENABLED.*must be false/s);
   });
 
   it('refuses the documented local JWT placeholder in hosted environments', () => {
@@ -109,7 +167,7 @@ describe('loadApiEnv', () => {
         CORS_ORIGINS: 'http://pim.example.test',
       }),
     ).toThrow(
-      /DATABASE_SSL.*TRUST_PROXY_HOPS.*AWS_ENDPOINT_URL.*OPENAI_BASE_URL.*STORAGE_DRIVER.*SWAGGER_ENABLED.*CORS_ORIGINS/s,
+      /DATABASE_SSL.*DATABASE_SSL_CA_FILE.*TRUST_PROXY_HOPS.*AWS_ENDPOINT_URL.*OPENAI_BASE_URL.*STORAGE_DRIVER.*SWAGGER_ENABLED.*CORS_ORIGINS/s,
     );
   });
 

@@ -17,7 +17,18 @@ const apiOnlySchema = z.object({
   DATABASE_URL: z.string().url(),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   DATABASE_SSL: booleanEnv(false),
-  /** Number of trusted reverse-proxy hops. Keep at zero when connecting directly. */
+  /**
+   * PEM bundle of the certificate authorities trusted for the database connection. With
+   * DATABASE_SSL=true the server certificate chain AND hostname are verified (verify-full)
+   * against exactly this bundle. The API image ships the AWS RDS global bundle and points
+   * this variable at it; QAS/PRD refuse to start without it.
+   */
+  DATABASE_SSL_CA_FILE: z.string().min(1).optional(),
+  /**
+   * Number of trusted reverse-proxy hops in front of the API. Keep at zero when connecting
+   * directly. QAS/PRD have exactly one: the ALB, or the web BFF that forwards the client
+   * address it received from the ALB.
+   */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 
   /** Comma-separated list of allowed browser origins. Never `*` in QAS/PRD. */
@@ -26,13 +37,17 @@ const apiOnlySchema = z.object({
 
   /**
    * Local credentials are an intentionally temporary source until CDR chooses its real
-   * identity provider. They are required environment values: no credential is embedded in
-   * source code or silently invented by a default.
+   * identity provider. When AUTH_MODE=local they are required environment values: no
+   * credential is embedded in source code or silently invented by a default.
+   *
+   * local/test: allowed. qas: allowed only with ALLOW_LOCAL_AUTH_IN_QAS=true, a temporary
+   * and explicit opt-in until the corporate IdP exists. prd: never, whatever the flag says.
    */
-  AUTH_MODE: z.literal('local').default('local'),
-  AUTH_LOCAL_USER_ID: z.string().min(1).max(120),
-  AUTH_LOCAL_EMAIL: z.string().email().max(254),
-  AUTH_LOCAL_PASSWORD: z.string().min(12).max(1_024),
+  AUTH_MODE: z.enum(['local']).default('local'),
+  ALLOW_LOCAL_AUTH_IN_QAS: booleanEnv(false),
+  AUTH_LOCAL_USER_ID: z.string().min(1).max(120).optional(),
+  AUTH_LOCAL_EMAIL: z.string().email().max(254).optional(),
+  AUTH_LOCAL_PASSWORD: z.string().min(12).max(1_024).optional(),
   AUTH_LOCAL_ROLES: z
     .string()
     .transform((value) =>
@@ -41,7 +56,8 @@ const apiOnlySchema = z.object({
         .map((role) => role.trim())
         .filter(Boolean),
     )
-    .pipe(z.array(z.enum(['ADMIN', 'EDITOR', 'VIEWER'])).min(1)),
+    .pipe(z.array(z.enum(['ADMIN', 'EDITOR', 'VIEWER'])).min(1))
+    .optional(),
 
   JWT_ACCESS_SECRET: z.string().min(32),
   // `<number><unit>` (ms format). Constrained here so the JWT adapter can rely on the
@@ -129,6 +145,59 @@ export const apiEnvSchema = baseEnvSchema
         message: 'is required when AI_PROVIDER=openai',
       });
     }
+    // One variable per check, in this exact shape: cdr-pim-infrastructure derives its
+    // conditional requirements from it (scripts/check-platform-contract.py).
+    if (env.AUTH_MODE === 'local' && !env.AUTH_LOCAL_USER_ID) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_LOCAL_USER_ID'],
+        message: 'is required when AUTH_MODE=local',
+      });
+    }
+    if (env.AUTH_MODE === 'local' && !env.AUTH_LOCAL_EMAIL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_LOCAL_EMAIL'],
+        message: 'is required when AUTH_MODE=local',
+      });
+    }
+    if (env.AUTH_MODE === 'local' && !env.AUTH_LOCAL_PASSWORD) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_LOCAL_PASSWORD'],
+        message: 'is required when AUTH_MODE=local',
+      });
+    }
+    if (env.AUTH_MODE === 'local' && !env.AUTH_LOCAL_ROLES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_LOCAL_ROLES'],
+        message: 'is required when AUTH_MODE=local',
+      });
+    }
+    // Local static credentials are only a development bridge. PRD refuses them outright; QAS
+    // accepts them only behind an explicit, temporary opt-in. Anything else fails closed.
+    if (env.APP_ENV === 'prd' && env.AUTH_MODE === 'local') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_MODE'],
+        message: '"local" is never allowed in prd',
+      });
+    }
+    if (!env.ALLOW_LOCAL_AUTH_IN_QAS && env.APP_ENV === 'qas' && env.AUTH_MODE === 'local') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AUTH_MODE'],
+        message: '"local" requires ALLOW_LOCAL_AUTH_IN_QAS=true in qas',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.ALLOW_LOCAL_AUTH_IN_QAS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ALLOW_LOCAL_AUTH_IN_QAS'],
+        message: 'must not be set in prd',
+      });
+    }
     // Guard-rails that only apply once we are outside a developer laptop.
     if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
       if (env.NODE_ENV !== 'production') {
@@ -136,15 +205,6 @@ export const apiEnvSchema = baseEnvSchema
           code: z.ZodIssueCode.custom,
           path: ['NODE_ENV'],
           message: 'must be production in qas/prd',
-        });
-      }
-      // Local static credentials are only a development bridge. Until an enterprise
-      // identity source is implemented, QAS/PRD refuse to start instead of falling back.
-      if (env.AUTH_MODE === 'local') {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['AUTH_MODE'],
-          message: '"local" is allowed only when APP_ENV is local/test',
         });
       }
       if (env.JWT_ACCESS_SECRET === LOCAL_JWT_PLACEHOLDER) {
@@ -168,11 +228,22 @@ export const apiEnvSchema = baseEnvSchema
           message: 'must be true in qas/prd',
         });
       }
-      if (env.TRUST_PROXY_HOPS < 1) {
+      // The public trust store does not contain the RDS CAs: without an explicit bundle a
+      // verify-full connection cannot succeed, and nothing may fall back to "require".
+      if (!env.DATABASE_SSL_CA_FILE) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['DATABASE_SSL_CA_FILE'],
+          message: 'must point at the database CA bundle in qas/prd',
+        });
+      }
+      // Exactly one hop. Zero would rate-limit every user as the proxy's address; more than
+      // one would let a client choose its own address by prepending X-Forwarded-For entries.
+      if (env.TRUST_PROXY_HOPS !== 1) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['TRUST_PROXY_HOPS'],
-          message: 'must explicitly trust the load balancer hop in qas/prd',
+          message: 'must be exactly 1 (the load balancer or web BFF hop) in qas/prd',
         });
       }
       if (env.AWS_ENDPOINT_URL) {

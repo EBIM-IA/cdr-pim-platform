@@ -5,6 +5,7 @@ import {
   actorRoleLabel,
   authCookieName,
   authMeResponseSchema,
+  clientAddressFromForwardedFor,
   durationToSeconds,
   hasExpectedOrigin,
   loginFailureMessage,
@@ -39,6 +40,17 @@ describe('auth security helpers', () => {
     expect(hasExpectedOrigin('https://attacker.example', 'https://cdr.example')).toBe(false);
     expect(hasExpectedOrigin(null, 'https://cdr.example')).toBe(false);
     expect(hasExpectedOrigin('not-a-url', 'https://cdr.example')).toBe(false);
+  });
+
+  it('forwards only the address appended by the load balancer', () => {
+    expect(clientAddressFromForwardedFor('203.0.113.7')).toBe('203.0.113.7');
+    // Entries to the left were supplied by the client and are ignored.
+    expect(clientAddressFromForwardedFor('1.2.3.4, 203.0.113.7')).toBe('203.0.113.7');
+    expect(clientAddressFromForwardedFor('2001:db8::1')).toBe('2001:db8::1');
+    expect(clientAddressFromForwardedFor(null)).toBeNull();
+    expect(clientAddressFromForwardedFor('')).toBeNull();
+    expect(clientAddressFromForwardedFor('203.0.113.7, evil\r\nx-injected: 1')).toBeNull();
+    expect(clientAddressFromForwardedFor('1.2.3.4, not-an-ip')).toBeNull();
   });
 
   it('creates a server-only, same-site session cookie and caps its lifetime', () => {

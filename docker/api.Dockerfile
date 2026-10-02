@@ -54,6 +54,10 @@ COPY --from=build --chown=node:node /output/dist ./dist
 # Migrations are shipped inside the image so the migration task runs the exact SQL that
 # matches this build. `migrator.ts` resolves them relative to the working directory.
 COPY --from=build --chown=node:node /repo/apps/api/drizzle ./drizzle
+# AWS RDS CA bundle (public certificates, provenance in apps/api/certs/README.md). Both the
+# API and the migration task verify the database with verify-full against exactly this file.
+COPY --from=build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem ./certs/rds-global-bundle.pem
+ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
 
 EXPOSE 3001
 # Node's own fetch — no curl/wget in the image, and nothing extra to keep patched.

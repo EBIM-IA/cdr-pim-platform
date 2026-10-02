@@ -17,7 +17,8 @@ async function readReturnTo(request: NextRequest): Promise<unknown> {
 }
 
 export async function POST(request: NextRequest) {
-  if (!hasExpectedOrigin(request.headers.get('origin'), request.nextUrl.origin)) {
+  // Compared with the configured public origin, never with the server's own bind address.
+  if (!hasExpectedOrigin(request.headers.get('origin'), env.PUBLIC_APP_ORIGIN)) {
     return securePrivateResponse(
       NextResponse.json({ message: 'Origen de solicitud no permitido.' }, { status: 403 }),
     );
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
   const response = securePrivateResponse(
     acceptsJson
       ? NextResponse.json({ redirectTo })
-      : NextResponse.redirect(new URL(redirectTo, request.url), 303),
+      : NextResponse.redirect(new URL(redirectTo, env.PUBLIC_APP_ORIGIN), 303),
   );
 
   response.cookies.set(authCookieName(env.NODE_ENV === 'production'), '', {

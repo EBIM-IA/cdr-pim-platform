@@ -30,8 +30,9 @@ Abre <http://localhost:3000>. La portada consulta el catálogo mediante la API y
 estado de error explícito si el servicio no está disponible.
 
 El acceso requiere iniciar sesión con `AUTH_LOCAL_EMAIL` y `AUTH_LOCAL_PASSWORD` de tu
-`.env`. La cuenta local es únicamente para desarrollo: la API rechaza `AUTH_MODE=local` en
-QAS/PRD hasta que se conecte la fuente de identidad acordada con CDR.
+`.env`. La cuenta local es un puente temporal: la API rechaza `AUTH_MODE=local` en PRD
+siempre, y en QAS solo la acepta con `ALLOW_LOCAL_AUTH_IN_QAS=true`, hasta que se conecte la
+fuente de identidad acordada con CDR.
 
 La interfaz incluye catálogo y detalle de productos, además de workspaces conectados al backend para
 Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Importaciones, IA y
