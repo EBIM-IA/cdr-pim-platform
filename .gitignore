@@ -21,6 +21,8 @@ coverage/
 .env.*
 !.env.example
 *.pem
+# Public Amazon RDS CA bundle (not a secret) — see apps/api/certs/README.md
+!apps/api/certs/rds-global-bundle.pem
 *.key
 *.p12
 
