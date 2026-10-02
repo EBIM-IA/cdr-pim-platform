@@ -19,7 +19,12 @@ export interface WorkerHealthState {
  * `/health/ready` reports the *polling loop*, not the queue: a worker that cannot reach SQS
  * should keep retrying, not be killed and restarted by the scheduler.
  */
-export function startHealthServer(port: number, state: WorkerHealthState, logger: Logger): Server {
+export function startHealthServer(
+  port: number,
+  state: WorkerHealthState,
+  logger: Logger,
+  host = '127.0.0.1',
+): Server {
   const startedAt = Date.now();
 
   const server = createServer((request, response) => {
@@ -55,8 +60,8 @@ export function startHealthServer(port: number, state: WorkerHealthState, logger
       .end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found' } }));
   });
 
-  server.listen(port, '0.0.0.0', () => {
-    logger.info('Worker health server listening', { port });
+  server.listen(port, host, () => {
+    logger.info('Worker health server listening', { host, port });
   });
 
   return server;

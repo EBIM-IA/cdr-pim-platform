@@ -1,5 +1,5 @@
 import { getContext } from '../primitives/correlation';
-import { redact } from './redact';
+import { redact, sanitizeLogText } from './redact';
 
 export const LogLevel = {
   debug: 'debug',
@@ -75,12 +75,13 @@ export class StructuredLogger implements Logger {
 
     const context = getContext();
     const details = redact({ ...this.bindings, ...meta }) as Record<string, unknown>;
+    const safeMessage = sanitizeLogText(message);
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
       level,
       service: this.options.service,
       environment: this.options.environment,
-      message,
+      message: safeMessage,
       ...(context ? { correlationId: context.correlationId, requestId: context.requestId } : {}),
       ...details,
     };
@@ -88,7 +89,7 @@ export class StructuredLogger implements Logger {
     // Pretty mode prints the child logger's bindings too — dropping them would hide the
     // correlation and job identifiers exactly where a developer is reading the output.
     const line = this.options.pretty
-      ? `${record.timestamp} ${level.toUpperCase().padEnd(5)} [${record.service}] ${message} ${
+      ? `${record.timestamp} ${level.toUpperCase().padEnd(5)} [${record.service}] ${safeMessage} ${
           Object.keys(details).length ? JSON.stringify(details) : ''
         }`.trimEnd()
       : JSON.stringify(record);

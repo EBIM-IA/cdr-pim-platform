@@ -26,7 +26,9 @@ export function createDatabase(options: DatabaseOptions): {
 } {
   const sql = postgres(options.url, {
     max: options.poolMax,
-    ssl: options.ssl ? 'require' : false,
+    // Hosted environments validate both the certificate chain and server hostname. The
+    // configuration schema makes TLS mandatory in QAS/PRD.
+    ssl: options.ssl ? 'verify-full' : false,
     // Fail fast rather than let a request hang until the ALB times it out.
     connect_timeout: 10,
     idle_timeout: 30,

@@ -1,10 +1,9 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - apps/*
+  - packages/*
 
-# pnpm >=10 requires explicit approval for dependency lifecycle scripts.
-# Keep this list minimal and reviewed — it is a supply-chain surface.
 onlyBuiltDependencies:
+  # pnpm >=10 blocks dependency lifecycle scripts unless they are explicitly reviewed.
   - '@swc/core'
   - esbuild
   - sharp
@@ -17,3 +16,11 @@ overrides:
   # exactly 8.4.31; the fix needs >=8.5.18. Scoped to next's own copy, same major, and
   # build-time only (webpack CSS pipeline) — @tailwindcss/postcss already runs on 8.5.x.
   'next>postcss': ^8.5.18
+  # Same-major floors so a lockfile refresh can never fall back to a vulnerable copy.
+  # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p (high, dev-only via @nestjs/cli > minimatch).
+  brace-expansion@<2.0.0: 1.1.21
+  brace-expansion@>=4.0.0 <6.0.0: 5.0.12
+  # GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g (high, dev-only via @nestjs/cli > ajv).
+  fast-uri@>=3.0.0 <4.0.0: 3.1.8
+  # GHSA-r3ph-w7gj-g6xm (moderate). @nestjs/swagger 11.4.x depends on js-yaml ^5.4.0.
+  js-yaml@>=5.0.0 <6.0.0: 5.4.2

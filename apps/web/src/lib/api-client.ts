@@ -4,16 +4,23 @@ import {
   type LivenessResponse,
   type ProductDto,
   type ProductListDto,
+  type ProductStatus,
   type ReadinessResponse,
   type SemanticSearchResponse,
+  type WorkspaceDto,
+  type WorkspaceSlug,
   apiErrorSchema,
   livenessResponseSchema,
   productListSchema,
   productSchema,
   readinessResponseSchema,
   semanticSearchResponseSchema,
+  workspaceSchema,
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
+
+import { env } from '@/lib/env';
+import { upstreamTimeoutSignal } from '@/lib/http-security';
 
 /**
  * The single place the web app talks to the API.
@@ -59,8 +66,16 @@ export class ApiClient {
     return this.get('/health/ready', readinessResponseSchema, [200, 503]);
   }
 
-  listProducts(page = 1, pageSize = 10): Promise<ProductListDto> {
-    return this.get(`/products?page=${page}&pageSize=${pageSize}`, productListSchema);
+  listProducts(
+    page = 1,
+    pageSize = 10,
+    filters: { q?: string; brand?: string; status?: ProductStatus } = {},
+  ): Promise<ProductListDto> {
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (filters.q) query.set('q', filters.q);
+    if (filters.brand) query.set('brand', filters.brand);
+    if (filters.status) query.set('status', filters.status);
+    return this.get(`/products?${query.toString()}`, productListSchema);
   }
 
   getProduct(id: string): Promise<ProductDto> {
@@ -72,6 +87,10 @@ export class ApiClient {
       `/search/semantic?q=${encodeURIComponent(query)}&limit=${limit}`,
       semanticSearchResponseSchema,
     );
+  }
+
+  getWorkspace(slug: WorkspaceSlug): Promise<WorkspaceDto> {
+    return this.get(`/workspaces/${encodeURIComponent(slug)}`, workspaceSchema);
   }
 
   private async get<T extends ZodTypeAny>(
@@ -92,6 +111,7 @@ export class ApiClient {
       ...(this.options.revalidateSeconds === undefined
         ? { cache: 'no-store' as const }
         : { next: { revalidate: this.options.revalidateSeconds } }),
+      signal: upstreamTimeoutSignal(),
     });
 
     const body: unknown = await response.json().catch(() => null);
@@ -125,7 +145,7 @@ export class ApiClient {
 /** Server-side client. Uses the internal base URL, which may not be publicly routable. */
 export function createServerApiClient(options: Partial<ApiClientOptions> = {}): ApiClient {
   return new ApiClient({
-    baseUrl: process.env.API_BASE_URL ?? 'http://localhost:3001',
+    baseUrl: env.API_BASE_URL,
     ...options,
   });
 }

@@ -116,6 +116,23 @@ describe('DrizzleProductRepository', () => {
     expect(first.total).toBe(3);
   });
 
+  it('filters free text using the product description', async () => {
+    await repository.save(
+      Product.create({
+        sku: 'D1672',
+        name: 'Pastilla de freno',
+        description: 'Compuesto cerámico de baja emisión de polvo.',
+        now,
+      }),
+    );
+    await repository.save(Product.create({ sku: '6205-2RS', name: 'Rodamiento', now }));
+
+    const result = await repository.list({ page: 1, pageSize: 10, q: 'cerámico' });
+
+    expect(result.total).toBe(1);
+    expect(result.items.map((product) => product.sku)).toEqual(['D1672']);
+  });
+
   it('returns null for an unknown id', async () => {
     expect(await repository.findById(newUuid())).toBeNull();
   });

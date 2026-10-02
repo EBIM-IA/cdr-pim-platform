@@ -12,6 +12,7 @@
     "test:watch": "vitest --config vitest.config.ts",
     "test:integration": "dotenv -e ../../.env -- vitest run --config vitest.integration.config.ts",
     "db:migrate": "dotenv -e ../../.env -- tsx src/database/migrate.cli.ts",
+    "db:seed:demo": "dotenv -e ../../.env -- tsx src/database/seed-demo.cli.ts",
     "clean": "rm -rf dist .turbo coverage",
     "db:new": "tsx src/database/new-migration.cli.ts"
   },
@@ -28,7 +29,8 @@
     "@nestjs/core": "^11.2.7",
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/platform-express": "^11.2.7",
-    "@nestjs/swagger": "^11.2.0",
+    "@nestjs/swagger": "^11.4.7",
+    "@nestjs/throttler": "^6.7.1",
     "drizzle-orm": "^0.45.3",
     "openai": "^4.104.0",
     "postgres": "^3.4.7",
@@ -40,8 +42,8 @@
   "devDependencies": {
     "@cdr/eslint-config": "workspace:*",
     "@cdr/tsconfig": "workspace:*",
-    "@nestjs/cli": "^11.0.10",
-    "@nestjs/schematics": "^11.0.8",
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.2.7",
     "@swc/core": "^1.13.5",
     "@types/express": "^5.0.3",
@@ -53,6 +55,6 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "unplugin-swc": "^1.5.7",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }
