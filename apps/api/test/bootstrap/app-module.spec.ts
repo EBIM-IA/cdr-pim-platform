@@ -81,6 +81,11 @@ describe('AppModule bootstrap', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleRef.createNestApplication();
+    (
+      app.getHttpAdapter().getInstance() as {
+        set(setting: string, value: number): void;
+      }
+    ).set('trust proxy', 1);
     app.setGlobalPrefix('/api/v1');
     await app.init();
   }, 30_000);
@@ -227,5 +232,30 @@ describe('AppModule bootstrap', () => {
       correlationId: expect.any(String),
       path: '/api/v1/does-not-exist',
     });
+  });
+
+  it('rate-limits repeated login attempts by account and client IP', async () => {
+    const clientIp = '198.51.100.24';
+    const credentials = {
+      email: 'rate-limit-target@example.test',
+      password: 'definitely-wrong',
+    };
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .set('x-forwarded-for', clientIp)
+        .send(credentials)
+        .expect(401);
+    }
+
+    const blocked = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('x-forwarded-for', clientIp)
+      .send(credentials)
+      .expect(429);
+
+    expect(blocked.headers['retry-after']).toBeTypeOf('string');
+    expect(blocked.body.error).toMatchObject({ code: 'TOO_MANY_REQUESTS' });
   });
 });

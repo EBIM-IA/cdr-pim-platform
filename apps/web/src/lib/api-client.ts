@@ -19,6 +19,9 @@ import {
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
 
+import { env } from '@/lib/env';
+import { upstreamTimeoutSignal } from '@/lib/http-security';
+
 /**
  * The single place the web app talks to the API.
  *
@@ -108,6 +111,7 @@ export class ApiClient {
       ...(this.options.revalidateSeconds === undefined
         ? { cache: 'no-store' as const }
         : { next: { revalidate: this.options.revalidateSeconds } }),
+      signal: upstreamTimeoutSignal(),
     });
 
     const body: unknown = await response.json().catch(() => null);
@@ -141,7 +145,7 @@ export class ApiClient {
 /** Server-side client. Uses the internal base URL, which may not be publicly routable. */
 export function createServerApiClient(options: Partial<ApiClientOptions> = {}): ApiClient {
   return new ApiClient({
-    baseUrl: process.env.API_BASE_URL ?? 'http://localhost:3001',
+    baseUrl: env.API_BASE_URL,
     ...options,
   });
 }

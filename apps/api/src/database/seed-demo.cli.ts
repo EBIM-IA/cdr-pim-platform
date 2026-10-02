@@ -1,5 +1,6 @@
 /* eslint-disable no-console -- standalone CLI: stdout is its user interface */
 import { loadApiEnv } from '@cdr/config';
+import { sanitizeLogText } from '@cdr/shared';
 
 import { createDatabase } from './drizzle.client';
 import { assertDemoSeedEnvironment, seedDemoCatalog } from './demo-seed';
@@ -31,6 +32,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('Demo seed failed:', error instanceof Error ? error.message : error);
+  console.error(
+    'Demo seed failed:',
+    error instanceof Error ? sanitizeLogText(error.message) : 'Unknown seed error',
+  );
   process.exitCode = 1;
 });

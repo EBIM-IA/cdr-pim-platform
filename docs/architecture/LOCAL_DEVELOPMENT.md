@@ -16,6 +16,7 @@ corepack enable              # pnpm 10.19.0
 pnpm install
 
 cp .env.example .env         # local placeholders — no real secrets
+chmod 600 .env               # keep local credentials private to your user
 
 docker compose up -d         # PostgreSQL 16 + pgvector
 pnpm db:migrate              # applies drizzle/*.sql

@@ -1,11 +1,11 @@
 # =============================================================================
 # Build immutable images and publish them to Amazon ECR
 # =============================================================================
-# Runs only after code is on `main`. This is the ONLY workflow that produces a deployable
-# artefact. The digest it records is what `promote.yml` later moves between environments —
-# no image is ever rebuilt for a different environment (see DEPLOYMENT_STRATEGY.md).
+# A main-branch commit is built exactly once and tagged with its git commit SHA. A release
+# tag only adds a human-friendly alias to the already-published manifest; it never rebuilds
+# the image. `promote.yml` always resolves the SHA tag to an immutable digest.
 #
-# SETUP REQUIRED before this can run — none of it was invented, so it must be provided:
+# SETUP REQUIRED before this can run:
 #   · repository variable  AWS_ACCOUNT_ID
 #   · repository variable  AWS_REGION
 #   · an IAM role trusting GitHub's OIDC provider, ARN in variable AWS_DEPLOY_ROLE_ARN
@@ -20,54 +20,153 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: publish-${{ github.ref }}
+  # A tag pushed while the main build is running waits for that commit's images.
+  group: publish-${{ github.sha }}
   cancel-in-progress: false
 
+# Jobs get no OIDC permission unless they actually need AWS access.
 permissions:
   contents: read
-  # Required for OIDC: no long-lived AWS access keys are stored in GitHub.
-  id-token: write
 
 jobs:
+  validate-source:
+    name: Validate trusted source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_commit: ${{ steps.source.outputs.source_commit }}
+      release_tag: ${{ steps.source.outputs.release_tag }}
+      is_release: ${{ steps.source.outputs.is_release }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: source
+        name: Verify branch or release tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_VALUE: ${{ github.ref }}
+          TRIGGER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          source_commit=$(git rev-parse "$TRIGGER_SHA^{commit}")
+          if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The workflow source did not resolve to a full git commit SHA."
+            exit 1
+          fi
+
+          is_release=false
+          release_tag=''
+
+          if [[ "$REF_TYPE" == 'tag' ]]; then
+            # Docker-compatible SemVer without build metadata. Besides preventing shell
+            # injection, this excludes ambiguous or mutable release names.
+            semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+            if (( ${#REF_NAME} > 128 )) || [[ ! "$REF_NAME" =~ $semver ]]; then
+              echo "::error::Release tags must use vMAJOR.MINOR.PATCH[-PRERELEASE]."
+              exit 1
+            fi
+
+            # A syntactically valid release tag is still untrusted unless its commit is
+            # reachable from the protected main branch.
+            # fetch-depth: 0 above materializes every remote branch without leaving the
+            # checkout token in git configuration for this shell step.
+            git rev-parse --verify refs/remotes/origin/main >/dev/null
+            if ! git merge-base --is-ancestor "$source_commit" refs/remotes/origin/main; then
+              echo "::error::Release tag $REF_NAME does not point to a commit on main."
+              exit 1
+            fi
+
+            is_release=true
+            release_tag=$REF_NAME
+          elif [[ "$REF_TYPE" != 'branch' || "$REF_VALUE" != 'refs/heads/main' ]]; then
+            echo "::error::Builds may only originate from the main branch."
+            exit 1
+          elif [[ "$EVENT_NAME" != 'push' && "$EVENT_NAME" != 'workflow_dispatch' ]]; then
+            echo "::error::Unsupported workflow event: $EVENT_NAME"
+            exit 1
+          fi
+
+          printf 'source_commit=%s\n' "$source_commit" >> "$GITHUB_OUTPUT"
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+          printf 'is_release=%s\n' "$is_release" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Build and push ${{ matrix.app }}
+    if: needs.validate-source.outputs.is_release != 'true'
+    needs: validate-source
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
         app: [api, worker, web]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate-source.outputs.source_commit }}
+          persist-credentials: false
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: cdr-pim-build-${{ matrix.app }}-${{ github.run_id }}
+
+      - name: Verify the assumed AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo '::error::AWS_ACCOUNT_ID must contain exactly 12 digits.'
+            exit 1
+          fi
+          caller_account=$(aws sts get-caller-identity --query Account --output text)
+          if [[ "$caller_account" != "$EXPECTED_AWS_ACCOUNT_ID" ]]; then
+            echo "::error::OIDC role belongs to AWS account $caller_account, expected $EXPECTED_AWS_ACCOUNT_ID."
+            exit 1
+          fi
 
       - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - id: meta
-        name: Compute image tags
+        name: Compute immutable image tag
+        env:
+          APP: ${{ matrix.app }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SOURCE_COMMIT: ${{ needs.validate-source.outputs.source_commit }}
         run: |
-          REGISTRY="${{ steps.ecr.outputs.registry }}"
-          REPO="$REGISTRY/cdr-pim-${{ matrix.app }}"
-          # The git SHA is the primary, immutable tag. A semver tag is added on releases.
-          TAGS="$REPO:${{ github.sha }}"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS="$TAGS,$REPO:${{ github.ref_name }}"
+          set -euo pipefail
+          if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::Invalid source commit received from validation job.'
+            exit 1
           fi
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+          repo="$REGISTRY/cdr-pim-$APP"
+          printf 'tags=%s:%s\n' "$repo" "$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
+          printf 'repo=%s\n' "$repo" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/${{ matrix.app }}.Dockerfile
@@ -76,13 +175,116 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          provenance: false
+          # Attach verifiable build provenance and an SPDX SBOM alongside each image.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 
       - name: Record the digest
+        env:
+          APP: ${{ matrix.app }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REPOSITORY: ${{ steps.meta.outputs.repo }}
         run: |
-          echo "### ${{ matrix.app }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.meta.outputs.repo }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '### %s\n' "$APP"
+            echo '```'
+            printf '%s@%s\n' "$REPOSITORY" "$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release-alias:
+    name: Tag existing ${{ matrix.app }} image
+    if: needs.validate-source.outputs.is_release == 'true'
+    needs: validate-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: cdr-pim-release-${{ matrix.app }}-${{ github.run_id }}
+
+      - name: Verify the assumed AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo '::error::AWS_ACCOUNT_ID must contain exactly 12 digits.'
+            exit 1
+          fi
+          caller_account=$(aws sts get-caller-identity --query Account --output text)
+          if [[ "$caller_account" != "$EXPECTED_AWS_ACCOUNT_ID" ]]; then
+            echo "::error::OIDC role belongs to AWS account $caller_account, expected $EXPECTED_AWS_ACCOUNT_ID."
+            exit 1
+          fi
+
+      - id: release-ecr
+        name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Add release alias without rebuilding
+        env:
+          APP: ${{ matrix.app }}
+          REGISTRY: ${{ steps.release-ecr.outputs.registry }}
+          RELEASE_TAG: ${{ needs.validate-source.outputs.release_tag }}
+          SOURCE_COMMIT: ${{ needs.validate-source.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          repository="cdr-pim-$APP"
+
+          source_digest=$(aws ecr describe-images \
+            --repository-name "$repository" \
+            --image-ids "imageTag=$SOURCE_COMMIT" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          if [[ ! "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::$repository:$SOURCE_COMMIT is not available as an immutable image."
+            exit 1
+          fi
+
+          existing_digest=$(aws ecr describe-images \
+            --repository-name "$repository" \
+            --image-ids "imageTag=$RELEASE_TAG" \
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+
+          if [[ "$existing_digest" == "$source_digest" ]]; then
+            echo "$repository:$RELEASE_TAG already points to $source_digest"
+          elif [[ -n "$existing_digest" && "$existing_digest" != 'None' ]]; then
+            echo "::error::$repository:$RELEASE_TAG already points to a different digest."
+            exit 1
+          else
+            # An image built with provenance/SBOM is an OCI index. `imagetools create`
+            # copies an existing index as-is, retaining its attestations and digest.
+            docker buildx imagetools create \
+              --tag "$REGISTRY/$repository:$RELEASE_TAG" \
+              "$REGISTRY/$repository@$source_digest"
+
+            published_digest=$(aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageTag=$RELEASE_TAG" \
+              --query 'imageDetails[0].imageDigest' --output text)
+            if [[ "$published_digest" != "$source_digest" ]]; then
+              echo "::error::ECR returned $published_digest, expected $source_digest."
+              exit 1
+            fi
+          fi
+
+          printf 'Tagged `%s:%s` as `%s` (`%s`).\n' \
+            "$repository" "$SOURCE_COMMIT" "$RELEASE_TAG" "$source_digest" \
+            >> "$GITHUB_STEP_SUMMARY"

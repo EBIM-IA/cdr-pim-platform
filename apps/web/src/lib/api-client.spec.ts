@@ -25,6 +25,7 @@ describe('ApiClient', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://api.test/api/v1/health/live');
     expect((init.headers as Record<string, string>)['x-correlation-id']).toBe('corr-1');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('forwards the bearer token only when the server session provides one', async () => {

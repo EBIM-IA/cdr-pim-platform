@@ -1,6 +1,6 @@
 import { loadWorkerEnv } from '@cdr/config';
 import { InMemoryQueueAdapter, type QueueConsumerPort, SqsQueueAdapter } from '@cdr/messaging';
-import { createLogger } from '@cdr/shared';
+import { createLogger, sanitizeLogText } from '@cdr/shared';
 
 import { startHealthServer } from './health-server';
 import { AiEmbeddingHandler } from './handlers/ai-embedding.handler';
@@ -49,6 +49,7 @@ async function bootstrap(): Promise<void> {
       metrics: () => ({ ...consumer.metrics }),
     },
     logger,
+    env.APP_ENV === 'qas' || env.APP_ENV === 'prd' ? '0.0.0.0' : '127.0.0.1',
   );
 
   logger.info('Worker started', {
@@ -86,6 +87,10 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((error: unknown) => {
-  console.error('Fatal error during worker bootstrap:', error);
+  const summary =
+    error instanceof Error
+      ? `${error.name}: ${sanitizeLogText(error.message)}`
+      : 'Unknown bootstrap error';
+  console.error('Fatal error during worker bootstrap:', summary);
   process.exit(1);
 });

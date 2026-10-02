@@ -9,14 +9,18 @@
 | Configuration validated at boot, fail-fast        | ✅ Zod schema; the process exits rather than starting misconfigured             |
 | Secrets redacted from logs                        | ✅ Central redaction in the logger, unit-tested                                 |
 | Structured error responses with no stack traces   | ✅ Single exception filter                                                      |
-| Encryption at rest (RDS, S3) and in transit (TLS) | ✅ In the Terraform                                                             |
-| Private subnets, least-privilege security groups  | ✅ In the Terraform                                                             |
-| Per-task IAM roles                                | ✅ In the Terraform                                                             |
+| Encryption at rest (RDS, S3) and in transit (TLS) | ⏳ Deployment requirement; IaC is outside this repository                       |
+| Private subnets, least-privilege security groups  | ⏳ Deployment requirement; IaC is outside this repository                       |
+| Per-task IAM roles                                | ⏳ Deployment requirement; IaC is outside this repository                       |
 | JWT access tokens + RBAC                          | ✅ Global guards; private by default                                            |
 | Local login for development                       | ✅ Environment-backed, constant-time comparison                                 |
 | Enterprise user source, refresh, revocation       | ❌ Not built — blocked on a CDR decision                                        |
-| Rate limiting                                     | ❌ Not built                                                                    |
-| Dependency vulnerability scanning                 | ✅ `pnpm audit` in CI                                                           |
+| Application rate limiting                         | ✅ Global + login account/IP + actor-based AI/index limits                      |
+| Durable business audit                            | ✅ PostgreSQL append-only table; UPDATE/DELETE/TRUNCATE rejected                |
+| Browser/BFF hardening                             | ✅ Nonce CSP, security headers, no-store responses, upstream timeouts           |
+| Dependency vulnerability scanning                 | ✅ CI gate; current lockfile has no known vulnerabilities                       |
+| GitHub workflow supply-chain controls             | ✅ Actions/images pinned; untrusted inputs validated before OIDC                |
+| Protected `main` branch                           | ⚠️ Repository administration still required                                     |
 
 ## Authentication is enabled and fail-closed
 
@@ -51,7 +55,10 @@ whether an SSO integration is needed. It was not invented.
   configuration schema, which
   reports the _variable name_ and never the value on failure.
 - Access tokens carry the subject, email and current coarse roles. Their lifetime is short
-  (`15m` by default) because no revocation source exists in local mode.
+  (`15m` by default and never more than one hour) because no revocation source exists in
+  local mode.
+- Signing and verification pin `HS256`, issuer and audience; every token has a unique `jti`.
+  Tokens missing those constraints are rejected.
 - Refresh tokens are not issued in this phase.
 - Verification failures return a generic "Invalid or expired token". The library's reason
   ("jwt expired" vs "invalid signature") tells an attacker which half of the credential to
@@ -75,7 +82,8 @@ Every protected HTTP route declares a minimum role; authentication alone is not 
 The metadata is enforced centrally by `RolesGuard`, including class-level defaults with
 method-level overrides. `@Public()` takes precedence so login and health remain reachable
 without an actor; an architecture regression test fixes both the public-route allowlist and
-the role assigned to every current controller operation.
+the role assigned to every current controller operation. A protected route with no role
+metadata is rejected rather than silently authorized.
 
 ## Secrets
 
@@ -101,14 +109,41 @@ The logger redacts, at any nesting depth, keys matching:
 `session`, `cookie`, `pin`, `otp`, `psk`.
 
 This is central rather than left to call sites, because relying on developers to remember
-does not scale. It is unit-tested against the exact variable names this platform uses
+does not scale. Free-form messages, error stacks and nested causes are also scrubbed for
+Bearer/JWT values, credentials embedded in URLs, query-string tokens and common API-key
+formats. It is unit-tested against the exact variable names this platform uses
 (`OPENAI_API_KEY`, `DATABASE_PASSWORD`, `vpn_psk`, `refreshToken`, …).
 
 Error responses carry a `code`, a safe `message`, non-sensitive `details` and a
 `correlationId` — never a stack trace, never a driver message that could disclose schema,
 hostnames or credentials.
 
-## Network
+## Abuse controls
+
+Every API route has both a per-route limit and a cross-route global limit. Login adds two
+independent five-attempt windows: one keyed by normalized account email and one by trusted
+client IP. Semantic search and synchronous indexing have tighter actor-based budgets.
+Blocked requests return `429` and a standard `Retry-After` header; the BFF preserves it.
+
+These in-process counters protect one task. A public multi-task deployment still requires
+an ALB/WAF rule for a shared edge limit. `TRUST_PROXY_HOPS` must name the exact load-balancer
+hop count; QAS/PRD refuse to start when it is zero.
+
+## Business audit
+
+Business mutations write immutable records to `audit_entries` with actor, resource,
+correlation id, source, timestamp and field-level changes. PostgreSQL triggers reject
+`UPDATE`, `DELETE` and `TRUNCATE`; integration tests exercise all three paths. Product
+creation is the first connected mutation. Each future mutation must write through
+`AuditPort` before it is considered complete.
+
+Retention, archival and access to audit reports remain operational decisions for CDR; they
+cannot be inferred safely from the application repository.
+
+## Network deployment requirements
+
+The following are required for QAS/PRD but must be verified in the separate infrastructure
+repository; this application repository is not evidence that they are deployed:
 
 - RDS is in a private data subnet with **no route to the internet**, reachable only on 5432
   from the ECS task security groups.
@@ -120,10 +155,16 @@ hostnames or credentials.
 
 ## Known gaps
 
-1. **No rate limiting.** A brute-force or scraping attempt against the API is unthrottled.
-   `@nestjs/throttler` plus an ALB/WAF rule is the intended answer.
-2. **No WAF.** Worth adding before public exposure.
-3. **The audit trail is logs, not a table.** Queryable in CloudWatch Logs Insights, but not
-   a durable record with a retention policy — deliberately deferred until CDR states the
-   retention and reporting requirement.
-4. **No penetration test.** Should precede go-live.
+1. **Enterprise identity and revocation are pending.** QAS/PRD deliberately fail to start
+   until CDR chooses and configures its identity provider.
+2. **No shared edge limit/WAF is defined here.** The application limit is per running task;
+   the AWS control belongs in the infrastructure repository.
+3. **Audit retention and archival are not defined.** CDR must specify the required period,
+   access model and external/tamper-resistant archive.
+4. **Infrastructure controls are not verifiable from this repository.** RDS/S3 encryption,
+   backups, IAM and network isolation must be reviewed in the IaC repository.
+5. **`main` is not yet protected by a GitHub branch rule or ruleset.** Repository
+   administrators must require pull requests, green CI and approval; application code cannot
+   prevent a privileged direct push. PRD promotion independently fails closed unless its
+   environment requires a reviewer and prevents self-review.
+6. **No penetration test.** It should precede go-live in an authorized environment.

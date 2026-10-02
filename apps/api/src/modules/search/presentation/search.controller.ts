@@ -9,6 +9,7 @@ import {
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { RequireRole } from '../../../shared/http/role.decorator';
+import { RateLimit } from '../../../shared/http/rate-limit';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { Role } from '../../identity/domain/entities/role';
 import { IndexProductUseCase } from '../application/index-product.use-case';
@@ -24,6 +25,7 @@ export class SearchController {
   ) {}
 
   @Get('semantic')
+  @RateLimit('ai')
   @ApiOperation({ summary: 'Nearest-neighbour product search over pgvector embeddings' })
   @ApiOkResponse({ schema: openApiSchema(semanticSearchResponseSchema) })
   async search(
@@ -51,6 +53,7 @@ export class SearchController {
    * request that an ALB can time out.
    */
   @Post('index/:productId')
+  @RateLimit('index')
   @RequireRole(Role.Editor)
   @HttpCode(200)
   @ApiOperation({ summary: 'Index (or re-index) one product embedding synchronously' })

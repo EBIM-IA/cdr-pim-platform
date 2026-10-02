@@ -21,11 +21,24 @@ describe('loadApiEnv', () => {
     expect(env.AI_PROVIDER).toBe('fake');
     expect(env.AI_EMBEDDING_DIMENSIONS).toBe(1536);
     expect(env.AUTH_LOCAL_ROLES).toEqual(['ADMIN']);
+    expect(env.SWAGGER_ENABLED).toBe(false);
   });
 
   it('rejects a short JWT secret', () => {
     expect(() => loadApiEnv({ ...minimal, JWT_ACCESS_SECRET: 'short' })).toThrow(
       EnvironmentValidationError,
+    );
+  });
+
+  it('caps access tokens at one hour', () => {
+    expect(() => loadApiEnv({ ...minimal, JWT_ACCESS_TTL: '61m' })).toThrow(
+      /JWT_ACCESS_TTL.*one hour/s,
+    );
+  });
+
+  it('refuses production mode with local defaults', () => {
+    expect(() => loadApiEnv({ ...minimal, NODE_ENV: 'production' })).toThrow(
+      /APP_ENV.*qas or prd/s,
     );
   });
 
@@ -56,6 +69,17 @@ describe('loadApiEnv', () => {
     }
   });
 
+  it('refuses the documented local JWT placeholder in hosted environments', () => {
+    expect(() =>
+      loadApiEnv({
+        ...minimal,
+        NODE_ENV: 'production',
+        APP_ENV: 'prd',
+        JWT_ACCESS_SECRET: 'local-development-only-access-secret-change-me',
+      }),
+    ).toThrow(/JWT_ACCESS_SECRET.*local-development placeholder/s);
+  });
+
   it('refuses wildcard CORS in prd', () => {
     expect(() =>
       loadApiEnv({
@@ -66,6 +90,27 @@ describe('loadApiEnv', () => {
         CORS_ORIGINS: '*',
       }),
     ).toThrow(/wildcard CORS/);
+  });
+
+  it('reports every hosted-environment security guardrail that is not satisfied', () => {
+    expect(() =>
+      loadApiEnv({
+        ...minimal,
+        NODE_ENV: 'production',
+        APP_ENV: 'prd',
+        QUEUE_DRIVER: 'sqs',
+        SQS_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/cdr-pim-prd-jobs',
+        STORAGE_DRIVER: 'memory',
+        DATABASE_SSL: 'false',
+        TRUST_PROXY_HOPS: '0',
+        SWAGGER_ENABLED: 'true',
+        AWS_ENDPOINT_URL: 'http://localhost:4566',
+        OPENAI_BASE_URL: 'https://proxy.example.test',
+        CORS_ORIGINS: 'http://pim.example.test',
+      }),
+    ).toThrow(
+      /DATABASE_SSL.*TRUST_PROXY_HOPS.*AWS_ENDPOINT_URL.*OPENAI_BASE_URL.*STORAGE_DRIVER.*SWAGGER_ENABLED.*CORS_ORIGINS/s,
+    );
   });
 
   it('requires an OpenAI key only when OpenAI is actually selected', () => {

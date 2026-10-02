@@ -1,5 +1,7 @@
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import type { ApiEnv } from '@cdr/config';
 
 import { DatabaseModule } from './database/database.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -16,9 +18,17 @@ import { SearchModule } from './modules/search/search.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { ConfigModule } from './shared/config/config.module';
 import { AllExceptionsFilter } from './shared/http/all-exceptions.filter';
+import { ApiThrottlerGuard } from './shared/http/api-throttler.guard';
 import { CorrelationIdMiddleware } from './shared/http/correlation-id.middleware';
+import {
+  actorOrIpTracker,
+  globalRateLimitKey,
+  hasRateLimitProfile,
+  loginAccountTracker,
+} from './shared/http/rate-limit';
 import { LoggerModule } from './shared/logging/logger.module';
 import { PlatformModule } from './shared/platform.module';
+import { API_ENV } from './shared/tokens';
 
 /**
  * Composition root of the modular monolith.
@@ -41,6 +51,56 @@ import { PlatformModule } from './shared/platform.module';
   imports: [
     // Cross-cutting infrastructure
     ConfigModule,
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [API_ENV],
+      useFactory: (env: ApiEnv) => ({
+        throttlers: [
+          {
+            name: 'global',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_GLOBAL,
+            getTracker: actorOrIpTracker,
+            generateKey: globalRateLimitKey,
+          },
+          {
+            name: 'default',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_DEFAULT,
+            getTracker: actorOrIpTracker,
+          },
+          {
+            name: 'login-account',
+            ttl: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+            limit: env.RATE_LIMIT_LOGIN,
+            blockDuration: env.RATE_LIMIT_LOGIN_BLOCK_MS,
+            getTracker: loginAccountTracker,
+            skipIf: (context) => !hasRateLimitProfile(context, 'login'),
+          },
+          {
+            name: 'login-ip',
+            ttl: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+            limit: env.RATE_LIMIT_LOGIN,
+            blockDuration: env.RATE_LIMIT_LOGIN_BLOCK_MS,
+            skipIf: (context) => !hasRateLimitProfile(context, 'login'),
+          },
+          {
+            name: 'ai',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_AI,
+            getTracker: actorOrIpTracker,
+            skipIf: (context) => !hasRateLimitProfile(context, 'ai'),
+          },
+          {
+            name: 'index',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_INDEX,
+            getTracker: actorOrIpTracker,
+            skipIf: (context) => !hasRateLimitProfile(context, 'index'),
+          },
+        ],
+      }),
+    }),
     LoggerModule,
     DatabaseModule,
     PlatformModule,
@@ -63,6 +123,7 @@ import { PlatformModule } from './shared/platform.module';
     // Order matters: establish the actor before checking its role.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: ApiThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {

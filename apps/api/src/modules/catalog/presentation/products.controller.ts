@@ -12,9 +12,10 @@ import {
 } from '@cdr/contracts';
 
 import { openApiSchema } from '../../../shared/http/openapi';
+import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { RequireRole } from '../../../shared/http/role.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { Role } from '../../identity/domain/entities/role';
+import { type AuthenticatedActor, Role } from '../../identity/domain/entities/role';
 import { CreateProductUseCase } from '../application/create-product.use-case';
 import { GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
@@ -65,7 +66,8 @@ export class ProductsController {
   @ApiCreatedResponse({ schema: openApiSchema(productSchema) })
   async create(
     @Body(new ZodValidationPipe(createProductSchema)) body: CreateProductInput,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ProductDto> {
-    return toProductDto(await this.createProduct.execute(body));
+    return toProductDto(await this.createProduct.execute(body, actor));
   }
 }

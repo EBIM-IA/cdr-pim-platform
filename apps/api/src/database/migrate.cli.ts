@@ -1,5 +1,6 @@
 /* eslint-disable no-console -- standalone CLI: stdout is its user interface */
 import postgres from 'postgres';
+import { sanitizeLogText } from '@cdr/shared';
 
 import { defaultMigrationsDir, runMigrations } from './migrator';
 
@@ -17,10 +18,27 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  const appEnv = process.env.APP_ENV ?? 'local';
+  const hosted = appEnv === 'qas' || appEnv === 'prd';
+  const databaseSsl = process.env.DATABASE_SSL === 'true';
+  if (process.env.NODE_ENV === 'production' && !hosted) {
+    throw new Error('APP_ENV must be qas or prd when NODE_ENV=production.');
+  }
+  if (hosted && !databaseSsl) {
+    throw new Error('DATABASE_SSL must be true in qas/prd.');
+  }
+  if (
+    process.env.DATABASE_SSL &&
+    process.env.DATABASE_SSL !== 'true' &&
+    process.env.DATABASE_SSL !== 'false'
+  ) {
+    throw new Error('DATABASE_SSL must be either true or false.');
+  }
+
   const directory = process.argv[2] ?? defaultMigrationsDir();
   const sql = postgres(url, {
     max: 1,
-    ssl: process.env.DATABASE_SSL === 'true' ? 'require' : false,
+    ssl: databaseSsl ? 'verify-full' : false,
     // `CREATE EXTENSION IF NOT EXISTS` emits a NOTICE that postgres.js would otherwise
     // dump to the console as if it were a failure.
     onnotice: () => undefined,
@@ -41,6 +59,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('Migration failed:', error instanceof Error ? error.message : error);
+  console.error(
+    'Migration failed:',
+    error instanceof Error ? sanitizeLogText(error.message) : 'Unknown migration error',
+  );
   process.exit(1);
 });

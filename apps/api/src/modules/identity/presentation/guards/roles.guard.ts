@@ -22,7 +22,9 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required) return true;
+    if (!required) {
+      throw new ForbiddenError('Route authorization policy missing');
+    }
 
     const actor = context.switchToHttp().getRequest<{ actor?: AuthenticatedActor }>().actor;
     if (!actor) throw new ForbiddenError('Not authenticated');

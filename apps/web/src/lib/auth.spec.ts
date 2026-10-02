@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   actorInitials,
   actorRoleLabel,
+  authCookieName,
   authMeResponseSchema,
   durationToSeconds,
   hasExpectedOrigin,
@@ -41,6 +42,8 @@ describe('auth security helpers', () => {
   });
 
   it('creates a server-only, same-site session cookie and caps its lifetime', () => {
+    expect(authCookieName(false)).toBe('cdr_pim_session');
+    expect(authCookieName(true)).toBe('__Host-cdr_pim_session');
     expect(durationToSeconds('15m')).toBe(15 * 60);
     expect(durationToSeconds('500ms')).toBe(1);
     expect(sessionCookieOptions('1h', false)).toEqual({
@@ -49,6 +52,7 @@ describe('auth security helpers', () => {
       secure: false,
       path: '/',
       maxAge: 60 * 60,
+      priority: 'high',
     });
     expect(sessionCookieOptions('999999999y', true)).toMatchObject({
       secure: true,

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -41,7 +42,7 @@ describe('migration runner', () => {
 
     try {
       const result = await runMigrations(target);
-      expect(result.applied.length).toBeGreaterThanOrEqual(3);
+      expect(result.applied.length).toBeGreaterThanOrEqual(5);
       expect(result.skipped).toEqual([]);
 
       const tables = await target<{ table_name: string }[]>`
@@ -49,6 +50,7 @@ describe('migration runner', () => {
         WHERE table_schema = 'public' ORDER BY table_name
       `;
       expect(tables.map((row) => row.table_name)).toEqual([
+        'audit_entries',
         'cdr_schema_migrations',
         'equivalence_group_members',
         'equivalence_groups',
@@ -56,6 +58,24 @@ describe('migration runner', () => {
         'product_identifiers',
         'products',
       ]);
+
+      const auditId = randomUUID();
+      await target`
+        INSERT INTO audit_entries (
+          id, resource_type, resource_id, action, actor_id, source,
+          correlation_id, occurred_at, changes
+        ) VALUES (
+          ${auditId}, 'product', 'p-1', 'created', 'user-1', 'api',
+          'correlation-1', now(), ${target.json({ sku: { after: '6202' } })}
+        )
+      `;
+      await expect(
+        target`UPDATE audit_entries SET resource_id = 'tampered' WHERE id = ${auditId}`,
+      ).rejects.toThrow(/append-only/);
+      await expect(target`DELETE FROM audit_entries WHERE id = ${auditId}`).rejects.toThrow(
+        /append-only/,
+      );
+      await expect(target`TRUNCATE TABLE audit_entries`).rejects.toThrow(/append-only/);
 
       // Re-running is a no-op: the deployment pipeline runs this on every release.
       const second = await runMigrations(target);

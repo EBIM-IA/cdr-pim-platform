@@ -3,15 +3,17 @@ import 'server-only';
 import { API_PREFIX } from '@cdr/contracts';
 import { cookies } from 'next/headers';
 
-import { AUTH_COOKIE_NAME, authMeResponseSchema, type AuthActor } from '@/lib/auth';
+import { authCookieName, authMeResponseSchema, type AuthActor } from '@/lib/auth';
+import { env } from '@/lib/env';
+import { upstreamTimeoutSignal } from '@/lib/http-security';
 
 function authApiUrl(path: string): string {
-  const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:3001';
-  return `${baseUrl}${API_PREFIX}${path}`;
+  return `${env.API_BASE_URL}${API_PREFIX}${path}`;
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  return (await cookies()).get(AUTH_COOKIE_NAME)?.value ?? null;
+  const cookieName = authCookieName(env.NODE_ENV === 'production');
+  return (await cookies()).get(cookieName)?.value ?? null;
 }
 
 export async function fetchCurrentActor(accessToken: string): Promise<AuthActor | null> {
@@ -22,6 +24,7 @@ export async function fetchCurrentActor(accessToken: string): Promise<AuthActor 
         authorization: `Bearer ${accessToken}`,
       },
       cache: 'no-store',
+      signal: upstreamTimeoutSignal(),
     });
     if (!response.ok) return null;
 

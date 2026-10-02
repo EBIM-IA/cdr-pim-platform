@@ -12,8 +12,26 @@ export const REDACTED = '[REDACTED]';
 
 const MAX_DEPTH = 6;
 
+/** Scrubs secrets that escaped into free-form driver/vendor error text. */
+export function sanitizeLogText(value: string): string {
+  return value
+    .replace(/([a-z][a-z0-9+.-]*:\/\/[^:/\s]+:)[^@\s/]+@/gi, `$1${REDACTED}@`)
+    .replace(/\bBearer\s+[^\s,;]+/gi, `Bearer ${REDACTED}`)
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, REDACTED)
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, REDACTED)
+    .replace(
+      /([?&](?:access_token|api[-_]?key|authorization|password|secret|session|token)=)[^&\s]+/gi,
+      `$1${REDACTED}`,
+    )
+    .replace(
+      /\b(password|secret|api[-_]?key|access_token)\s*[=:]\s*([^\s,;]+)/gi,
+      `$1=${REDACTED}`,
+    );
+}
+
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return '[MAX_DEPTH]';
+  if (typeof value === 'string') return sanitizeLogText(value);
   if (value === null || typeof value !== 'object') return value;
 
   if (Array.isArray(value)) {
@@ -22,7 +40,12 @@ export function redact(value: unknown, depth = 0): unknown {
 
   if (value instanceof Date) return value.toISOString();
   if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack };
+    return {
+      name: value.name,
+      message: sanitizeLogText(value.message),
+      ...(value.stack ? { stack: sanitizeLogText(value.stack) } : {}),
+      ...('cause' in value ? { cause: redact(value.cause, depth + 1) } : {}),
+    };
   }
 
   const output: Record<string, unknown> = {};

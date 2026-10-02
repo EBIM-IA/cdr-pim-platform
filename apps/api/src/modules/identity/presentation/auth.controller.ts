@@ -12,6 +12,7 @@ import {
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { RateLimit } from '../../../shared/http/rate-limit';
 import { AuthenticateUseCase } from '../application/authenticate.use-case';
 import { type AuthenticatedActor, Role } from '../domain/entities/role';
 import { CurrentActor, Public, RequireRole } from './decorators/auth.decorators';
@@ -23,6 +24,7 @@ export class AuthController {
   constructor(private readonly authenticate: AuthenticateUseCase) {}
 
   @Public()
+  @RateLimit('login')
   @Post('login')
   @HttpCode(200)
   @ApiOperation({ summary: 'Authenticate with the configured local development account' })

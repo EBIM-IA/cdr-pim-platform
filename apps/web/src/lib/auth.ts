@@ -7,7 +7,12 @@ import {
 } from '@cdr/contracts';
 import { z } from 'zod';
 
-export const AUTH_COOKIE_NAME = 'cdr_pim_session';
+export const LOCAL_AUTH_COOKIE_NAME = 'cdr_pim_session';
+export const PRODUCTION_AUTH_COOKIE_NAME = '__Host-cdr_pim_session';
+
+export function authCookieName(production: boolean): string {
+  return production ? PRODUCTION_AUTH_COOKIE_NAME : LOCAL_AUTH_COOKIE_NAME;
+}
 
 export const authActorSchema = authenticatedActorSchema;
 export { authMeResponseSchema, loginResponseSchema };
@@ -76,6 +81,7 @@ export function sessionCookieOptions(expiresIn: string, production: boolean) {
     secure: production,
     path: '/',
     maxAge,
+    priority: 'high' as const,
   };
 }
 

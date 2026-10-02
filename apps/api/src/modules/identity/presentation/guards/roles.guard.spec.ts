@@ -30,8 +30,10 @@ describe('RolesGuard', () => {
     expect(guard.canActivate(contextWith())).toBe(true);
   });
 
-  it('allows a route that declares no role requirement', () => {
-    expect(guardRequiring(undefined).canActivate(contextWith())).toBe(true);
+  it('fails closed when a protected route declares no role requirement', () => {
+    expect(() => guardRequiring(undefined).canActivate(contextWith(editor))).toThrow(
+      /authorization policy missing/,
+    );
   });
 
   it('allows an actor whose role outranks the requirement', () => {

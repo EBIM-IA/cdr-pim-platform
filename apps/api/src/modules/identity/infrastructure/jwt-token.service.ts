@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import type { ApiEnv } from '@cdr/config';
-import { UnauthorizedError } from '@cdr/shared';
+import { UnauthorizedError, newUuid } from '@cdr/shared';
 
 import { API_ENV } from '../../../shared/tokens';
 import { type AuthenticatedActor, assertRole } from '../domain/entities/role';
@@ -39,6 +39,10 @@ export class JwtTokenService implements TokenServicePort {
     const accessToken = await this.jwt.signAsync(claims, {
       secret: this.env.JWT_ACCESS_SECRET,
       expiresIn: accessTtl,
+      algorithm: this.env.JWT_ALGORITHM,
+      issuer: this.env.JWT_ISSUER,
+      audience: this.env.JWT_AUDIENCE,
+      jwtid: newUuid(),
     });
 
     return { accessToken, expiresIn: this.env.JWT_ACCESS_TTL };
@@ -50,14 +54,22 @@ export class JwtTokenService implements TokenServicePort {
 
   private async verify(token: string, secret: string): Promise<AuthenticatedActor> {
     try {
-      const payload = await this.jwt.verifyAsync<Partial<AccessTokenClaims>>(token, { secret });
-      if (!payload.sub || !payload.email) {
+      const payload = await this.jwt.verifyAsync<Partial<AccessTokenClaims> & { jti?: string }>(
+        token,
+        {
+          secret,
+          algorithms: [this.env.JWT_ALGORITHM],
+          issuer: this.env.JWT_ISSUER,
+          audience: this.env.JWT_AUDIENCE,
+        },
+      );
+      if (!payload.sub || !payload.email || !payload.jti || !Array.isArray(payload.roles)) {
         throw new UnauthorizedError('Invalid or expired token');
       }
       return {
         id: payload.sub,
         email: payload.email,
-        roles: (payload.roles ?? []).map((role) => assertRole(role)),
+        roles: payload.roles.map((role) => assertRole(role)),
       };
     } catch (error) {
       // Never surface the library's reason ("jwt expired", "invalid signature"): it tells
