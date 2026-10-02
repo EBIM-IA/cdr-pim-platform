@@ -29,7 +29,7 @@
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/platform-express": "^11.2.7",
     "@nestjs/swagger": "^11.2.0",
-    "drizzle-orm": "^0.44.6",
+    "drizzle-orm": "^0.45.3",
     "openai": "^4.104.0",
     "postgres": "^3.4.7",
     "reflect-metadata": "^0.2.2",
