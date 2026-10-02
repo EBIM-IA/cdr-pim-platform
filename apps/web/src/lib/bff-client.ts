@@ -5,6 +5,13 @@ export class SessionExpiredError extends Error {
   }
 }
 
+export class LogoutError extends Error {
+  constructor() {
+    super('No fue posible cerrar la sesión. Inténtalo nuevamente.');
+    this.name = 'LogoutError';
+  }
+}
+
 interface BrowserLocation {
   readonly pathname: string;
   readonly search: string;
@@ -24,6 +31,22 @@ export function returnPathFromLocation(location: BrowserLocation): string {
 export function expiredSessionLoginPath(returnTo: string): string {
   const query = new URLSearchParams({ returnTo });
   return `/login?${query.toString()}`;
+}
+
+/**
+ * Clears the HttpOnly session through a same-origin fetch. A plain HTML form navigation can
+ * omit the Origin header in some browser configurations, which the CSRF-protected route must
+ * reject. Fetch supplies the browser-controlled origin metadata without exposing the token.
+ */
+export async function logoutSession(fetcher: typeof fetch = fetch): Promise<void> {
+  const response = await fetcher('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ returnTo: '/login' }),
+  });
+
+  if (!response.ok) throw new LogoutError();
 }
 
 /**

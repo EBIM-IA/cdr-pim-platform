@@ -28,6 +28,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import type { AuthActor } from '@/lib/auth';
+import { logoutSession } from '@/lib/bff-client';
 import { cn } from '@/lib/utils';
 
 interface NavigationItem {
@@ -198,6 +199,8 @@ function actorInitials(email: string): string {
 
 export function AppShell({ children, actor }: { children: ReactNode; actor: AuthActor }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const navigationId = useId();
   const menuButton = useRef<HTMLButtonElement>(null);
   const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
@@ -205,6 +208,24 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
   const closeMenu = () => {
     setMenuOpen(false);
     requestAnimationFrame(() => menuButton.current?.focus());
+  };
+
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      await logoutSession();
+      window.location.replace('/login');
+    } catch (error) {
+      setLogoutError(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible cerrar la sesión. Inténtalo nuevamente.',
+      );
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -265,18 +286,22 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
               >
                 {actorInitials(actor.email)}
               </span>
-              <form action="/api/auth/logout" method="post">
-                <input type="hidden" name="returnTo" value="/login" />
-                <Button
-                  type="submit"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Cerrar sesión"
-                  title="Cerrar sesión"
-                >
-                  <LogOut aria-hidden="true" className="size-4" />
-                </Button>
-              </form>
+              {logoutError ? (
+                <span role="alert" className="hidden max-w-48 text-xs text-destructive sm:inline">
+                  {logoutError}
+                </span>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => void handleLogout()}
+                disabled={loggingOut}
+                aria-label={loggingOut ? 'Cerrando sesión' : 'Cerrar sesión'}
+                title={loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+              >
+                <LogOut aria-hidden="true" className="size-4" />
+              </Button>
             </div>
           </header>
 

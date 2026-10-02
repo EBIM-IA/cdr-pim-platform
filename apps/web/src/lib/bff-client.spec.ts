@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  LogoutError,
   SessionExpiredError,
   authenticatedBffFetch,
   expiredSessionLoginPath,
+  logoutSession,
   returnPathFromLocation,
 } from './bff-client';
 
@@ -57,5 +59,24 @@ describe('authenticated BFF client', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     expect(redirect).toHaveBeenCalledWith('/login?returnTo=%2Fproducts%3Fpage%3D2');
+  });
+
+  it('closes the session through a same-origin JSON request', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await expect(logoutSession(fetcher)).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+      }),
+    );
+  });
+
+  it('reports a rejected logout without navigating to an API response', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 403 }));
+    await expect(logoutSession(fetcher)).rejects.toBeInstanceOf(LogoutError);
   });
 });
