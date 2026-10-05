@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../../src/app.module';
 import { EMBEDDING_PROVIDER } from '../../src/modules/ai/domain/ports/embedding-provider.port';
 import { AUDIT_PORT } from '../../src/modules/audit/domain/ports/audit.port';
+import { AxSyncController } from '../../src/modules/ax-integration/presentation/ax-sync.controller';
 import { PRODUCT_REPOSITORY } from '../../src/modules/catalog/domain/ports/product-repository.port';
 import { ProductsController } from '../../src/modules/catalog/presentation/products.controller';
 import { EQUIVALENCE_GROUP_REPOSITORY } from '../../src/modules/equivalences/domain/ports/equivalence-group-repository.port';
@@ -109,6 +110,7 @@ describe('AppModule bootstrap', () => {
     ['SearchController', SearchController],
     ['ImportsController', ImportsController],
     ['WorkspacesController', WorkspacesController],
+    ['AxSyncController', AxSyncController],
   ])('resolves %s with its type-injected dependencies', (_name, controller) => {
     expect(app.get(controller)).toBeInstanceOf(controller);
   });

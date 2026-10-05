@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { JobType, jobEnvelopeSchema } from './job-envelope';
+import { JobType, axBatchReceivedPayloadSchema, jobEnvelopeSchema } from './job-envelope';
 
 const valid = {
   schemaVersion: 1,
@@ -29,5 +29,33 @@ describe('jobEnvelopeSchema', () => {
   it('requires an idempotency key, since SQS delivery is at-least-once', () => {
     const { idempotencyKey: _omitted, ...withoutKey } = valid;
     expect(() => jobEnvelopeSchema.parse(withoutKey)).toThrow();
+  });
+});
+
+describe('axBatchReceivedPayloadSchema', () => {
+  const payload = {
+    idLote: 'AX-20260928-000001',
+    sistemaOrigen: 'SISMETIC_AX',
+    registrosRecibidos: 2,
+    fechaEnvio: '2026-09-28T15:30:00Z',
+    fechaRecepcion: '2026-09-28T15:30:01.000Z',
+    requestHash: `sha256:${'a'.repeat(64)}`,
+  };
+
+  it('accepts batch metadata', () => {
+    expect(axBatchReceivedPayloadSchema.parse(payload)).toEqual(payload);
+    expect(
+      jobEnvelopeSchema.parse({ ...valid, type: JobType.AX_BATCH_RECEIVED, payload }),
+    ).toMatchObject({ type: 'AX_BATCH_RECEIVED' });
+  });
+
+  it('refuses to carry the products themselves', () => {
+    expect(() =>
+      axBatchReceivedPayloadSchema.parse({ ...payload, productos: [{ codigoArticulo: '1' }] }),
+    ).toThrow();
+  });
+
+  it('requires a sha256-prefixed request hash', () => {
+    expect(() => axBatchReceivedPayloadSchema.parse({ ...payload, requestHash: 'abc' })).toThrow();
   });
 });

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { AX_ID_LOTE_MAX_LENGTH } from '../http/ax-integration';
+
 /**
  * The set of asynchronous jobs the platform knows about.
  *
@@ -8,7 +10,13 @@ import { z } from 'zod';
  * See `docs/architecture/INTEGRATION_ARCHITECTURE.md`.
  */
 export const JobType = {
+  /** Reserved for the earlier PULL design (ADR-008). Not used by the PUSH contract v1.1. */
   AX_SYNC: 'AX_SYNC',
+  /**
+   * TEMPORARY QAS MOCK: an AX batch was received and validated by the API. Carries batch
+   * metadata only — never the products — and changes nothing in the database.
+   */
+  AX_BATCH_RECEIVED: 'AX_BATCH_RECEIVED',
   AI_EMBEDDING: 'AI_EMBEDDING',
   DOCUMENT_EXTRACTION: 'DOCUMENT_EXTRACTION',
   IMPORT_BATCH: 'IMPORT_BATCH',
@@ -57,3 +65,21 @@ export const aiEmbeddingPayloadSchema = z.object({
   force: z.boolean().default(false),
 });
 export type AiEmbeddingPayload = z.infer<typeof aiEmbeddingPayloadSchema>;
+
+/**
+ * AX_BATCH_RECEIVED (TEMPORARY QAS MOCK). Metadata of a received batch, deliberately
+ * WITHOUT the products: there is no database claim-check yet, and an SQS message is capped
+ * at 256 KiB. `requestHash` is a technical trace (SHA-256 of the canonical request), NOT
+ * an idempotency guarantee — nothing records it.
+ */
+export const axBatchReceivedPayloadSchema = z
+  .object({
+    idLote: z.string().min(1).max(AX_ID_LOTE_MAX_LENGTH),
+    sistemaOrigen: z.string().nullable(),
+    registrosRecibidos: z.number().int().positive(),
+    fechaEnvio: z.string().datetime({ offset: true }),
+    fechaRecepcion: z.string().datetime(),
+    requestHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  })
+  .strict();
+export type AxBatchReceivedPayload = z.infer<typeof axBatchReceivedPayloadSchema>;

@@ -4,6 +4,7 @@ import { createLogger, sanitizeLogText } from '@cdr/shared';
 
 import { startHealthServer } from './health-server';
 import { AiEmbeddingHandler } from './handlers/ai-embedding.handler';
+import { AxBatchReceivedMockHandler } from './handlers/ax-batch-received-mock.handler';
 import { SkeletonPingHandler } from './handlers/skeleton-ping.handler';
 import { JobConsumer } from './runtime/consumer';
 import { HandlerRegistry } from './runtime/handler-registry';
@@ -30,7 +31,9 @@ async function bootstrap(): Promise<void> {
 
   const registry = new HandlerRegistry()
     .register(new SkeletonPingHandler())
-    .register(new AiEmbeddingHandler());
+    .register(new AiEmbeddingHandler())
+    // TEMPORARY QAS MOCK: logs and acknowledges; touches no database.
+    .register(new AxBatchReceivedMockHandler());
 
   const consumer = new JobConsumer(queue, registry, logger, {
     maxMessages: env.QUEUE_MAX_MESSAGES,

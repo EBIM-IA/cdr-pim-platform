@@ -188,6 +188,80 @@ describe('loadApiEnv', () => {
   });
 });
 
+describe('AX integration (temporary QAS mock)', () => {
+  // Test-only filler of the minimum length; never a real credential.
+  const token = 't'.repeat(64);
+  const qas = { ...hostedQas, ALLOW_LOCAL_AUTH_IN_QAS: 'true' } as NodeJS.ProcessEnv;
+  const prdWithoutLocalAuth = { ...hostedQas, APP_ENV: 'prd' } as NodeJS.ProcessEnv;
+
+  it('is disabled by default, with no credential', () => {
+    const env = loadApiEnv(minimal);
+    expect(env.AX_INTEGRATION_MODE).toBe('disabled');
+    expect(env.AX_INTEGRATION_AUTH_MODE).toBe('disabled');
+    expect(env.AX_INTEGRATION_TOKEN).toBeUndefined();
+    expect(env.RATE_LIMIT_INTEGRATION).toBe(30);
+  });
+
+  it('runs the mock in qas with the static bearer token', () => {
+    const env = loadApiEnv({
+      ...qas,
+      AX_INTEGRATION_MODE: 'mock',
+      AX_INTEGRATION_AUTH_MODE: 'static_bearer',
+      AX_INTEGRATION_TOKEN: token,
+    });
+    expect(env.AX_INTEGRATION_MODE).toBe('mock');
+    expect(env.AX_INTEGRATION_AUTH_MODE).toBe('static_bearer');
+  });
+
+  it('fails closed when the static bearer mode has no token', () => {
+    expect(() =>
+      loadApiEnv({
+        ...qas,
+        AX_INTEGRATION_MODE: 'mock',
+        AX_INTEGRATION_AUTH_MODE: 'static_bearer',
+      }),
+    ).toThrow(/AX_INTEGRATION_TOKEN.*required when AX_INTEGRATION_AUTH_MODE=static_bearer/s);
+  });
+
+  it('refuses the mock without an authentication mode', () => {
+    expect(() => loadApiEnv({ ...qas, AX_INTEGRATION_MODE: 'mock' })).toThrow(
+      /AX_INTEGRATION_AUTH_MODE.*must not be "disabled" when AX_INTEGRATION_MODE=mock/s,
+    );
+  });
+
+  it('rejects a token shorter than 256 bits of base64url', () => {
+    expect(() =>
+      loadApiEnv({
+        ...qas,
+        AX_INTEGRATION_MODE: 'mock',
+        AX_INTEGRATION_AUTH_MODE: 'static_bearer',
+        AX_INTEGRATION_TOKEN: 'short-token',
+      }),
+    ).toThrow(/AX_INTEGRATION_TOKEN/);
+  });
+
+  it('hard-fails prd with the mock, the static bearer mode or the token', () => {
+    expect(() => loadApiEnv({ ...prdWithoutLocalAuth, AX_INTEGRATION_MODE: 'mock' })).toThrow(
+      /AX_INTEGRATION_MODE.*"mock" is never allowed in prd/s,
+    );
+    expect(() =>
+      loadApiEnv({ ...prdWithoutLocalAuth, AX_INTEGRATION_AUTH_MODE: 'static_bearer' }),
+    ).toThrow(/AX_INTEGRATION_AUTH_MODE.*"static_bearer" is never allowed in prd/s);
+    expect(() => loadApiEnv({ ...prdWithoutLocalAuth, AX_INTEGRATION_TOKEN: token })).toThrow(
+      /AX_INTEGRATION_TOKEN.*must not be set in prd/s,
+    );
+  });
+
+  it('never echoes the token in a validation error', () => {
+    try {
+      loadApiEnv({ ...prdWithoutLocalAuth, AX_INTEGRATION_TOKEN: token });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect((error as Error).message).not.toContain(token);
+    }
+  });
+});
+
 describe('boolean environment variables', () => {
   it('treats the string "false" as false, not as a truthy string', () => {
     // Regression guard: z.coerce.boolean() gets this wrong and would enable TLS against a

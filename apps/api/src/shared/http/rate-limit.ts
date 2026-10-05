@@ -7,7 +7,7 @@ import type { Request } from 'express';
 import type { AuthenticatedActor } from '../../modules/identity/domain/entities/role';
 
 export const RATE_LIMIT_PROFILE = Symbol('rate-limit-profile');
-export type RateLimitProfile = 'login' | 'ai' | 'index';
+export type RateLimitProfile = 'login' | 'ai' | 'index' | 'integration';
 
 /** Marks the small set of endpoints that need a stricter limit than the API default. */
 export const RateLimit = (profile: RateLimitProfile): MethodDecorator =>
