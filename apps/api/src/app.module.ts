@@ -6,6 +6,7 @@ import type { ApiEnv } from '@cdr/config';
 import { DatabaseModule } from './database/database.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AxIntegrationModule } from './modules/ax-integration/ax-integration.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { EquivalencesModule } from './modules/equivalences/equivalences.module';
 import { HealthModule } from './modules/health/health.module';
@@ -44,7 +45,8 @@ import { API_ENV } from './shared/tokens';
  * `docs/architecture/MODULE_ARCHITECTURE.md` for the status of each context.
  *
  * Authentication is fail-closed: both guards are global and the small set of public routes
- * must opt out explicitly with `@Public()`. QAS/PRD reject the temporary local credential
+ * must opt out explicitly with `@Public()`. The AX integration route is public only to the
+ * HUMAN guards; it carries its own machine guard (`AxIntegrationRoute`). QAS/PRD reject the temporary local credential
  * adapter at configuration time until the customer's identity provider is implemented.
  */
 @Module({
@@ -98,6 +100,15 @@ import { API_ENV } from './shared/tokens';
             getTracker: actorOrIpTracker,
             skipIf: (context) => !hasRateLimitProfile(context, 'index'),
           },
+          {
+            // System integrations (AX). Its own bucket, keyed by client IP — never shared
+            // with the human login buckets. TEMPORARY QAS OPERATIONAL LIMIT, not P-10.
+            name: 'integration',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_INTEGRATION,
+            getTracker: actorOrIpTracker,
+            skipIf: (context) => !hasRateLimitProfile(context, 'integration'),
+          },
         ],
       }),
     }),
@@ -114,6 +125,7 @@ import { API_ENV } from './shared/tokens';
     SearchModule,
     ImportsModule,
     IntegrationsModule,
+    AxIntegrationModule,
     WorkspacesModule,
   ],
   providers: [

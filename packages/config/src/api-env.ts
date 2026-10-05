@@ -59,6 +59,22 @@ const apiOnlySchema = z.object({
     .pipe(z.array(z.enum(['ADMIN', 'EDITOR', 'VIEWER'])).min(1))
     .optional(),
 
+  /**
+   * Sismetic / Dynamics AX → PIM integration (POST /api/v1/productos/sincronizar).
+   *
+   * disabled (default): the route answers 404, exactly like a route that does not exist.
+   * mock: TEMPORARY, QAS ONLY. The batch is validated and an AX_BATCH_RECEIVED job is
+   *       published; nothing is persisted. PRD refuses it.
+   */
+  AX_INTEGRATION_MODE: z.enum(['disabled', 'mock']).default('disabled'),
+  /**
+   * static_bearer: TEMPORARY, QAS ONLY machine-to-machine credential — one random token
+   * (>= 256 bits) delivered through Secrets Manager, compared in constant time. Never a
+   * human login, never a role. PRD refuses it until P-06 (the real M2M mechanism) is decided.
+   */
+  AX_INTEGRATION_AUTH_MODE: z.enum(['disabled', 'static_bearer']).default('disabled'),
+  AX_INTEGRATION_TOKEN: z.string().min(43).max(512).optional(),
+
   JWT_ACCESS_SECRET: z.string().min(32),
   // `<number><unit>` (ms format). Constrained here so the JWT adapter can rely on the
   // shape instead of hoping the operator typed something the signing library accepts.
@@ -79,6 +95,11 @@ const apiOnlySchema = z.object({
   RATE_LIMIT_LOGIN_BLOCK_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(300_000),
   RATE_LIMIT_AI: z.coerce.number().int().min(1).max(10_000).default(10),
   RATE_LIMIT_INDEX: z.coerce.number().int().min(1).max(10_000).default(5),
+  /**
+   * Requests per RATE_LIMIT_WINDOW_MS per client IP on the AX integration route. A
+   * TEMPORARY QAS OPERATIONAL LIMIT against abuse — not the contractual figure of P-10.
+   */
+  RATE_LIMIT_INTEGRATION: z.coerce.number().int().min(1).max(10_000).default(30),
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
   SQS_JOBS_QUEUE_URL: z.string().optional(),
 
@@ -195,6 +216,43 @@ export const apiEnvSchema = baseEnvSchema
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['ALLOW_LOCAL_AUTH_IN_QAS'],
+        message: 'must not be set in prd',
+      });
+    }
+    // AX integration (temporary QAS mock). A mode without its credential fails closed, and
+    // PRD refuses the mock, the static token and the token itself.
+    if (env.AX_INTEGRATION_AUTH_MODE === 'static_bearer' && !env.AX_INTEGRATION_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_TOKEN'],
+        message: 'is required when AX_INTEGRATION_AUTH_MODE=static_bearer',
+      });
+    }
+    if (env.AX_INTEGRATION_MODE === 'mock' && env.AX_INTEGRATION_AUTH_MODE === 'disabled') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_AUTH_MODE'],
+        message: 'must not be "disabled" when AX_INTEGRATION_MODE=mock',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_MODE === 'mock') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_MODE'],
+        message: '"mock" is never allowed in prd',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_AUTH_MODE === 'static_bearer') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_AUTH_MODE'],
+        message: '"static_bearer" is never allowed in prd',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_TOKEN'],
         message: 'must not be set in prd',
       });
     }

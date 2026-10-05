@@ -1,0 +1,479 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CDR PIM — Integración Sismetic / Dynamics AX (QAS MOCK TEMPORAL)",
+    "version": "1.1.0-qas-mock",
+    "description": "Contrato AX → PIM v1.1, endpoint público TEMPORAL de QAS para certificar el contrato.\n\nMOCK QAS: el lote se valida y se entrega a SQS; un worker lo registra y confirma.\nNO hay persistencia en base de datos, NO hay upsert de productos, NO hay GET de estado\ny NO hay garantía de idempotencia: reenviar el mismo idLote devuelve 202 otra vez.\nestado=RECIBIDO significa \"la API validó el lote y entregó el evento a SQS\", no que\nlos productos se hayan guardado.\n\nLímite técnico del body: 100 KB (límite por defecto del parser JSON de la API). No es\nel límite contractual P-02, aún pendiente.\n\nLa conectividad final de AX será Site-to-Site VPN + ALB interno. Este host público no es\nla ruta de producción. Un servidor AX sin salida a Internet no puede alcanzarlo."
+  },
+  "servers": [
+    {
+      "url": "https://ax-api-cdr-pim-qas.esupplier.net",
+      "description": "QAS — temporal, público"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/v1/productos/sincronizar": {
+      "post": {
+        "operationId": "sincronizarProductos",
+        "summary": "Recibir un lote de productos AX (MOCK QAS: validado y encolado, no persistido)",
+        "parameters": [
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "description": "Opcional (máx. 200 caracteres). Si falta, la API genera uno. Se devuelve en la respuesta.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AxSyncRequest"
+              },
+              "examples": {
+                "loteMinimo": {
+                  "summary": "Lote mínimo (1 producto)",
+                  "value": {
+                    "idLote": "AX-20260928-000001",
+                    "fechaEnvio": "2026-09-28T15:30:00Z",
+                    "sistemaOrigen": "SISMETIC_AX",
+                    "productos": [
+                      {
+                        "codigoArticulo": "000123",
+                        "codigoProveedor": "PRV-001",
+                        "codigoLinea": "RODAMIENTOS",
+                        "tipoAplicacion": "AUTOMOTRIZ",
+                        "marca": "SKF"
+                      }
+                    ]
+                  }
+                },
+                "dosProductos": {
+                  "summary": "Lote de 2 productos con fechaModificacion",
+                  "value": {
+                    "idLote": "AX-20260928-000002",
+                    "fechaEnvio": "2026-09-28T15:30:00Z",
+                    "sistemaOrigen": "SISMETIC_AX",
+                    "productos": [
+                      {
+                        "codigoArticulo": "000123",
+                        "codigoProveedor": "PRV-001",
+                        "codigoLinea": "RODAMIENTOS",
+                        "tipoAplicacion": "AUTOMOTRIZ",
+                        "marca": "SKF",
+                        "codigoUnificador": "UNI-6205",
+                        "fechaModificacion": "2026-09-28T15:00:00Z"
+                      },
+                      {
+                        "codigoArticulo": "000456",
+                        "codigoProveedor": "PRV-002",
+                        "codigoLinea": "SELLOS",
+                        "tipoAplicacion": "INDUSTRIAL",
+                        "marca": "NTN",
+                        "fechaModificacion": "2026-09-28T10:00:00-05:00"
+                      }
+                    ]
+                  }
+                },
+                "ceroIzquierda": {
+                  "summary": "codigoArticulo con ceros a la izquierda (se conserva literal)",
+                  "value": {
+                    "idLote": "AX-20260928-000003",
+                    "fechaEnvio": "2026-09-28T15:30:00Z",
+                    "sistemaOrigen": "SISMETIC_AX",
+                    "productos": [
+                      {
+                        "codigoArticulo": "0000789",
+                        "codigoProveedor": "PRV-001",
+                        "codigoLinea": "RODAMIENTOS",
+                        "tipoAplicacion": "AUTOMOTRIZ",
+                        "marca": "SKF"
+                      }
+                    ]
+                  }
+                },
+                "sinTipoAplicacionNiMarca": {
+                  "summary": "tipoAplicacion y marca ausentes (aceptado temporalmente con warning, P-05)",
+                  "value": {
+                    "idLote": "AX-20260928-000004",
+                    "fechaEnvio": "2026-09-28T15:30:00Z",
+                    "sistemaOrigen": "SISMETIC_AX",
+                    "productos": [
+                      {
+                        "codigoArticulo": "000123",
+                        "codigoProveedor": "PRV-001",
+                        "codigoLinea": "RODAMIENTOS"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Lote validado y entregado a SQS. NO significa que los productos se hayan persistido.",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "X-CDR-QAS-Mock": {
+                "description": "Siempre \"true\" en este endpoint temporal.",
+                "schema": {
+                  "type": "string",
+                  "enum": ["true"]
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": ["no-store"]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AxSyncAcceptedResponse"
+                },
+                "example": {
+                  "idLote": "AX-20260928-000001",
+                  "estado": "RECIBIDO",
+                  "registrosRecibidos": 1,
+                  "fechaRecepcion": "2026-09-28T15:30:01.123Z",
+                  "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON mal formado (BAD_REQUEST) o cuerpo que no cumple el contrato (VALIDATION_FAILED).",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "esquemaInvalido": {
+                    "value": {
+                      "error": {
+                        "code": "VALIDATION_FAILED",
+                        "message": "Invalid body",
+                        "details": {
+                          "issues": [
+                            {
+                              "path": "productos.0.codigoArticulo",
+                              "message": "Expected string, received number"
+                            }
+                          ]
+                        },
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  },
+                  "jsonMalFormado": {
+                    "value": {
+                      "error": {
+                        "code": "BAD_REQUEST",
+                        "message": "Expected ',' or '}' after property value in JSON at position 20",
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer ausente o incorrecto. Un JWT de usuario humano también es rechazado.",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "sinToken": {
+                    "value": {
+                      "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Missing bearer token",
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  },
+                  "tokenIncorrecto": {
+                    "value": {
+                      "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Invalid integration token",
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "El body supera el límite técnico actual (100 KB).",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "demasiadoGrande": {
+                    "value": {
+                      "error": {
+                        "code": "PAYLOAD_TOO_LARGE",
+                        "message": "Request body exceeds the size limit",
+                        "details": {
+                          "limitBytes": 102400
+                        },
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite operativo temporal de QAS superado (30 solicitudes/min por IP). Respetar Retry-After.",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "limite": {
+                    "value": {
+                      "error": {
+                        "code": "TOO_MANY_REQUESTS",
+                        "message": "ThrottlerException: Too Many Requests",
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No se pudo entregar el evento a SQS. El lote NO fue recibido: reintentar.",
+            "headers": {
+              "X-Correlation-Id": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "colaNoDisponible": {
+                    "value": {
+                      "error": {
+                        "code": "DEPENDENCY_UNAVAILABLE",
+                        "message": "Dependency unavailable: sqs:sendMessage",
+                        "details": {
+                          "dependency": "sqs:sendMessage"
+                        },
+                        "correlationId": "6f1c2a54-3b1e-4c47-9d0e-2a7f5b8c9d10",
+                        "timestamp": "2026-09-28T15:30:01.000Z",
+                        "path": "/api/v1/productos/sincronizar"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token estático TEMPORAL de QAS entregado por canal seguro. No es un login de usuario."
+      }
+    },
+    "headers": {
+      "CorrelationId": {
+        "description": "Identificador de correlación de la solicitud.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "AxSyncRequest": {
+        "type": "object",
+        "properties": {
+          "idLote": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "fechaEnvio": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sistemaOrigen": {
+            "type": "string",
+            "nullable": true
+          },
+          "productos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "codigoArticulo": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "codigoProveedor": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "codigoUnificador": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "codigoLinea": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tipoAplicacion": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "marca": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "fechaModificacion": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                }
+              },
+              "required": ["codigoArticulo", "codigoProveedor", "codigoLinea"],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "required": ["idLote", "fechaEnvio", "productos"],
+        "additionalProperties": false
+      },
+      "AxSyncAcceptedResponse": {
+        "type": "object",
+        "properties": {
+          "idLote": {
+            "type": "string"
+          },
+          "estado": {
+            "type": "string",
+            "enum": ["RECIBIDO"]
+          },
+          "registrosRecibidos": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "minimum": 0
+          },
+          "fechaRecepcion": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "correlationId": {
+            "type": "string"
+          }
+        },
+        "required": ["idLote", "estado", "registrosRecibidos", "fechaRecepcion", "correlationId"],
+        "additionalProperties": false
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "correlationId": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message", "correlationId", "timestamp", "path"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false
+      }
+    }
+  }
+}
