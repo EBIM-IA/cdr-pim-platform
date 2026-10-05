@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { type Clock, ConflictError } from '@cdr/shared';
+import { type Clock, ConflictError, getCorrelationId, newUuid } from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
+import { AuditAction, createAuditEntry } from '../../audit/domain/entities/audit-entry';
+import { AUDIT_PORT, type AuditPort } from '../../audit/domain/ports/audit.port';
+import type { AuthenticatedActor } from '../../identity/domain/entities/role';
 import { Product } from '../domain/entities/product';
 import {
   PRODUCT_REPOSITORY,
@@ -20,9 +23,10 @@ export class CreateProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly products: ProductRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
-  async execute(command: CreateProductCommand): Promise<Product> {
+  async execute(command: CreateProductCommand, actor: AuthenticatedActor): Promise<Product> {
     const now = this.clock.now();
     const product = Product.create({
       sku: command.sku,
@@ -39,6 +43,24 @@ export class CreateProductUseCase {
     }
 
     await this.products.save(product);
+    await this.audit.record(
+      createAuditEntry({
+        resourceType: 'product',
+        resourceId: product.id,
+        action: AuditAction.Created,
+        actorId: actor.id,
+        source: 'api',
+        correlationId: getCorrelationId() ?? newUuid(),
+        occurredAt: now,
+        changes: {
+          sku: { after: product.sku },
+          name: { after: product.name },
+          description: { after: product.description },
+          brand: { after: product.brand },
+          status: { after: product.status },
+        },
+      }),
+    );
     return product;
   }
 }

@@ -1,18 +1,15 @@
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ForbiddenError } from '@cdr/shared';
+import { UnauthorizedError } from '@cdr/shared';
 import type { Request } from 'express';
 
+import { PUBLIC_ROUTE } from '../../../../shared/http/public.decorator';
 import { TOKEN_SERVICE, type TokenServicePort } from '../../domain/ports/token-service.port';
-import { PUBLIC_ROUTE } from '../decorators/auth.decorators';
 
 /**
  * Authenticates a request from its `Authorization: Bearer` header and attaches the actor.
  *
- * NOT registered as a global `APP_GUARD` yet — see `docs/architecture/SECURITY_BASELINE.md`.
- * There is no user store or login endpoint in the foundation, so enabling it globally would
- * make every route return 403 with no way to obtain a token. Turning it on is a two-line
- * change in `AppModule` once the identity module has a real user repository.
+ * Registered globally: every controller is private unless explicitly marked `@Public()`.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -31,10 +28,11 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request & { actor?: unknown }>();
     const header = request.header('authorization');
     if (!header?.toLowerCase().startsWith('bearer ')) {
-      throw new ForbiddenError('Missing bearer token');
+      throw new UnauthorizedError('Missing bearer token');
     }
-
-    request.actor = await this.tokens.verifyAccessToken(header.slice(7).trim());
+    const token = header.slice(7).trim();
+    if (!token) throw new UnauthorizedError('Missing bearer token');
+    request.actor = await this.tokens.verifyAccessToken(token);
     return true;
   }
 }

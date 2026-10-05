@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # =============================================================================
 # apps/worker — background job consumer
 # =============================================================================
 #   docker build -f docker/worker.Dockerfile -t cdr-pim-worker .   (context: repo root)
 # =============================================================================
 
-FROM node:24-alpine AS base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -33,7 +33,7 @@ COPY . .
 RUN pnpm --filter @cdr/worker... run build
 RUN pnpm deploy --filter @cdr/worker --prod --legacy /output
 
-FROM node:24-alpine AS runtime
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 ENV NODE_ENV=production
 USER node
 WORKDIR /app

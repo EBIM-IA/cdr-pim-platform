@@ -25,6 +25,27 @@ describe('ApiClient', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://api.test/api/v1/health/live');
     expect((init.headers as Record<string, string>)['x-correlation-id']).toBe('corr-1');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('forwards the bearer token only when the server session provides one', async () => {
+    const fetchMock = mockFetch(200, {
+      items: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const authenticated = new ApiClient({
+      baseUrl: 'http://api.test',
+      correlationId: 'corr-auth',
+      accessToken: 'server-only-token',
+    });
+
+    await authenticated.listProducts();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer server-only-token');
   });
 
   it('turns the API error envelope into a typed error', async () => {
@@ -63,5 +84,56 @@ describe('ApiClient', () => {
     );
 
     await expect(client.readiness()).resolves.toMatchObject({ status: 'down' });
+  });
+
+  it('serializes supported catalog filters', async () => {
+    const fetchMock = mockFetch(200, {
+      items: [],
+      page: 2,
+      pageSize: 25,
+      total: 0,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client.listProducts(2, 25, {
+      q: 'rodamiento',
+      brand: 'FAG',
+      status: 'in_review',
+    });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'http://api.test/api/v1/products?page=2&pageSize=25&q=rodamiento&brand=FAG&status=in_review',
+    );
+  });
+
+  it('gets and validates one operational workspace', async () => {
+    const fetchMock = mockFetch(200, {
+      slug: 'reports',
+      operationalStatus: 'partial',
+      generatedAt: '2026-10-01T18:00:00.000Z',
+      metrics: [{ key: 'total', label: 'Total', value: 12, format: 'integer' }],
+      columns: [{ key: 'status', label: 'Estado', type: 'status' }],
+      rows: [{ id: 'row-1', values: { status: 'Activo' } }],
+      totalRows: 1,
+      notices: [],
+      actions: [
+        {
+          id: 'read',
+          label: 'Consultar reportes',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: '/api/v1/workspaces/reports',
+        },
+      ],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(client.getWorkspace('reports')).resolves.toMatchObject({
+      slug: 'reports',
+      totalRows: 1,
+    });
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/api/v1/workspaces/reports');
   });
 });

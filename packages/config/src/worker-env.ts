@@ -31,7 +31,7 @@ const workerOnlySchema = z.object({
 
   STORAGE_DRIVER: storageDriverSchema.default('memory'),
   S3_BUCKET_ASSETS: z.string().optional(),
-  S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().positive().max(3_600).default(900),
 });
 
 export const workerEnvSchema = baseEnvSchema
@@ -39,6 +39,13 @@ export const workerEnvSchema = baseEnvSchema
   .merge(aiEnvSchema)
   .merge(workerOnlySchema)
   .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && env.APP_ENV !== 'qas' && env.APP_ENV !== 'prd') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['APP_ENV'],
+        message: 'must be qas or prd when NODE_ENV=production',
+      });
+    }
     if (env.QUEUE_DRIVER === 'sqs' && !env.SQS_JOBS_QUEUE_URL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -46,12 +53,56 @@ export const workerEnvSchema = baseEnvSchema
         message: 'is required when QUEUE_DRIVER=sqs',
       });
     }
-    if ((env.APP_ENV === 'qas' || env.APP_ENV === 'prd') && env.QUEUE_DRIVER !== 'sqs') {
+    if (env.STORAGE_DRIVER === 's3' && !env.S3_BUCKET_ASSETS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['QUEUE_DRIVER'],
-        message: 'must be "sqs" in qas/prd',
+        path: ['S3_BUCKET_ASSETS'],
+        message: 'is required when STORAGE_DRIVER=s3',
       });
+    }
+    if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OPENAI_API_KEY'],
+        message: 'is required when AI_PROVIDER=openai',
+      });
+    }
+    if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
+      if (env.NODE_ENV !== 'production') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['NODE_ENV'],
+          message: 'must be production in qas/prd',
+        });
+      }
+      if (env.QUEUE_DRIVER !== 'sqs') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['QUEUE_DRIVER'],
+          message: 'must be "sqs" in qas/prd',
+        });
+      }
+      if (env.STORAGE_DRIVER !== 's3') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['STORAGE_DRIVER'],
+          message: 'must be "s3" in qas/prd',
+        });
+      }
+      if (env.AWS_ENDPOINT_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AWS_ENDPOINT_URL'],
+          message: 'must be unset in qas/prd',
+        });
+      }
+      if (env.OPENAI_BASE_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['OPENAI_BASE_URL'],
+          message: 'must be unset in qas/prd',
+        });
+      }
     }
   });
 

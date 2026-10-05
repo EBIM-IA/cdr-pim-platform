@@ -2,7 +2,9 @@ import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 
+import { RequireRole } from '../../../shared/http/role.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
+import { Role } from '../../identity/domain/entities/role';
 import { EnqueueProductEmbeddingUseCase } from '../application/enqueue-product-embedding.use-case';
 import { EnqueueSkeletonPingUseCase } from '../application/enqueue-skeleton-ping.use-case';
 
@@ -12,6 +14,7 @@ const skeletonPingBodySchema = z.object({
 
 @ApiTags('imports')
 @Controller('imports')
+@RequireRole(Role.Editor)
 export class ImportsController {
   constructor(
     private readonly enqueueSkeletonPing: EnqueueSkeletonPingUseCase,
@@ -19,6 +22,7 @@ export class ImportsController {
   ) {}
 
   @Post('skeleton-ping')
+  @RequireRole(Role.Admin)
   @HttpCode(202)
   @ApiOperation({
     summary: 'Walking-skeleton probe: publishes a SKELETON_PING job for the worker',

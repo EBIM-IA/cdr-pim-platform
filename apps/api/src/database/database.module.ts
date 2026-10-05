@@ -23,6 +23,7 @@ const connectionProvider = {
       url: env.DATABASE_URL,
       poolMax: env.DATABASE_POOL_MAX,
       ssl: env.DATABASE_SSL,
+      sslCaFile: env.DATABASE_SSL_CA_FILE,
     }),
 };
 

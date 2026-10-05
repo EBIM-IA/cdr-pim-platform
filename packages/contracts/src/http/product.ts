@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { paginatedSchema, uuidSchema } from './common';
+import { paginatedSchema, paginationQuerySchema, uuidSchema } from './common';
 
 /**
  * Lifecycle of a product record inside the PIM. Deliberately about *information*
@@ -40,6 +40,13 @@ export type ProductDto = z.infer<typeof productSchema>;
 
 export const productListSchema = paginatedSchema(productSchema);
 export type ProductListDto = z.infer<typeof productListSchema>;
+
+export const productListQuerySchema = paginationQuerySchema.extend({
+  q: z.string().trim().min(1).max(300).optional(),
+  brand: z.string().trim().min(1).max(120).optional(),
+  status: productStatusSchema.optional(),
+});
+export type ProductListQuery = z.infer<typeof productListQuerySchema>;
 
 export const createProductSchema = z.object({
   sku: z.string().min(1).max(64),

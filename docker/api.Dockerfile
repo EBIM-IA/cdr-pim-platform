@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # =============================================================================
 # apps/api — NestJS
 # =============================================================================
@@ -10,7 +10,7 @@
 # image work without the rest of the repository.
 # =============================================================================
 
-FROM node:24-alpine AS base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -43,7 +43,7 @@ RUN pnpm --filter @cdr/api... run build
 RUN pnpm deploy --filter @cdr/api --prod --legacy /output
 
 # ---- runtime ---------------------------------------------------------------
-FROM node:24-alpine AS runtime
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 ENV NODE_ENV=production
 # Alpine ships `node` as uid 1000; run unprivileged.
 USER node
@@ -54,6 +54,10 @@ COPY --from=build --chown=node:node /output/dist ./dist
 # Migrations are shipped inside the image so the migration task runs the exact SQL that
 # matches this build. `migrator.ts` resolves them relative to the working directory.
 COPY --from=build --chown=node:node /repo/apps/api/drizzle ./drizzle
+# AWS RDS CA bundle (public certificates, provenance in apps/api/certs/README.md). Both the
+# API and the migration task verify the database with verify-full against exactly this file.
+COPY --from=build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem ./certs/rds-global-bundle.pem
+ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
 
 EXPOSE 3001
 # Node's own fetch — no curl/wget in the image, and nothing extra to keep patched.
