@@ -24,7 +24,8 @@ RUN corepack enable
 WORKDIR /repo
 
 FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
+COPY scripts/verify-node-version.mjs scripts/verify-node-version.mjs
 COPY packages/config/package.json          packages/config/
 COPY packages/contracts/package.json       packages/contracts/
 COPY packages/eslint-config/package.json   packages/eslint-config/
@@ -56,8 +57,8 @@ USER node
 WORKDIR /app
 
 # `output: 'standalone'` produces a minimal server plus only the node_modules it traced.
-COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
-COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /repo/apps/web/.next-build/standalone ./
+COPY --from=build --chown=node:node /repo/apps/web/.next-build/static ./apps/web/.next-build/static
 COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
 
 EXPOSE 3000

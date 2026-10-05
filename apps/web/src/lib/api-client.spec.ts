@@ -136,4 +136,57 @@ describe('ApiClient', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://api.test/api/v1/workspaces/reports');
   });
+
+  it('serializes repeated dynamic attribute filters without losing values', async () => {
+    const fetchMock = mockFetch(200, {
+      items: [],
+      page: 3,
+      pageSize: 25,
+      total: 0,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client.listCatalogGrid({
+      categoryId: '11111111-1111-4111-8111-111111111111',
+      page: 3,
+      pageSize: 25,
+      q: '6202',
+      filter: ['material:contains:acero', 'diametro:eq:20'],
+    });
+
+    const [rawUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const url = new URL(rawUrl);
+    expect(url.pathname).toBe('/api/v1/catalog/grid');
+    expect(url.searchParams.get('categoryId')).toBe('11111111-1111-4111-8111-111111111111');
+    expect(url.searchParams.getAll('filter')).toEqual([
+      'material:contains:acero',
+      'diametro:eq:20',
+    ]);
+  });
+
+  it('sends an optimistic version when updating a dynamic attribute', async () => {
+    const fetchMock = mockFetch(200, {
+      productId: '11111111-1111-4111-8111-111111111111',
+      attributeKey: 'material',
+      value: 'Acero templado',
+      version: 5,
+      source: 'manual',
+      updatedAt: '2026-10-05T10:00:00.000Z',
+      replicatedProductIds: [],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client.updateProductAttribute('11111111-1111-4111-8111-111111111111', 'material', {
+      value: 'Acero templado',
+      expectedVersion: 4,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'http://api.test/api/v1/catalog/products/11111111-1111-4111-8111-111111111111/attributes/material',
+    );
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBe(JSON.stringify({ value: 'Acero templado', expectedVersion: 4 }));
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+  });
 });

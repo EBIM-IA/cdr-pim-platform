@@ -74,6 +74,12 @@ describe('loadApiEnv', () => {
     );
   });
 
+  it('accepts the business roles while legacy local roles are migrated', () => {
+    expect(
+      loadApiEnv({ ...minimal, AUTH_LOCAL_ROLES: 'ADMINISTRADOR,COMPRAS,VENTAS' }).AUTH_LOCAL_ROLES,
+    ).toEqual(['ADMINISTRADOR', 'COMPRAS', 'VENTAS']);
+  });
+
   describe('local authentication by environment', () => {
     it.each(['local', 'test'])('allows local authentication in %s', (APP_ENV) => {
       expect(loadApiEnv({ ...minimal, APP_ENV }).AUTH_MODE).toBe('local');
@@ -98,6 +104,9 @@ describe('loadApiEnv', () => {
       expect(() => loadApiEnv({ ...hostedQas, APP_ENV: 'prd' })).toThrow(
         /AUTH_MODE.*never allowed in prd/s,
       );
+    });
+
+    it('reports both production violations when the qas opt-in leaks into prd', () => {
       expect(() =>
         loadApiEnv({ ...hostedQas, APP_ENV: 'prd', ALLOW_LOCAL_AUTH_IN_QAS: 'true' }),
       ).toThrow(/AUTH_MODE.*never allowed in prd.*ALLOW_LOCAL_AUTH_IN_QAS.*must not be set/s);

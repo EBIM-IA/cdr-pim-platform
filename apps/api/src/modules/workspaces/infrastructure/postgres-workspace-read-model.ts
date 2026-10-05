@@ -13,7 +13,7 @@ import type {
 
 import type { Sql } from '../../../database/drizzle.client';
 import { API_ENV, DATABASE_SQL } from '../../../shared/tokens';
-import type { AuthenticatedActor } from '../../identity/domain/entities/role';
+import { type AuthenticatedActor, capabilitiesForActor } from '../../identity/domain/entities/role';
 import type { WorkspaceReadModelPort } from '../domain/ports/workspace-read-model.port';
 
 interface WorkspaceParts {
@@ -858,21 +858,30 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
 
   private readAdministration(actor: AuthenticatedActor): WorkspaceDto {
     const roles = [...new Set(actor.roles)];
+    const capabilities = capabilitiesForActor(actor);
     return this.response('administration', {
       operationalStatus: 'partial',
       metrics: [
         textMetric('actor', 'Usuario autenticado', actor.email),
         integerMetric('roles', 'Roles efectivos', roles.length),
+        integerMetric('capabilities', 'Capacidades efectivas', capabilities.length),
         textMetric('auth-mode', 'Modo de autenticación', this.env.AUTH_MODE),
       ],
       columns: [
-        { key: 'role', label: 'Rol efectivo', type: 'status' },
+        { key: 'kind', label: 'Tipo', type: 'status' },
+        { key: 'grant', label: 'Asignación efectiva', type: 'text' },
         { key: 'actor', label: 'Actor', type: 'text' },
       ],
-      rows: roles.map((role) => ({
-        id: role,
-        values: { role, actor: actor.email },
-      })),
+      rows: [
+        ...roles.map((role) => ({
+          id: `role:${role}`,
+          values: { kind: 'Rol', grant: role, actor: actor.email },
+        })),
+        ...capabilities.map((capability) => ({
+          id: `capability:${capability}`,
+          values: { kind: 'Capacidad', grant: capability, actor: actor.email },
+        })),
+      ],
       notices: [
         warning(
           'local-auth',

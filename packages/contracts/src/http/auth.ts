@@ -1,13 +1,64 @@
 import { z } from 'zod';
 
-/** Roles currently understood by both the API and the web application. */
-export const authRoleSchema = z.enum(['ADMIN', 'EDITOR', 'VIEWER']);
+/**
+ * Business roles agreed with Casa del Rulimán.
+ *
+ * The three legacy values remain accepted while existing local environments and already
+ * issued development tokens are migrated. They map to the equivalent business role in
+ * the API's capability policy and must not be used for new identity-provider mappings.
+ */
+export const authRoleSchema = z.enum([
+  'ADMINISTRADOR',
+  'COMPRAS',
+  'VENTAS',
+  'ADMIN',
+  'EDITOR',
+  'VIEWER',
+]);
 export type AuthRole = z.infer<typeof authRoleSchema>;
+
+/** Stable capabilities used by both route guards and menu visibility. */
+export const authCapabilitySchema = z.enum([
+  'identity:self:read',
+  'menu:home:view',
+  'menu:products:view',
+  'menu:categories:view',
+  'menu:templates:view',
+  'menu:applications:view',
+  'menu:equivalences:view',
+  'menu:documents:view',
+  'menu:imports:view',
+  'menu:ai-quality:view',
+  'menu:publication:view',
+  'menu:integrations:view',
+  'menu:reports:view',
+  'menu:administration:view',
+  'catalog:read',
+  'catalog:write',
+  'attributes:read',
+  'attributes:write',
+  'attributes:sensitive:read',
+  'applications:read',
+  'applications:write',
+  'equivalences:read',
+  'equivalences:write',
+  'imports:execute',
+  'ai-quality:execute',
+  'publication:execute',
+  'integrations:manage',
+  'reports:read',
+  'audit:read',
+  'administration:manage',
+  'operations:manage',
+]);
+export type AuthCapability = z.infer<typeof authCapabilitySchema>;
 
 export const authenticatedActorSchema = z.object({
   id: z.string().min(1).max(120),
   email: z.string().email(),
   roles: z.array(authRoleSchema).min(1),
+  /** Derived server-side from roles; clients use it to hide inaccessible UI actions. */
+  capabilities: z.array(authCapabilitySchema).default([]),
 });
 export type AuthenticatedActorDto = z.infer<typeof authenticatedActorSchema>;
 

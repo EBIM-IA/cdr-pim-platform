@@ -2,7 +2,7 @@ import type { WorkspaceDto } from '@cdr/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GetWorkspaceUseCase } from '../application/get-workspace.use-case';
-import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
+import { Capability, Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import { WorkspacesController } from './workspaces.controller';
 
 const actor: AuthenticatedActor = {
@@ -12,8 +12,10 @@ const actor: AuthenticatedActor = {
 };
 
 describe('WorkspacesController', () => {
-  it('requires VIEWER or a higher role through the global role guard protocol', () => {
-    expect(Reflect.getMetadata('cdr:required-role', WorkspacesController)).toBe(Role.Viewer);
+  it('requires catalog read access through the global capability guard protocol', () => {
+    expect(Reflect.getMetadata('cdr:required-capabilities', WorkspacesController)).toEqual([
+      Capability.CatalogRead,
+    ]);
   });
 
   it('returns a contract-valid projection from the use case', async () => {

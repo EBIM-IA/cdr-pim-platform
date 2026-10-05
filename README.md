@@ -26,6 +26,10 @@ pnpm db:seed:demo        # opcional: 7 registros locales respaldados por la fuen
 pnpm dev                 # web :3000 · api :3001 · worker :3002
 ```
 
+El repositorio declara la misma versión de Node en `.nvmrc` y `.node-version`. Además,
+`engine-strict` y el `preinstall` detienen la instalación inmediatamente si el shell está usando
+Node 18 u otra versión anterior a la indicada en `engines.node`.
+
 Abre <http://localhost:3000>. La portada consulta el catálogo mediante la API y presenta un
 estado de error explícito si el servicio no está disponible.
 
@@ -111,6 +115,10 @@ pnpm db:seed:demo       # seed local/test idempotente; no sobrescribe datos exis
 ```
 
 Para un solo workspace: `pnpm --filter @cdr/api <script>`.
+
+El web separa los artefactos de Next.js por modo: `next dev` escribe en `.next-dev` y
+`next build`/`next start` usan `.next-build`. Por ello es seguro compilar mientras el servidor de
+desarrollo está activo; ambos procesos dejan de compartir manifiestos y cachés.
 
 ---
 

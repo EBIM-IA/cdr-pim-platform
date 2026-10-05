@@ -6,6 +6,9 @@ node_modules/
 dist/
 build/
 .next/
+.next-dev/
+.next-build/
+apps/web/next-env.d.ts
 out/
 *.tsbuildinfo
 

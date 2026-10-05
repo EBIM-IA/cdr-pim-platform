@@ -3,9 +3,9 @@ import type { AuditEntry } from '../entities/audit-entry';
 /**
  * Outbound port for the audit trail.
  *
- * Write-only by design at this stage: nothing in the application reads the trail back, so
- * there is no query method to get wrong. A `find` method arrives with the first screen that
- * actually needs it.
+ * `record` atomically persists the event and all field-level rows. Business mutations must
+ * use the database unit-of-work described in `docs/architecture/AUDIT_UNIT_OF_WORK.md` so
+ * the domain write and this append happen in the same transaction.
  */
 export interface AuditPort {
   record(entry: AuditEntry): Promise<void>;

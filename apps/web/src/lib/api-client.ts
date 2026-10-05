@@ -1,20 +1,32 @@
 import {
   API_PREFIX,
   type ApiError,
+  type CatalogGridQuery,
+  type CatalogGridResultDto,
+  type CatalogGridSchemaDto,
+  type CatalogCategorySummaryDto,
   type LivenessResponse,
   type ProductDto,
   type ProductListDto,
   type ProductStatus,
   type ReadinessResponse,
   type SemanticSearchResponse,
+  type ProductAttributeSheetDto,
+  type UpdateProductAttributeInput,
+  type UpdatedProductAttributeDto,
   type WorkspaceDto,
   type WorkspaceSlug,
   apiErrorSchema,
+  catalogCategoryListSchema,
+  catalogGridResultSchema,
+  catalogGridSchemaSchema,
   livenessResponseSchema,
   productListSchema,
+  productAttributeSheetSchema,
   productSchema,
   readinessResponseSchema,
   semanticSearchResponseSchema,
+  updatedProductAttributeSchema,
   workspaceSchema,
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
@@ -82,6 +94,45 @@ export class ApiClient {
     return this.get(`/products/${encodeURIComponent(id)}`, productSchema);
   }
 
+  listCatalogCategories(): Promise<CatalogCategorySummaryDto[]> {
+    return this.get('/catalog/categories', catalogCategoryListSchema);
+  }
+
+  getCatalogGridSchema(categoryId: string): Promise<CatalogGridSchemaDto> {
+    const query = new URLSearchParams({ categoryId });
+    return this.get(`/catalog/schema?${query.toString()}`, catalogGridSchemaSchema);
+  }
+
+  listCatalogGrid(query: CatalogGridQuery): Promise<CatalogGridResultDto> {
+    const params = new URLSearchParams({
+      categoryId: query.categoryId,
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    });
+    if (query.q) params.set('q', query.q);
+    for (const filter of query.filter) params.append('filter', filter);
+    return this.get(`/catalog/grid?${params.toString()}`, catalogGridResultSchema);
+  }
+
+  getProductAttributeSheet(productId: string): Promise<ProductAttributeSheetDto> {
+    return this.get(
+      `/catalog/products/${encodeURIComponent(productId)}`,
+      productAttributeSheetSchema,
+    );
+  }
+
+  updateProductAttribute(
+    productId: string,
+    attributeKey: string,
+    input: UpdateProductAttributeInput,
+  ): Promise<UpdatedProductAttributeDto> {
+    return this.request(
+      `/catalog/products/${encodeURIComponent(productId)}/attributes/${encodeURIComponent(attributeKey)}`,
+      updatedProductAttributeSchema,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
   semanticSearch(query: string, limit = 10): Promise<SemanticSearchResponse> {
     return this.get(
       `/search/semantic?q=${encodeURIComponent(query)}&limit=${limit}`,
@@ -98,12 +149,23 @@ export class ApiClient {
     schema: T,
     acceptedStatuses: number[] = [200],
   ): Promise<z.infer<T>> {
+    return this.request(path, schema, { method: 'GET' }, acceptedStatuses);
+  }
+
+  private async request<T extends ZodTypeAny>(
+    path: string,
+    schema: T,
+    init: Pick<RequestInit, 'method' | 'body'>,
+    acceptedStatuses: number[] = [200],
+  ): Promise<z.infer<T>> {
     const correlationId = this.options.correlationId ?? crypto.randomUUID();
 
     const response = await fetch(`${this.options.baseUrl}${API_PREFIX}${path}`, {
+      ...init,
       headers: {
         accept: 'application/json',
         'x-correlation-id': correlationId,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(this.options.accessToken
           ? { authorization: `Bearer ${this.options.accessToken}` }
           : {}),

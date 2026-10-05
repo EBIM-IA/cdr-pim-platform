@@ -11,6 +11,7 @@
 | [INTEGRATION_ARCHITECTURE.md](./INTEGRATION_ARCHITECTURE.md) | AX, PrestaShop, orders — and what CDR still has to provide      |
 | [AI_ARCHITECTURE.md](./AI_ARCHITECTURE.md)                   | Embeddings, re-embedding, model versioning, cost control        |
 | [SECURITY_BASELINE.md](./SECURITY_BASELINE.md)               | Authentication, secrets, IAM, encryption, what is not done yet  |
+| [AUDIT_UNIT_OF_WORK.md](./AUDIT_UNIT_OF_WORK.md)             | Atomic business writes and immutable field-level audit          |
 | [OBSERVABILITY.md](./OBSERVABILITY.md)                       | Logging, health probes, metrics and the alarms that matter      |
 | [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md)               | Getting a working environment and the day-to-day loop           |
 | [DEPLOYMENT_STRATEGY.md](./DEPLOYMENT_STRATEGY.md)           | Branching, build-once-promote, migrations, rollback             |

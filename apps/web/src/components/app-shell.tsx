@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import type { AuthCapability } from '@cdr/contracts';
 import {
   BarChart3,
   Boxes,
@@ -35,32 +36,85 @@ interface NavigationItem {
   label: string;
   href?: string;
   icon: LucideIcon;
+  capability: AuthCapability;
 }
 
 const navigation: NavigationItem[] = [
-  { label: 'Inicio', href: '/', icon: Home },
-  { label: 'Productos', href: '/products', icon: PackageSearch },
-  { label: 'Categorías', href: '/categories', icon: FolderTree },
-  { label: 'Plantillas', href: '/templates', icon: Boxes },
-  { label: 'Aplicaciones', href: '/applications', icon: PackageCheck },
-  { label: 'Equivalencias', href: '/equivalences', icon: Link2 },
-  { label: 'Documentos', href: '/documents', icon: FileText },
-  { label: 'Importaciones', href: '/imports', icon: FileUp },
-  { label: 'IA y Calidad', href: '/quality', icon: Sparkles },
-  { label: 'Publicación', href: '/publication', icon: Gauge },
-  { label: 'Integraciones', href: '/integrations', icon: ShieldCheck },
-  { label: 'Reportes', href: '/reports', icon: BarChart3 },
-  { label: 'Administración', href: '/administration', icon: Users },
+  { label: 'Inicio', href: '/', icon: Home, capability: 'menu:home:view' },
+  {
+    label: 'Productos',
+    href: '/products',
+    icon: PackageSearch,
+    capability: 'menu:products:view',
+  },
+  {
+    label: 'Categorías',
+    href: '/categories',
+    icon: FolderTree,
+    capability: 'menu:categories:view',
+  },
+  { label: 'Plantillas', href: '/templates', icon: Boxes, capability: 'menu:templates:view' },
+  {
+    label: 'Aplicaciones',
+    href: '/applications',
+    icon: PackageCheck,
+    capability: 'menu:applications:view',
+  },
+  {
+    label: 'Equivalencias',
+    href: '/equivalences',
+    icon: Link2,
+    capability: 'menu:equivalences:view',
+  },
+  {
+    label: 'Documentos',
+    href: '/documents',
+    icon: FileText,
+    capability: 'menu:documents:view',
+  },
+  {
+    label: 'Importaciones',
+    href: '/imports',
+    icon: FileUp,
+    capability: 'menu:imports:view',
+  },
+  {
+    label: 'IA y Calidad',
+    href: '/quality',
+    icon: Sparkles,
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    label: 'Publicación',
+    href: '/publication',
+    icon: Gauge,
+    capability: 'menu:publication:view',
+  },
+  {
+    label: 'Integraciones',
+    href: '/integrations',
+    icon: ShieldCheck,
+    capability: 'menu:integrations:view',
+  },
+  { label: 'Reportes', href: '/reports', icon: BarChart3, capability: 'menu:reports:view' },
+  {
+    label: 'Administración',
+    href: '/administration',
+    icon: Users,
+    capability: 'menu:administration:view',
+  },
 ];
 
 function Sidebar({
   open,
   onClose,
   labelledBy,
+  capabilities,
 }: {
   open: boolean;
   onClose: () => void;
   labelledBy: string;
+  capabilities: readonly AuthCapability[];
 }) {
   const pathname = usePathname();
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -135,44 +189,46 @@ function Sidebar({
         </div>
 
         <nav className="flex flex-1 flex-col gap-1" aria-label="Módulos del PIM">
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            const active =
-              item.href === '/'
-                ? pathname === '/'
-                : Boolean(item.href && pathname.startsWith(item.href));
-            const content = (
-              <>
-                <Icon aria-hidden="true" className="size-[18px] shrink-0" />
-                <span>{item.label}</span>
-                {!item.href ? (
-                  <span className="ml-auto text-[9px] uppercase tracking-wide">Próximo</span>
-                ) : null}
-              </>
-            );
-            return item.href ? (
-              <Link
-                key={item.label}
-                href={item.href}
-                onClick={onClose}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'flex min-h-11 items-center gap-3 rounded-full px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
-                  active ? 'bg-white/25 ring-1 ring-inset ring-white/25' : 'hover:bg-white/15',
-                )}
-              >
-                {content}
-              </Link>
-            ) : (
-              <span
-                key={item.label}
-                aria-disabled="true"
-                className="flex min-h-11 items-center gap-3 rounded-full px-4 text-sm font-semibold text-white/55"
-              >
-                {content}
-              </span>
-            );
-          })}
+          {navigation
+            .filter((item) => capabilities.includes(item.capability))
+            .map((item) => {
+              const Icon = item.icon;
+              const active =
+                item.href === '/'
+                  ? pathname === '/'
+                  : Boolean(item.href && pathname.startsWith(item.href));
+              const content = (
+                <>
+                  <Icon aria-hidden="true" className="size-[18px] shrink-0" />
+                  <span>{item.label}</span>
+                  {!item.href ? (
+                    <span className="ml-auto text-[9px] uppercase tracking-wide">Próximo</span>
+                  ) : null}
+                </>
+              );
+              return item.href ? (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={onClose}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex min-h-11 items-center gap-3 rounded-full px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
+                    active ? 'bg-white/25 ring-1 ring-inset ring-white/25' : 'hover:bg-white/15',
+                  )}
+                >
+                  {content}
+                </Link>
+              ) : (
+                <span
+                  key={item.label}
+                  aria-disabled="true"
+                  className="flex min-h-11 items-center gap-3 rounded-full px-4 text-sm font-semibold text-white/55"
+                >
+                  {content}
+                </span>
+              );
+            })}
         </nav>
 
         <div className="mt-5 border-t border-white/20 px-4 pt-4 text-[11px] leading-relaxed text-white/75">
@@ -237,7 +293,12 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
         Saltar al contenido
       </a>
       <div className="flex min-h-dvh w-full bg-white">
-        <Sidebar open={menuOpen} onClose={closeMenu} labelledBy={navigationId} />
+        <Sidebar
+          open={menuOpen}
+          onClose={closeMenu}
+          labelledBy={navigationId}
+          capabilities={actor.capabilities}
+        />
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-8">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">

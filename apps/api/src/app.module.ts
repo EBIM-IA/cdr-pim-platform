@@ -5,8 +5,10 @@ import type { ApiEnv } from '@cdr/config';
 
 import { DatabaseModule } from './database/database.module';
 import { AiModule } from './modules/ai/ai.module';
+import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { CatalogSchemaModule } from './modules/catalog-schema/catalog-schema.module';
 import { EquivalencesModule } from './modules/equivalences/equivalences.module';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
@@ -38,10 +40,9 @@ import { API_ENV } from './shared/tokens';
  * none of them reaches into another's internals — the only shared surface is the small set
  * of ports each module explicitly exports (ADR-001).
  *
- * Two bounded contexts appear in the documentation but not here: `categories` and
- * `attributes`. They currently hold domain types only, with no persistence and no
- * endpoints, so registering an empty Nest module would be noise. See
- * `docs/architecture/MODULE_ARCHITECTURE.md` for the status of each context.
+ * Category templates and typed attributes are composed through `CatalogSchemaModule`.
+ * The older `categories` and `attributes` folders retain domain types for compatibility,
+ * but are not separate runtime modules.
  *
  * Authentication is fail-closed: both guards are global and the small set of public routes
  * must opt out explicitly with `@Public()`. QAS/PRD reject the temporary local credential
@@ -109,6 +110,8 @@ import { API_ENV } from './shared/tokens';
     HealthModule,
     IdentityModule,
     CatalogModule,
+    CatalogSchemaModule,
+    ApplicationsModule,
     EquivalencesModule,
     AiModule,
     SearchModule,

@@ -8,10 +8,10 @@ import {
 } from '@cdr/contracts';
 
 import { openApiSchema } from '../../../shared/http/openapi';
-import { RequireRole } from '../../../shared/http/role.decorator';
+import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { GetWorkspaceUseCase } from '../application/get-workspace.use-case';
-import { type AuthenticatedActor, Role } from '../../identity/domain/entities/role';
+import { type AuthenticatedActor, Capability } from '../../identity/domain/entities/role';
 
 interface AuthenticatedRequest {
   readonly actor: AuthenticatedActor;
@@ -19,7 +19,7 @@ interface AuthenticatedRequest {
 
 @ApiTags('workspaces')
 @Controller('workspaces')
-@RequireRole(Role.Viewer)
+@RequireCapabilities(Capability.CatalogRead)
 export class WorkspacesController {
   constructor(private readonly getWorkspace: GetWorkspaceUseCase) {}
 
@@ -31,7 +31,7 @@ export class WorkspacesController {
     @Param('slug', new ZodValidationPipe(workspaceSlugSchema)) slug: WorkspaceSlug,
     @Req() request: AuthenticatedRequest,
   ): Promise<WorkspaceDto> {
-    // The global guards establish the actor and enforce VIEWER-or-higher before this runs.
+    // The global guards establish the actor and enforce catalog read access before this runs.
     // Output validation is intentional. These projections combine SQL and configuration;
     // parsing here prevents a malformed cell from leaking into the generic web renderer.
     return workspaceSchema.parse(await this.getWorkspace.execute(slug, request.actor));

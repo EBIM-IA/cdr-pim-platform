@@ -14,12 +14,12 @@ import { openApiSchema } from '../../../shared/http/openapi';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { RateLimit } from '../../../shared/http/rate-limit';
 import { AuthenticateUseCase } from '../application/authenticate.use-case';
-import { type AuthenticatedActor, Role } from '../domain/entities/role';
-import { CurrentActor, Public, RequireRole } from './decorators/auth.decorators';
+import { type AuthenticatedActor, Capability, capabilitiesForActor } from '../domain/entities/role';
+import { CurrentActor, Public, RequireCapabilities } from './decorators/auth.decorators';
 
 @ApiTags('identity')
 @Controller('auth')
-@RequireRole(Role.Viewer)
+@RequireCapabilities(Capability.IdentitySelfRead)
 export class AuthController {
   constructor(private readonly authenticate: AuthenticateUseCase) {}
 
@@ -46,5 +46,10 @@ export class AuthController {
 }
 
 function toActorDto(actor: AuthenticatedActor): AuthenticatedActorDto {
-  return { id: actor.id, email: actor.email, roles: [...actor.roles] };
+  return {
+    id: actor.id,
+    email: actor.email,
+    roles: [...actor.roles],
+    capabilities: capabilitiesForActor(actor),
+  };
 }

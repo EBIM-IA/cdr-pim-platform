@@ -12,10 +12,10 @@ import {
 } from '@cdr/contracts';
 
 import { openApiSchema } from '../../../shared/http/openapi';
+import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
-import { RequireRole } from '../../../shared/http/role.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { type AuthenticatedActor, Role } from '../../identity/domain/entities/role';
+import { type AuthenticatedActor, Capability } from '../../identity/domain/entities/role';
 import { CreateProductUseCase } from '../application/create-product.use-case';
 import { GetProductByIdUseCase } from '../application/get-product-by-id.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
@@ -29,7 +29,7 @@ import { toProductDto } from './product.presenter';
  */
 @ApiTags('catalog')
 @Controller('products')
-@RequireRole(Role.Viewer)
+@RequireCapabilities(Capability.CatalogRead)
 export class ProductsController {
   constructor(
     private readonly getProductById: GetProductByIdUseCase,
@@ -60,7 +60,7 @@ export class ProductsController {
   }
 
   @Post()
-  @RequireRole(Role.Editor)
+  @RequireCapabilities(Capability.CatalogWrite)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a draft product' })
   @ApiCreatedResponse({ schema: openApiSchema(productSchema) })

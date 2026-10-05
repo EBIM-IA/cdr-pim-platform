@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool    | Version    | Notes                                                       |
-| ------- | ---------- | ----------------------------------------------------------- |
-| Node.js | 24.x       | `nvm use` reads `.nvmrc`                                    |
-| pnpm    | 10.19.0    | `corepack enable` — the version is pinned in `package.json` |
-| Docker  | any recent | Provides PostgreSQL and, optionally, LocalStack             |
+| Tool    | Version    | Notes                                                         |
+| ------- | ---------- | ------------------------------------------------------------- |
+| Node.js | 24.x       | `nvm use` reads `.nvmrc`; other managers read `.node-version` |
+| pnpm    | 10.19.0    | `corepack enable` — the version is pinned in `package.json`   |
+| Docker  | any recent | Provides PostgreSQL and, optionally, LocalStack               |
 
 ## First run
 
@@ -23,6 +23,10 @@ pnpm db:migrate              # applies drizzle/*.sql
 pnpm db:seed:demo            # inserts the 7 source-backed demo products (optional)
 pnpm dev                     # web :3000 · api :3001 · worker :3002
 ```
+
+The root `.npmrc` enables `engine-strict`, and the root `preinstall` independently validates
+`engines.node`. An install started from an old system Node therefore fails before dependencies or
+generated artefacts can be changed. `pnpm check:runtime` performs the same check explicitly.
 
 Then open <http://localhost:3000>. After login, the dashboard, product catalogue and eleven
 operational workspaces read through the authenticated Next.js BFF and the NestJS API.
@@ -103,6 +107,19 @@ pnpm db:seed:demo       # optional local/test demo catalogue; safe to rerun
 
 Filter to one workspace with `pnpm --filter @cdr/api <script>`.
 
+### Isolated Next.js outputs
+
+The web application deliberately uses separate Next.js output directories:
+
+| Command                     | Output         |
+| --------------------------- | -------------- |
+| `next dev`                  | `.next-dev/`   |
+| `next build` / `next start` | `.next-build/` |
+
+This makes `pnpm --filter @cdr/web build` safe while a development server is running: a production
+build cannot replace the development server's manifests or route cache. `pnpm --filter @cdr/web
+clean` removes both directories plus the legacy `.next` directory.
+
 ## The walking skeleton by hand
 
 ```bash
@@ -131,15 +148,17 @@ curl "http://localhost:3001/api/v1/search/semantic?q=rodamiento%20sellado&limit=
 
 ## Troubleshooting
 
-| Symptom                                                   | Cause and fix                                                                                        |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `/health/ready` returns 503 with `database: down`         | PostgreSQL is not up: `docker compose up -d postgres`. Also check `DATABASE_SSL=false` locally       |
-| `EnvironmentValidationError` on start                     | A variable is missing or malformed. The message names the variable — never its value                 |
-| `Migration ... was modified after being applied`          | An applied migration was edited. Restore it and write a new one; the checksum guard is doing its job |
-| `Nest can't resolve dependencies` after adding a provider | Register the provider in its module, and use `@Inject(TOKEN)` for symbol tokens                      |
-| Web shows "sin conexión"                                  | The API is not running, or `API_BASE_URL` is wrong                                                   |
-| Port already in use                                       | Something else holds 3000/3001/3002. `lsof -ti tcp:3000`                                             |
-| `pnpm dev` cannot find `pnpm`                             | `corepack enable`, or `nvm use` first                                                                |
+| Symptom                                                                               | Cause and fix                                                                                                                            |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `/health/ready` returns 503 with `database: down`                                     | PostgreSQL is not up: `docker compose up -d postgres`. Also check `DATABASE_SSL=false` locally                                           |
+| `EnvironmentValidationError` on start                                                 | A variable is missing or malformed. The message names the variable — never its value                                                     |
+| `Migration ... was modified after being applied`                                      | An applied migration was edited. Restore it and write a new one; the checksum guard is doing its job                                     |
+| `Nest can't resolve dependencies` after adding a provider                             | Register the provider in its module, and use `@Inject(TOKEN)` for symbol tokens                                                          |
+| Web shows "sin conexión"                                                              | The API is not running, or `API_BASE_URL` is wrong                                                                                       |
+| Port already in use                                                                   | Something else holds 3000/3001/3002. `lsof -ti tcp:3000`                                                                                 |
+| `pnpm dev` cannot find `pnpm`                                                         | `corepack enable`, or `nvm use` first                                                                                                    |
+| Install fails with `Unsupported environment` or `[cdr-pim] Node ... no es compatible` | The shell resolved an old system Node. Run `nvm use`, or activate the version in `.node-version`                                         |
+| Development UI breaks after a build                                                   | Current versions isolate `.next-dev` and `.next-build`; stop old processes once and run the web clean command to remove a legacy `.next` |
 
 ## Resetting
 

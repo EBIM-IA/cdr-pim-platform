@@ -4,16 +4,32 @@ import { type Uuid, assertUuid } from '@cdr/shared';
 import { inArray } from 'drizzle-orm';
 
 import type { Database } from './drizzle.client';
-import { equivalenceGroupMembers, equivalenceGroups, productIdentifiers, products } from './schema';
+import {
+  attributeDefinitions,
+  attributeTemplates,
+  catalogCategories,
+  productAttributeValues,
+  productTemplateAssignments,
+  templateAttributeAssignments,
+  templateAttributeRoleAccess,
+} from '../modules/catalog-schema/infrastructure/persistence/catalog-schema.tables';
+import {
+  equivalenceGroupMembers,
+  equivalenceGroups,
+  externalHomologs,
+  groupApplications,
+  productIdentifiers,
+  products,
+} from './schema';
 
 /**
  * A small, source-backed catalogue for local development and automated tests.
  *
  * These seven rows are the non-illustrative records from the former platform seed. That
- * seed records their provenance as PLANTILLAS_PIM.xlsx. The current schema deliberately
- * has no category, attribute, quality or provenance tables yet, so this adapter persists
- * only fields that have an honest destination today. The former lifecycle values map to
- * the current vocabulary as REVIEW -> in_review and APPROVED -> published.
+ * seed records their provenance as PLANTILLAS_PIM.xlsx. The fixture also maps those rows
+ * into persisted categories, active template versions and source-backed dynamic attributes.
+ * ERP flags without supplied values remain unset. Former lifecycle values map to the
+ * current vocabulary as REVIEW -> in_review and APPROVED -> published.
  */
 export const DEMO_PRODUCT_SEEDS = [
   {
@@ -26,6 +42,7 @@ export const DEMO_PRODUCT_SEEDS = [
     description:
       'Rodamiento rígido de bolas FAG con sellos de caucho, juego radial C3 y lubricante L038.',
     sourceUpdatedAt: '2026-09-24T16:05:00-05:00',
+    categorySlug: 'rodamientos-rigidos-de-bolas',
   },
   {
     sku: '1200-TVH-C3',
@@ -36,6 +53,7 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'in_review',
     description: null,
     sourceUpdatedAt: '2026-09-23T10:10:00-05:00',
+    categorySlug: 'rodamientos-de-bolas-autoalineables',
   },
   {
     sku: 'CDR-0000016843',
@@ -46,6 +64,7 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'in_review',
     description: null,
     sourceUpdatedAt: '2026-09-22T09:35:00-05:00',
+    categorySlug: 'aceites-de-motor',
   },
   {
     sku: 'D1672',
@@ -56,6 +75,7 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'in_review',
     description: null,
     sourceUpdatedAt: '2026-09-21T11:20:00-05:00',
+    categorySlug: 'pastillas-de-freno',
   },
   {
     sku: 'CDR-0000000933',
@@ -66,6 +86,7 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'published',
     description: 'Grasa multipropósito de complejo de litio, grado NLGI 2.',
     sourceUpdatedAt: '2026-09-20T14:30:00-05:00',
+    categorySlug: 'grasas',
   },
   {
     sku: 'CDR-0000014230',
@@ -76,6 +97,7 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'published',
     description: null,
     sourceUpdatedAt: '2026-09-19T09:48:00-05:00',
+    categorySlug: 'retenedores-metricos',
   },
   {
     sku: 'CDR-0000024151',
@@ -86,6 +108,74 @@ export const DEMO_PRODUCT_SEEDS = [
     status: 'published',
     description: null,
     sourceUpdatedAt: '2026-09-18T16:10:00-05:00',
+    categorySlug: 'discos-de-freno',
+  },
+] as const;
+
+export const DEMO_CATEGORY_SEEDS = [
+  { slug: 'aceites-de-motor', name: 'Aceites de motor' },
+  { slug: 'discos-de-freno', name: 'Discos de freno' },
+  { slug: 'grasas', name: 'Grasas' },
+  { slug: 'pastillas-de-freno', name: 'Pastillas de freno' },
+  { slug: 'retenedores-metricos', name: 'Retenedores métricos' },
+  { slug: 'rodamientos-de-bolas-autoalineables', name: 'Rodamientos de bolas autoalineables' },
+  { slug: 'rodamientos-rigidos-de-bolas', name: 'Rodamientos rígidos de bolas' },
+] as const;
+
+const DEMO_ATTRIBUTE_SEEDS = [
+  {
+    key: 'codigo_unificador',
+    label: 'Código unificador',
+    dataType: 'text',
+    sourceAuthority: 'erp',
+    searchable: true,
+    required: true,
+    replicable: true,
+  },
+  {
+    key: 'codigo_proveedor',
+    label: 'Código de proveedor',
+    dataType: 'text',
+    sourceAuthority: 'erp',
+    searchable: true,
+    required: true,
+    replicable: false,
+  },
+  {
+    key: 'descripcion_tecnica',
+    label: 'Descripción técnica',
+    dataType: 'text',
+    sourceAuthority: 'pim',
+    searchable: true,
+    required: false,
+    replicable: true,
+  },
+  {
+    key: 'bloqueado_compra',
+    label: 'Bloqueado para compra',
+    dataType: 'boolean',
+    sourceAuthority: 'erp',
+    searchable: true,
+    required: false,
+    replicable: false,
+  },
+  {
+    key: 'bloqueado_venta',
+    label: 'Bloqueado para venta',
+    dataType: 'boolean',
+    sourceAuthority: 'erp',
+    searchable: true,
+    required: false,
+    replicable: false,
+  },
+  {
+    key: 'frecuencia_articulo',
+    label: 'Frecuencia del artículo',
+    dataType: 'text',
+    sourceAuthority: 'erp',
+    searchable: true,
+    required: false,
+    replicable: false,
   },
 ] as const;
 
@@ -230,6 +320,208 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
       )
       .onConflictDoNothing()
       .returning({ productId: equivalenceGroupMembers.productId });
+
+    // Demonstration-only relations make the operational screens verifiable without
+    // presenting them as approved master data. They remain clearly marked and may be
+    // replaced by the client's definitive application and homolog imports.
+    const d1672GroupId = groupIdByCode.get('D1672');
+    if (d1672GroupId) {
+      await tx
+        .insert(groupApplications)
+        .values({
+          id: deterministicDemoUuid('group-application', 'D1672:AUTOMOTRIZ'),
+          groupId: d1672GroupId,
+          vehicleType: 'AUTOMOTRIZ',
+          notes: 'Compatibilidad demostrativa; requiere validación del cliente',
+          source: 'manual',
+        })
+        .onConflictDoNothing();
+
+      await tx
+        .insert(externalHomologs)
+        .values({
+          id: deterministicDemoUuid('external-homolog', 'D1672:DEMO:D1672-DEMO'),
+          groupId: d1672GroupId,
+          externalCode: 'D1672-DEMO',
+          externalBrand: 'DEMO',
+          active: true,
+          approvalStatus: 'approved',
+          source: 'manual',
+        })
+        .onConflictDoNothing();
+    }
+
+    // Minimal dynamic catalogue fixture. Values come only from the source-backed seed
+    // above; the role matrix is deliberately permissive demo configuration, not a client
+    // policy decision.
+    await tx
+      .insert(catalogCategories)
+      .values(
+        DEMO_CATEGORY_SEEDS.map((category, position) => ({
+          id: deterministicDemoUuid('category', category.slug),
+          parentId: null,
+          slug: category.slug,
+          name: category.name,
+          path: category.slug,
+          position,
+          active: true,
+        })),
+      )
+      .onConflictDoNothing();
+    const categoryRows = await tx
+      .select({ id: catalogCategories.id, slug: catalogCategories.slug })
+      .from(catalogCategories)
+      .where(
+        inArray(
+          catalogCategories.slug,
+          DEMO_CATEGORY_SEEDS.map((category) => category.slug),
+        ),
+      );
+    const categoryIdBySlug = new Map(categoryRows.map((row) => [row.slug, row.id]));
+
+    await tx
+      .insert(attributeDefinitions)
+      .values(
+        DEMO_ATTRIBUTE_SEEDS.map((attribute) => ({
+          id: deterministicDemoUuid('attribute-definition', attribute.key),
+          key: attribute.key,
+          label: attribute.label,
+          dataType: attribute.dataType,
+          allowedValues: [],
+          active: true,
+          sourceAuthority: attribute.sourceAuthority,
+        })),
+      )
+      .onConflictDoNothing();
+    const definitionRows = await tx
+      .select({ id: attributeDefinitions.id, key: attributeDefinitions.key })
+      .from(attributeDefinitions)
+      .where(
+        inArray(
+          attributeDefinitions.key,
+          DEMO_ATTRIBUTE_SEEDS.map((attribute) => attribute.key),
+        ),
+      );
+    const definitionIdByKey = new Map(definitionRows.map((row) => [row.key, row.id]));
+
+    await tx
+      .insert(attributeTemplates)
+      .values(
+        DEMO_CATEGORY_SEEDS.map((category) => ({
+          id: deterministicDemoUuid('attribute-template', `${category.slug}:1`),
+          categoryId: categoryIdBySlug.get(category.slug) as string,
+          name: `Plantilla ${category.name}`,
+          version: 1,
+          status: 'active',
+        })),
+      )
+      .onConflictDoNothing();
+    const templateRows = await tx
+      .select({ id: attributeTemplates.id, categoryId: attributeTemplates.categoryId })
+      .from(attributeTemplates)
+      .where(inArray(attributeTemplates.categoryId, [...categoryIdBySlug.values()]));
+    const templateIdByCategoryId = new Map(templateRows.map((row) => [row.categoryId, row.id]));
+
+    const templateAssignments = DEMO_CATEGORY_SEEDS.flatMap((category) => {
+      const categoryId = categoryIdBySlug.get(category.slug) as string;
+      const templateId = templateIdByCategoryId.get(categoryId) as string;
+      return DEMO_ATTRIBUTE_SEEDS.map((attribute, position) => ({
+        templateId,
+        attributeDefinitionId: definitionIdByKey.get(attribute.key) as string,
+        position,
+        required: attribute.required,
+        replicable: attribute.replicable,
+        active: true,
+        searchable: attribute.searchable,
+        includeInTechnicalSheet: attribute.key === 'descripcion_tecnica',
+      }));
+    });
+    await tx.insert(templateAttributeAssignments).values(templateAssignments).onConflictDoNothing();
+
+    await tx
+      .insert(templateAttributeRoleAccess)
+      .values(
+        templateAssignments.flatMap((assignment) => [
+          {
+            templateId: assignment.templateId,
+            attributeDefinitionId: assignment.attributeDefinitionId,
+            role: 'ADMINISTRADOR',
+            canView: true,
+            canEdit: true,
+            canImport: true,
+            canExport: true,
+          },
+          {
+            templateId: assignment.templateId,
+            attributeDefinitionId: assignment.attributeDefinitionId,
+            role: 'COMPRAS',
+            canView: true,
+            canEdit: true,
+            canImport: true,
+            canExport: true,
+          },
+          {
+            templateId: assignment.templateId,
+            attributeDefinitionId: assignment.attributeDefinitionId,
+            role: 'VENTAS',
+            canView: true,
+            canEdit: false,
+            canImport: false,
+            canExport: true,
+          },
+        ]),
+      )
+      .onConflictDoNothing();
+
+    await tx
+      .insert(productTemplateAssignments)
+      .values(
+        DEMO_PRODUCT_SEEDS.map((seed) => ({
+          productId: productIdBySku.get(seed.sku) as string,
+          templateId: templateIdByCategoryId.get(
+            categoryIdBySlug.get(seed.categorySlug) as string,
+          ) as string,
+        })),
+      )
+      .onConflictDoNothing();
+
+    await tx
+      .insert(productAttributeValues)
+      .values(
+        DEMO_PRODUCT_SEEDS.flatMap((seed) => {
+          const common = {
+            productId: productIdBySku.get(seed.sku) as string,
+            source: 'erp',
+            confidence: 1,
+            version: 1,
+            validFrom: new Date(seed.sourceUpdatedAt),
+            updatedAt: new Date(seed.sourceUpdatedAt),
+          };
+          return [
+            {
+              ...common,
+              attributeDefinitionId: definitionIdByKey.get('codigo_unificador') as string,
+              valueText: seed.unifiedCode,
+            },
+            {
+              ...common,
+              attributeDefinitionId: definitionIdByKey.get('codigo_proveedor') as string,
+              valueText: seed.supplierCode,
+            },
+            ...(seed.description
+              ? [
+                  {
+                    ...common,
+                    source: 'manual',
+                    attributeDefinitionId: definitionIdByKey.get('descripcion_tecnica') as string,
+                    valueText: seed.description,
+                  },
+                ]
+              : []),
+          ];
+        }),
+      )
+      .onConflictDoNothing();
 
     return {
       productsInserted: insertedProducts.length,

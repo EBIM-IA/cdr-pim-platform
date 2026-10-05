@@ -6,8 +6,8 @@ import { type Uuid, ValidationError } from '@cdr/shared';
  * label, which is what makes filtering ("rodamientos con diámetro interior 25 mm")
  * possible at all.
  *
- * NOT PERSISTED YET — the attribute dictionary itself is a functional deliverable from
- * Casa del Rulimán and must not be invented here.
+ * Legacy shape kept for compatibility. The persisted dictionary and its source-authority
+ * rules live in `catalog-schema`; the final business dictionary remains a CDR deliverable.
  */
 export const AttributeDataType = {
   Text: 'text',

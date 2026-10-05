@@ -7,7 +7,8 @@ import type { Uuid } from '@cdr/shared';
  * ERP exports, supplier PDFs and AI extraction, "where did this value come from and how
  * much do we trust it?" decides whether a human has to review it before publication.
  *
- * NOT PERSISTED YET — see `AttributeDefinition`.
+ * Legacy shape kept for compatibility. Typed, versioned values and provenance are
+ * persisted by `catalog-schema`.
  */
 export const AttributeSource = {
   Manual: 'manual',

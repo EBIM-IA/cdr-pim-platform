@@ -19,7 +19,8 @@ WORKDIR /repo
 # ---- dependencies ----------------------------------------------------------
 FROM base AS deps
 # Only the manifests, so this layer is cached until a dependency actually changes.
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
+COPY scripts/verify-node-version.mjs scripts/verify-node-version.mjs
 COPY packages/config/package.json          packages/config/
 COPY packages/contracts/package.json       packages/contracts/
 COPY packages/eslint-config/package.json   packages/eslint-config/

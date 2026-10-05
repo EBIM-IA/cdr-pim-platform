@@ -4,6 +4,7 @@ import type { ProductStatus } from '@cdr/contracts';
 import {
   ChevronLeft,
   ChevronRight,
+  Columns3,
   LayoutGrid,
   List as ListIcon,
   RefreshCw,
@@ -15,6 +16,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { DynamicCatalogSheet } from '@/components/dynamic-catalog-sheet';
 import { ProductArtwork } from '@/components/product-artwork';
 import { ProductCard } from '@/components/product-card';
 import { ScreenGuide } from '@/components/screen-guide';
@@ -30,7 +32,7 @@ import { useProductsData } from '@/components/use-products-data';
 import type { Product } from '@/lib/types';
 import { cn, formatNumber, unique } from '@/lib/utils';
 
-type CatalogView = 'cards' | 'table';
+type CatalogView = 'cards' | 'table' | 'sheet';
 
 function ProductTable({ products }: { products: Product[] }) {
   return (
@@ -230,72 +232,85 @@ export function ProductsCatalog({
         title="Productos"
         description="Consulta la identidad, los códigos y el estado disponible de cada producto."
         actions={
-          <Button variant="outline" onClick={reload} disabled={loading}>
-            <RefreshCw aria-hidden="true" className={cn('size-4', loading && 'animate-spin')} />
-            Actualizar
-          </Button>
+          view !== 'sheet' ? (
+            <Button variant="outline" onClick={reload} disabled={loading}>
+              <RefreshCw aria-hidden="true" className={cn('size-4', loading && 'animate-spin')} />
+              Actualizar
+            </Button>
+          ) : undefined
         }
       />
 
       <ScreenGuide
-        objective="Presenta los SKU maestros disponibles para buscarlos, compararlos y abrir su información detallada."
+        objective="Presenta los SKU maestros para consultarlos o trabajar sus atributos técnicos mediante la plantilla activa de cada categoría."
         actions={[
           'Busca por SKU, descripción o marca y combina la consulta con los filtros disponibles.',
-          'Alterna entre tarjetas y tabla, cambia la cantidad de resultados y recorre las páginas.',
-          'Abre cualquier producto para consultar sus atributos y usa «Actualizar» para volver a cargar la lista.',
+          'Alterna entre tarjetas, tabla y hoja de datos; esta última habilita filtros por atributo y edición según tus permisos.',
+          'Abre cualquier producto para consultar su información detallada y usa «Actualizar» para volver a cargar la vista.',
         ]}
-        dataSource="Los productos, estados y paginación provienen de la API del catálogo. La búsqueda, marca y estado se envían como criterios reales de la consulta."
-        limitation="Categorías, aplicaciones y calidad permanecen identificadas como contrato pendiente. En esta pantalla los productos solo se consultan; no se crean ni editan."
+        dataSource="Los productos, plantillas, columnas, permisos y valores provienen de la API del catálogo. Las búsquedas, filtros y ediciones se ejecutan en el backend."
+        limitation="Las tarjetas y la tabla general son de consulta. La edición se realiza en la hoja de datos, por categoría y solamente sobre atributos habilitados para tu rol."
       />
 
       <Card className="mb-5 p-4 sm:p-5">
         <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto] md:items-end">
-          <label className="grid min-w-0 gap-1.5 text-xs font-semibold text-muted-foreground">
-            <span>Buscar en el catálogo</span>
-            <span className="relative block">
-              <Search
-                aria-hidden="true"
-                className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
-              />
-              <Input
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="SKU, descripción o marca"
-                className="pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
-                aria-describedby="catalog-search-status"
-              />
-              {searchInput ? (
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  aria-label="Limpiar búsqueda"
-                  className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-                >
-                  <X aria-hidden="true" className="size-4" />
-                </button>
-              ) : null}
-            </span>
-            <span id="catalog-search-status" className="sr-only" aria-live="polite">
-              {searchPending
-                ? 'Preparando búsqueda'
-                : loading
-                  ? 'Buscando productos'
-                  : 'Búsqueda actualizada'}
-            </span>
-          </label>
+          {view === 'sheet' ? (
+            <div className="self-center">
+              <p className="text-sm font-semibold">Modo de trabajo</p>
+              <p className="text-xs text-muted-foreground">
+                Selecciona una categoría para consultar y editar sus atributos técnicos.
+              </p>
+            </div>
+          ) : (
+            <label className="grid min-w-0 gap-1.5 text-xs font-semibold text-muted-foreground">
+              <span>Buscar en el catálogo</span>
+              <span className="relative block">
+                <Search
+                  aria-hidden="true"
+                  className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
+                />
+                <Input
+                  type="search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="SKU, descripción o marca"
+                  className="pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
+                  aria-describedby="catalog-search-status"
+                />
+                {searchInput ? (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    aria-label="Limpiar búsqueda"
+                    className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                  >
+                    <X aria-hidden="true" className="size-4" />
+                  </button>
+                ) : null}
+              </span>
+              <span id="catalog-search-status" className="sr-only" aria-live="polite">
+                {searchPending
+                  ? 'Preparando búsqueda'
+                  : loading
+                    ? 'Buscando productos'
+                    : 'Búsqueda actualizada'}
+              </span>
+            </label>
+          )}
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="flex-1 md:hidden"
-              onClick={() => setShowFilters((visible) => !visible)}
-              aria-expanded={showFilters}
-              aria-controls="catalog-filters"
-            >
-              <SlidersHorizontal aria-hidden="true" className="size-4" />
-              Filtros{activeFilterCount ? ` (${activeFilterCount})` : ''}
-            </Button>
+            {view !== 'sheet' ? (
+              <Button
+                variant="outline"
+                className="flex-1 md:hidden"
+                onClick={() => setShowFilters((visible) => !visible)}
+                aria-expanded={showFilters}
+                aria-controls="catalog-filters"
+              >
+                <SlidersHorizontal aria-hidden="true" className="size-4" />
+                Filtros{activeFilterCount ? ` (${activeFilterCount})` : ''}
+              </Button>
+            ) : null}
             <div
               className="flex rounded-lg border p-1"
               role="group"
@@ -321,44 +336,60 @@ export function ProductsCatalog({
                 <ListIcon aria-hidden="true" className="size-4" />
                 <span className="hidden sm:inline">Tabla</span>
               </Button>
+              <Button
+                variant={view === 'sheet' ? 'dark' : 'ghost'}
+                size="sm"
+                onClick={() => setView('sheet')}
+                aria-pressed={view === 'sheet'}
+                aria-label="Ver hoja de datos dinámica"
+              >
+                <Columns3 aria-hidden="true" className="size-4" />
+                <span className="hidden sm:inline">Hoja de datos</span>
+              </Button>
             </div>
           </div>
         </div>
 
-        <div
-          id="catalog-filters"
-          className={cn(
-            'mt-4 gap-3 border-t pt-4 md:grid md:grid-cols-2',
-            showFilters ? 'grid' : 'hidden',
-          )}
-        >
-          <Select label="Marca" value={brand} onChange={(event) => changeBrand(event.target.value)}>
-            <option value="">Todas las marcas</option>
-            {brands.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Estado"
-            value={status}
-            onChange={(event) => changeStatus(event.target.value as ProductStatus | '')}
+        {view !== 'sheet' ? (
+          <div
+            id="catalog-filters"
+            className={cn(
+              'mt-4 gap-3 border-t pt-4 md:grid md:grid-cols-2',
+              showFilters ? 'grid' : 'hidden',
+            )}
           >
-            <option value="">Todos los estados</option>
-            {statuses.map((item) => (
-              <option key={item} value={item}>
-                {statusLabel(item)}
-              </option>
-            ))}
-          </Select>
-          <p className="text-xs leading-relaxed text-muted-foreground md:col-span-3">
-            Las marcas visibles se obtienen de la página actual; el estado y los criterios de
-            búsqueda se validan en el contrato compartido.
-          </p>
-        </div>
+            <Select
+              label="Marca"
+              value={brand}
+              onChange={(event) => changeBrand(event.target.value)}
+            >
+              <option value="">Todas las marcas</option>
+              {brands.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Estado"
+              value={status}
+              onChange={(event) => changeStatus(event.target.value as ProductStatus | '')}
+            >
+              <option value="">Todos los estados</option>
+              {statuses.map((item) => (
+                <option key={item} value={item}>
+                  {statusLabel(item)}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs leading-relaxed text-muted-foreground md:col-span-3">
+              Las marcas visibles se obtienen de la página actual; el estado y los criterios de
+              búsqueda se validan en el contrato compartido.
+            </p>
+          </div>
+        ) : null}
 
-        {searchInput || activeFilterCount ? (
+        {view !== 'sheet' && (searchInput || activeFilterCount) ? (
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
             <span className="text-xs text-muted-foreground">Criterios activos</span>
             <Button variant="ghost" size="sm" onClick={clearFilters}>
@@ -369,8 +400,9 @@ export function ProductsCatalog({
         ) : null}
       </Card>
 
-      {loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
-      {!loading && error ? (
+      {view === 'sheet' ? <DynamicCatalogSheet /> : null}
+      {view !== 'sheet' && loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
+      {view !== 'sheet' && !loading && error ? (
         <StatePanel
           variant="error"
           title="No pudimos cargar los productos"
@@ -379,7 +411,7 @@ export function ProductsCatalog({
           onAction={reload}
         />
       ) : null}
-      {!loading && !error && products.length === 0 ? (
+      {view !== 'sheet' && !loading && !error && products.length === 0 ? (
         <StatePanel
           variant="empty"
           title={
@@ -395,7 +427,7 @@ export function ProductsCatalog({
         />
       ) : null}
 
-      {!loading && !error && products.length > 0 ? (
+      {view !== 'sheet' && !loading && !error && products.length > 0 ? (
         <>
           <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold" aria-live="polite">

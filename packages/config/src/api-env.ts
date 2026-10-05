@@ -56,7 +56,9 @@ const apiOnlySchema = z.object({
         .map((role) => role.trim())
         .filter(Boolean),
     )
-    .pipe(z.array(z.enum(['ADMIN', 'EDITOR', 'VIEWER'])).min(1))
+    .pipe(
+      z.array(z.enum(['ADMINISTRADOR', 'COMPRAS', 'VENTAS', 'ADMIN', 'EDITOR', 'VIEWER'])).min(1),
+    )
     .optional(),
 
   JWT_ACCESS_SECRET: z.string().min(32),

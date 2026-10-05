@@ -50,9 +50,9 @@ describe('definiciones de módulos', () => {
     ).toBe(true);
   });
 
-  it('distingue reglas confirmadas de capacidades implementadas', () => {
+  it('distingue capacidades implementadas de reglas todavía confirmadas', () => {
     expect(moduleDefinitions.templates.capabilities).toContainEqual(
-      expect.objectContaining({ title: 'Replicables', status: 'confirmed' }),
+      expect.objectContaining({ title: 'Replicables', status: 'available' }),
     );
     expect(moduleDefinitions.applications.capabilities).toContainEqual(
       expect.objectContaining({ title: 'Alcance por código unificador', status: 'confirmed' }),
@@ -65,11 +65,9 @@ describe('definiciones de módulos', () => {
     );
   });
 
-  it('identifica la proyección autenticada como fuente de cada módulo', () => {
+  it('identifica una fuente autenticada para cada módulo', () => {
     expect(
-      moduleSlugs.every((slug) =>
-        moduleDefinitions[slug].dataSource.includes('proyección autenticada'),
-      ),
+      moduleSlugs.every((slug) => /autenticad/iu.test(moduleDefinitions[slug].dataSource)),
     ).toBe(true);
   });
 });

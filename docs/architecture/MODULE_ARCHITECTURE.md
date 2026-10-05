@@ -6,91 +6,103 @@ graph LR
         health[health]
         identity[identity]
         catalog[catalog]
-        categories[categories]
-        attributes[attributes]
+        schema[catalog-schema]
+        applications[applications]
         equivalences[equivalences]
+        imports[imports]
+        audit[audit]
         search[search]
         ai[ai]
-        imports[imports]
         integrations[integrations]
-        audit[audit]
         workspaces[workspaces read model]
     end
 
+    schema -->|product FK| catalog
+    schema -->|codigoUnificador membership| equivalences
+    applications -->|group FK| equivalences
+    equivalences -->|product read port| catalog
     search -->|PRODUCT_REPOSITORY| catalog
     search -->|EMBEDDING_PROVIDER| ai
     imports -->|QUEUE_PORT| platform[shared platform ports]
-    equivalences -.->|FK only| catalog
-    workspaces -->|read-only SQL projections| database[(PostgreSQL)]
+    workspaces -->|read-only projections| database[(PostgreSQL)]
 
-    classDef done fill:#14532d,stroke:#052e16,color:#fff
+    classDef operational fill:#14532d,stroke:#052e16,color:#fff
     classDef partial fill:#78350f,stroke:#451a03,color:#fff
-    classDef scaffold fill:#334155,stroke:#1e293b,color:#fff
-    class health,catalog,search,ai,equivalences done
-    class identity,imports,integrations,audit,workspaces partial
-    class categories,attributes scaffold
+    classDef adapter fill:#334155,stroke:#1e293b,color:#fff
+    class health,identity,catalog,schema,applications,equivalences,imports,audit,search,workspaces operational
+    class ai partial
+    class integrations adapter
 ```
 
-## Status of each context
+## Estado de cada contexto
 
-Colour-coded above; stated plainly here. **"Scaffolding" means domain types exist and
-nothing is persisted** — not that something is half-broken.
+| Contexto           | Estado                     | Implementado                                                                                                                                                                             | Pendiente real                                                                                                  |
+| ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **health**         | Operativo                  | Liveness, readiness y verificación de PostgreSQL                                                                                                                                         | —                                                                                                               |
+| **identity**       | Operativo para local/test  | Login local, JWT, roles `ADMINISTRADOR`/`COMPRAS`/`VENTAS`, capacidades explícitas, guardas globales y aliases temporales                                                                | Proveedor empresarial, refresco y revocación; dependen de la decisión de identidad de CDR                       |
+| **catalog**        | Operativo, alcance base    | Producto, identificadores, listado, detalle, creación, repositorio PostgreSQL y auditoría de creación                                                                                    | Activos, documentos y reglas finales de calidad                                                                 |
+| **catalog-schema** | Operativo                  | Categorías; plantillas versionadas; definiciones y valores tipados; grid dinámico; filtros; hoja por producto; edición optimista; herencia replicable; administración y permisos por rol | Crear versiones desde HTTP, diccionario definitivo del cliente y generador PDF                                  |
+| **applications**   | Operativo                  | Aplicaciones pertenecientes al grupo de código unificador; listado, creación, edición y desactivación lógica                                                                             | Importación masiva aplicada al agregado y formato definitivo del cliente                                        |
+| **equivalences**   | Operativo para homólogos   | Grupos persistidos, membresías, homólogos externos, alta/edición/listado y búsqueda limitada a homólogos activos y aprobados                                                             | Flujo de creación/curación de grupos desde la interfaz y reglas finales de aprobación                           |
+| **imports**        | Staging y confirmación     | Previsualización CSV/JSON, validación por fila, idempotencia, persistencia de lotes/filas y confirmación auditable                                                                       | La confirmación todavía no aplica las filas a categorías, aplicaciones u homólogos; falta exportar errores XLSX |
+| **audit**          | Operativo y consultable    | Eventos append-only, detalle por campo, filtros por SKU/campo/actor/origen/fecha y vigencia anterior; unidad de trabajo atómica para atributos dinámicos                                 | Política de retención/archivo y migrar escrituras antiguas que aún auditan en una transacción separada          |
+| **search**         | Operativo                  | Indexación y búsqueda semántica con pgvector; los filtros dinámicos viven en `catalog-schema`                                                                                            | Ranking híbrido único entre texto, atributos y vector                                                           |
+| **ai**             | Fundación implementada     | Puertos, adaptadores OpenAI, fakes deterministas y selección por configuración                                                                                                           | Presupuestos, cuotas distribuidas y flujos de revisión humana completos                                         |
+| **integrations**   | Puertos y stubs explícitos | Contratos para ERP, comercio y pedidos; fuente ERP en memoria para desarrollo                                                                                                            | AX, PrestaShop y pedidos reales: VPN, credenciales y mapeos siguen pendientes                                   |
+| **workspaces**     | Read model operativo       | Proyecciones protegidas para las pantallas no especializadas; declara acciones soportadas o bloqueadas                                                                                   | Debe ceder comandos a los contextos propietarios; no sustituye sus endpoints                                    |
 
-| Context          | Status                      | What exists                                                                                                                                                           | What is deliberately missing, and why                                                        |
-| ---------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| **health**       | Complete                    | Liveness, readiness, indicator port, PostgreSQL indicator                                                                                                             | —                                                                                            |
-| **catalog**      | Walking skeleton            | `Product`, `ProductIdentifier`, repository port, Drizzle adapter, 3 use cases, REST controller, tables                                                                | Images/documents/data-quality persistence — needs CDR's asset and quality rules              |
-| **equivalences** | Aggregate + persistence     | `EquivalenceGroup` aggregate, repository port, Drizzle adapter, tables, integration tests                                                                             | Use cases and endpoints — how groups get _created_ (import? curation? AI?) is a CDR decision |
-| **search**       | Working end to end          | Vector index port, pgvector adapter, indexing and semantic-search use cases, controller                                                                               | Hybrid attribute+vector ranking; needs the attribute model first                             |
-| **ai**           | Complete for the foundation | Three provider ports, OpenAI adapters, deterministic fakes, config-driven selection, HTTP actor throttling                                                            | Cost/token budgets and distributed worker quotas                                             |
-| **identity**     | Local authentication        | Role and credential ports, env adapter, login/me endpoints, issuer/audience-bound JWTs, global auth/RBAC guards, brute-force throttling                               | Enterprise user source, refresh and revocation — pending CDR's identity-provider decision    |
-| **imports**      | Job producers only          | Two use cases publishing to the queue, controller                                                                                                                     | File parsing, staging, validation reports — import rules not yet defined                     |
-| **integrations** | Ports + honest stubs        | `ErpProductSourcePort`, `CommercePublisherPort`, `OrderChannelPublisherPort`; in-memory ERP source; AX/PrestaShop/orders adapters that throw with a documented reason | Real adapters — blocked on VPN, credentials and field mappings from CDR                      |
-| **audit**        | Durable append-only trail   | `AuditEntry`, `AuditPort`, PostgreSQL adapter/table, immutable DML/DDL triggers; product creation connected                                                           | Retention, archival/reporting policy and coverage for future write use cases                 |
-| **categories**   | Scaffolding                 | `Category`, `CategoryAttributeTemplate` domain types                                                                                                                  | No table, no repository. The taxonomy is a CDR deliverable                                   |
-| **attributes**   | Scaffolding                 | `AttributeDefinition`, `ProductAttribute`, validation helpers                                                                                                         | No table, no repository. The attribute dictionary is a CDR deliverable                       |
-| **workspaces**   | Live read model             | Protected `GET /api/v1/workspaces/:slug`, shared Zod contract and PostgreSQL/configuration projections for the eleven non-product screens                             | Write actions stay blocked until each owning context has confirmed rules and persistence     |
+`categories` y `attributes` conservan algunos tipos históricos, pero la implementación
+persistida y expuesta por HTTP vive en `catalog-schema`. No deben tratarse como módulos
+activos separados.
 
-`categories` and `attributes` have **no Nest module**: a module registering nothing would be
-noise. They gain one when they gain persistence.
+## Catálogo dinámico y permisos
 
-### Authentication is enabled and private by default
+`catalog-schema` publica dos superficies:
 
-`JwtAuthGuard` and `RolesGuard` are global `APP_GUARD` providers. Health and local login are
-the only routes marked public. The development credential adapter reads one account from
-validated environment variables; `AUTH_MODE=local` is rejected in PRD and needs the explicit
-`ALLOW_LOCAL_AUTH_IN_QAS=true` opt-in in QAS. See
-`SECURITY_BASELINE.md` for the fail-closed boundary and pending identity-provider decision.
+- consulta: categorías visibles, esquema del grid, filas filtrables y hoja técnica de un
+  producto;
+- administración: categorías y versiones de plantilla, asignaciones activas/inactivas,
+  obligatoriedad, replicabilidad, búsqueda, orden, inclusión futura en ficha técnica y
+  matriz `canView/canEdit/canImport/canExport` por rol.
 
-## The rules that keep this a modular monolith
+Desactivar una asignación nunca borra su definición ni los valores ya capturados. Los
+endpoints humanos de atributos aceptan únicamente valores de autoridad `pim`, fuerzan
+origen `manual` y confirman valor + historial en una sola transacción. Los atributos
+replicables se propagan a los productos elegibles del mismo código unificador.
 
-1. **A context's public surface is exactly**: the types in its `domain/ports/`, the types in
-   its `domain/entities/`, and whatever its `*.module.ts` exports. Nothing else.
-2. **No cross-module database access for commands or domain behavior.** `search` needs products, so it injects
-   `PRODUCT_REPOSITORY` — the port `CatalogModule` exports. It never queries `products`.
-   The one explicit exception is the `workspaces` query adapter: it builds read-only,
-   cross-context reporting projections directly from stable PostgreSQL tables. It cannot
-   write, expose a command or decide business eligibility; each owning context remains the
-   only future path for mutations.
-3. **No cross-module `application/`, `infrastructure/` or `presentation/` imports.**
-4. **Foreign keys are allowed** between modules' tables: a database constraint is a physical
-   guarantee, not a code dependency. `equivalence_group_members` references `products(id)`.
-5. Rules 1–5 are enforced by `apps/api/test/architecture/boundaries.spec.ts`, which fails
-   the build with the offending file and import named.
+## Autenticación privada por defecto
 
-## Adding a new bounded context
+`JwtAuthGuard` y `RolesGuard` son guardas globales. Login local y health son las únicas
+rutas públicas. El adaptador local toma una cuenta de variables validadas;
+`AUTH_MODE=local` se rechaza en PRD y en QAS requiere el opt-in explícito y temporal
+`ALLOW_LOCAL_AUTH_IN_QAS=true`. La autorización nueva usa capacidades; la matriz de
+plantilla añade una segunda autorización server-side a nivel de atributo. Ocultar un
+control en la web nunca reemplaza estas verificaciones. `SECURITY_BASELINE.md` documenta
+el límite fail-closed y la decisión pendiente sobre el proveedor de identidad.
 
-```
+## Reglas del monolito modular
+
+1. La superficie pública de un contexto son sus entidades, puertos y exports del módulo.
+2. Los comandos y decisiones de dominio cruzan contextos mediante puertos, no mediante SQL.
+3. `workspaces` es la excepción de lectura: proyecta varias tablas, pero no ejecuta comandos.
+4. Las claves foráneas entre contextos son garantías físicas permitidas.
+5. Una mutación y su auditoría deben compartir transacción cuando la consistencia lo exige;
+   el patrón está documentado en `AUDIT_UNIT_OF_WORK.md`.
+6. `apps/api/test/architecture/boundaries.spec.ts` protege los límites de capas y módulos.
+
+## Estructura de un contexto
+
+```text
 apps/api/src/modules/<name>/
 ├── domain/
-│   ├── entities/          # framework-free aggregates and value objects
-│   └── ports/             # interfaces + their DI tokens
-├── application/           # use cases, one per operation
-├── infrastructure/        # adapters implementing the ports
-│   └── persistence/       # <name>.tables.ts if it owns tables
-├── presentation/          # controllers, DTO mapping
-└── <name>.module.ts       # binds ports to adapters; exports the public surface
+│   ├── entities/
+│   └── ports/
+├── application/
+├── infrastructure/
+│   └── persistence/
+├── presentation/
+└── <name>.module.ts
 ```
 
-Then register the tables in `src/database/schema/index.ts` and the module in `AppModule`.
-The architecture test picks the new context up automatically.
+Las tablas se ensamblan en `src/database/schema/index.ts` y el módulo en `AppModule`; las
+migraciones SQL siguen siendo la fuente autoritativa del esquema.
