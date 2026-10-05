@@ -81,6 +81,7 @@ const apiOnlySchema = z.object({
   RATE_LIMIT_LOGIN_BLOCK_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(300_000),
   RATE_LIMIT_AI: z.coerce.number().int().min(1).max(10_000).default(10),
   RATE_LIMIT_INDEX: z.coerce.number().int().min(1).max(10_000).default(5),
+  RATE_LIMIT_INTEGRATION: z.coerce.number().int().min(1).max(10_000).default(30),
 
   /**
    * Local-only simulator for the still-unapproved Sismetic / Dynamics AX PUSH contract.
@@ -88,6 +89,11 @@ const apiOnlySchema = z.object({
    */
   AX_MOCK_MODE: z.enum(['disabled', 'local']).default('disabled'),
   AX_MOCK_SHARED_SECRET: z.string().min(32).max(1_024).optional(),
+
+  /** One-way Sismetic / Dynamics AX -> PIM persistent inbox. */
+  AX_INTEGRATION_MODE: z.enum(['disabled', 'inbound']).default('disabled'),
+  AX_INTEGRATION_AUTH_MODE: z.enum(['disabled', 'static_bearer']).default('disabled'),
+  AX_INTEGRATION_TOKEN: z.string().min(43).max(512).optional(),
 
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
   SQS_JOBS_QUEUE_URL: z.string().optional(),
@@ -177,6 +183,41 @@ export const apiEnvSchema = baseEnvSchema
         code: z.ZodIssueCode.custom,
         path: ['AX_MOCK_MODE'],
         message: 'must be "disabled" in qas/prd because the mock contract is not production API',
+      });
+    }
+    if (env.AX_INTEGRATION_AUTH_MODE === 'static_bearer' && !env.AX_INTEGRATION_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_TOKEN'],
+        message: 'is required when AX_INTEGRATION_AUTH_MODE=static_bearer',
+      });
+    }
+    if (env.AX_INTEGRATION_MODE === 'inbound' && env.AX_INTEGRATION_AUTH_MODE === 'disabled') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_AUTH_MODE'],
+        message: 'must not be "disabled" when AX_INTEGRATION_MODE=inbound',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_MODE !== 'disabled') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_MODE'],
+        message: 'must remain "disabled" in prd until the final M2M mechanism is approved',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_AUTH_MODE !== 'disabled') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_AUTH_MODE'],
+        message: 'must remain "disabled" in prd until the final M2M mechanism is approved',
+      });
+    }
+    if (env.APP_ENV === 'prd' && env.AX_INTEGRATION_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_INTEGRATION_TOKEN'],
+        message: 'must not be set in prd',
       });
     }
     // One variable per check, in this exact shape: cdr-pim-infrastructure derives its

@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AxIntegrationModule } from './modules/ax-integration/ax-integration.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CatalogSchemaModule } from './modules/catalog-schema/catalog-schema.module';
 import { CodeAffixesModule } from './modules/code-affixes/code-affixes.module';
@@ -101,6 +102,13 @@ import { API_ENV } from './shared/tokens';
             getTracker: actorOrIpTracker,
             skipIf: (context) => !hasRateLimitProfile(context, 'index'),
           },
+          {
+            name: 'integration',
+            ttl: env.RATE_LIMIT_WINDOW_MS,
+            limit: env.RATE_LIMIT_INTEGRATION,
+            getTracker: actorOrIpTracker,
+            skipIf: (context) => !hasRateLimitProfile(context, 'integration'),
+          },
         ],
       }),
     }),
@@ -121,6 +129,7 @@ import { API_ENV } from './shared/tokens';
     ImportsModule,
     IntegrationsModule,
     ProductAssetsModule,
+    AxIntegrationModule,
     WorkspacesModule,
   ],
   providers: [

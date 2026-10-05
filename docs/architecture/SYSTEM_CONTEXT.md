@@ -57,13 +57,13 @@ graph TB
 
 ## External systems
 
-| System                       | Direction        | Status                                                                                                                    |
-| ---------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Dynamics AX 2012 R2**      | AX → PIM         | Port defined (`ErpProductSourcePort`); adapter is a documented stub. Needs VPN and integration-surface decisions from CDR |
-| **PrestaShop**               | PIM → PrestaShop | Port defined (`CommercePublisherPort`); adapter stubbed. Needs API access and field mapping                               |
-| **Order-taking application** | PIM → orders     | Port defined (`OrderChannelPublisherPort`); adapter stubbed. Target system not yet specified                              |
-| **OpenAI**                   | PIM → OpenAI     | Adapters implemented. Runs against deterministic fakes until a key is configured                                          |
-| **Manufacturer catalogues**  | → PIM            | Out of scope for the foundation. TecDoc and specific manufacturers are explicitly excluded                                |
+| System                       | Direction        | Status                                                                                                                                          |
+| ---------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dynamics AX 2012 R2**      | AX → PIM         | Dirección confirmada; receptor REST, inbox PostgreSQL, idempotencia y estado implementados. Falta aplicar el mapeo al catálogo, M2M final y VPN |
+| **PrestaShop**               | PIM → PrestaShop | Port defined (`CommercePublisherPort`); adapter stubbed. Needs API access and field mapping                                                     |
+| **Order-taking application** | PIM → orders     | Port defined (`OrderChannelPublisherPort`); adapter stubbed. Target system not yet specified                                                    |
+| **OpenAI**                   | PIM → OpenAI     | Adapters implemented. Runs against deterministic fakes until a key is configured                                                                |
+| **Manufacturer catalogues**  | → PIM            | Out of scope for the foundation. TecDoc and specific manufacturers are explicitly excluded                                                      |
 
 ## What the PIM deliberately does **not** do
 
