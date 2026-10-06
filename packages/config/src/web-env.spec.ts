@@ -31,7 +31,7 @@ describe('loadWebEnv', () => {
     };
 
     it('defaults to the local development origin', () => {
-      expect(loadWebEnv({}).PUBLIC_APP_ORIGIN).toBe('http://localhost:3000');
+      expect(loadWebEnv({}).PUBLIC_APP_ORIGIN).toBe('http://localhost:3100');
     });
 
     it('accepts an https public origin in hosted environments', () => {

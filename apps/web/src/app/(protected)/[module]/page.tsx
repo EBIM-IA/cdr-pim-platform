@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { ApplicationsWorkspace } from '@/components/applications-workspace';
-import { AuditWorkspace } from '@/components/audit-workspace';
 import { CategoriesAdminWorkspace } from '@/components/categories-admin-workspace';
+import { DocumentsWorkspace } from '@/components/documents-workspace';
 import { EquivalencesWorkspace } from '@/components/equivalences-workspace';
 import { ImportsWorkspace } from '@/components/imports-workspace';
 import { ModuleWorkspace } from '@/components/module-workspace';
+import { ReferenceWorkspace } from '@/components/reference-workspace';
 import { TemplatesAdminWorkspace } from '@/components/templates-admin-workspace';
 import { isModuleSlug, moduleDefinitions, moduleSlugs } from '@/lib/module-definitions';
 import { getCurrentActor } from '@/lib/server-auth';
@@ -61,8 +62,17 @@ export default async function ModulePage({ params }: ModulePageProps) {
   if (module === 'imports') {
     return <ImportsWorkspace canExecute={capabilities.has('imports:execute')} />;
   }
-  if (module === 'reports' && capabilities.has('audit:read')) {
-    return <AuditWorkspace />;
+  if (module === 'documents') {
+    return <DocumentsWorkspace />;
+  }
+  if (
+    module === 'quality' ||
+    module === 'publication' ||
+    module === 'integrations' ||
+    module === 'reports' ||
+    module === 'administration'
+  ) {
+    return <ReferenceWorkspace key={definition.slug} definition={definition} />;
   }
 
   return <ModuleWorkspace key={definition.slug} definition={definition} />;

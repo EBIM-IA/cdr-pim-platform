@@ -52,7 +52,7 @@ function formatValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function AuditWorkspace() {
+export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [draft, setDraft] = useState<AuditFilters>(emptyFilters);
   const [filters, setFilters] = useState<AuditFilters>(emptyFilters);
   const [page, setPage] = useState(1);
@@ -108,27 +108,34 @@ export function AuditWorkspace() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Trazabilidad"
-        title="Reportes y auditoría"
-        description="Consulta el historial inmutable de cambios a nivel de campo, actor y origen."
-        actions={
-          <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw aria-hidden="true" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-            Actualizar
-          </Button>
-        }
-      />
-      <ScreenGuide
-        objective="Permite reconstruir quién cambió cada valor, cuándo ocurrió y cuál era el dato anterior."
-        actions={[
-          'Filtra por fechas, SKU, campo, origen o identificador del actor.',
-          'Compara el valor anterior y nuevo de cada cambio.',
-          'Navega por el historial paginado sin cargar todos los registros a la vez.',
-        ]}
-        dataSource="Cada fila proviene del modelo durable de auditoría del backend y conserva su correlación operativa."
-        limitation="Los filtros se aplican sobre eventos ya persistidos; esta vista no permite editar ni eliminar auditoría."
-      />
+      {!embedded ? (
+        <>
+          <PageHeader
+            eyebrow="Trazabilidad"
+            title="Reportes y auditoría"
+            description="Consulta el historial inmutable de cambios a nivel de campo, actor y origen."
+            actions={
+              <Button variant="outline" onClick={load} disabled={loading}>
+                <RefreshCw
+                  aria-hidden="true"
+                  className={loading ? 'size-4 animate-spin' : 'size-4'}
+                />
+                Actualizar
+              </Button>
+            }
+          />
+          <ScreenGuide
+            objective="Permite reconstruir quién cambió cada valor, cuándo ocurrió y cuál era el dato anterior."
+            actions={[
+              'Filtra por fechas, SKU, campo, origen o identificador del actor.',
+              'Compara el valor anterior y nuevo de cada cambio.',
+              'Navega por el historial paginado sin cargar todos los registros a la vez.',
+            ]}
+            dataSource="Cada fila proviene del modelo durable de auditoría del backend y conserva su correlación operativa."
+            limitation="Los filtros se aplican sobre eventos ya persistidos; esta vista no permite editar ni eliminar auditoría."
+          />
+        </>
+      ) : null}
 
       <Card className="mb-5 p-5">
         <form onSubmit={submit}>

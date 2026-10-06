@@ -14,14 +14,15 @@ export function ScreenGuide({
   limitation?: string;
 }) {
   return (
-    <details className="group -mt-2 mb-5 rounded-xl border border-orange-200 bg-orange-50/70 text-sm text-slate-700">
-      <summary className="flex cursor-pointer list-none items-start gap-3 rounded-xl px-4 py-3 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-        <CircleHelp aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+    <details
+      open
+      className="group -mt-2 mb-[18px] rounded-xl border border-[#ffd1af] bg-[#fff8f2] text-xs text-slate-700"
+    >
+      <summary className="flex min-h-[47px] cursor-pointer list-none items-start gap-3 rounded-xl px-4 py-3 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <CircleHelp aria-hidden="true" className="mt-0.5 size-[18px] shrink-0 text-primary" />
         <span className="min-w-0 flex-1 sm:flex sm:gap-2">
           <strong className="block shrink-0 text-cdr-ink">¿Qué es esta pantalla?</strong>
-          <span className="mt-0.5 block leading-relaxed text-muted-foreground sm:mt-0">
-            {objective}
-          </span>
+          <span className="mt-0.5 block leading-relaxed text-[#69727b] sm:mt-0">{objective}</span>
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
           <span className="hidden group-open:hidden sm:inline">Ver guía</span>
@@ -33,7 +34,7 @@ export function ScreenGuide({
         </span>
       </summary>
 
-      <div className="grid gap-5 border-t border-orange-200 px-4 pb-4 pt-4 sm:px-11 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-8">
+      <div className="grid gap-5 px-4 pb-4 pt-0 sm:px-11 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-8">
         <section aria-labelledby="screen-guide-actions">
           <h2
             id="screen-guide-actions"

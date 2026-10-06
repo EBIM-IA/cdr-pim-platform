@@ -25,6 +25,7 @@ import {
   listAdminTemplates,
   updateAdminTemplateAttribute,
 } from '@/lib/catalog-admin-api';
+import { cn } from '@/lib/utils';
 
 const roles = ['ADMINISTRADOR', 'COMPRAS', 'VENTAS'] as const;
 type BusinessRole = (typeof roles)[number];
@@ -132,6 +133,7 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [templateQuery, setTemplateQuery] = useState('');
   const [showInactive, setShowInactive] = useState(true);
   const [editing, setEditing] = useState<AdminTemplateAttributeDto | null>(null);
   const [draft, setDraft] = useState<AttributeDraft | null>(null);
@@ -212,6 +214,15 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
       )
       .sort((left, right) => left.position - right.position || left.key.localeCompare(right.key));
   }, [query, showInactive, template?.attributes]);
+  const visibleTemplates = useMemo(() => {
+    const normalized = templateQuery.trim().toLocaleLowerCase('es');
+    if (!normalized) return templates;
+    return templates.filter((item) =>
+      [item.name, item.categoryName, item.status].some((value) =>
+        value.toLocaleLowerCase('es').includes(normalized),
+      ),
+    );
+  }, [templateQuery, templates]);
 
   const beginEdit = (attribute: AdminTemplateAttributeDto) => {
     setEditing(attribute);
@@ -274,25 +285,24 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
   return (
     <>
       <PageHeader
-        eyebrow="Gobierno de atributos"
-        title="Plantillas"
-        description={
-          canManageRoleAccess
-            ? 'Configura los atributos de cada versión de plantilla y su acceso para Administrador, Compras y Ventas.'
-            : 'Configura las reglas operativas de los atributos y consulta el acceso vigente para cada rol.'
-        }
+        title="Plantilla dinámica"
+        description="Configuración de atributos por categoría."
         actions={
-          <Button
-            variant="outline"
-            onClick={() => void loadTemplate(templateId)}
-            disabled={!templateId || loadingTemplate}
-          >
-            <RefreshCw
-              className={loadingTemplate ? 'size-4 animate-spin' : 'size-4'}
-              aria-hidden="true"
-            />
-            Actualizar
-          </Button>
+          <>
+            <Button variant="outline" disabled title="Contrato de alta de atributos pendiente">
+              Añadir atributo
+            </Button>
+            <Button
+              onClick={() => void loadTemplate(templateId)}
+              disabled={!templateId || loadingTemplate}
+            >
+              <RefreshCw
+                className={loadingTemplate ? 'size-4 animate-spin' : 'size-4'}
+                aria-hidden="true"
+              />
+              Actualizar plantilla
+            </Button>
+          </>
         }
       />
       <ScreenGuide
@@ -328,6 +338,136 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
           {error}
         </div>
       ) : null}
+
+      <div className="mb-[18px] grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <Card className="p-4">
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-primary">
+            Buscar plantilla
+            <span className="relative block">
+              <Search
+                aria-hidden="true"
+                className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                className="pl-9 normal-case tracking-normal"
+                value={templateQuery}
+                onChange={(event) => setTemplateQuery(event.target.value)}
+                placeholder="Nombre, categoría o estado"
+              />
+            </span>
+          </label>
+          <div className="mt-4 max-h-[430px] space-y-1 overflow-y-auto">
+            {visibleTemplates.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={item.id === templateId}
+                onClick={() => {
+                  setTemplateId(item.id);
+                  setEditing(null);
+                }}
+                className={cn(
+                  'flex w-full items-start gap-3 rounded-lg p-2.5 text-left transition',
+                  item.id === templateId
+                    ? 'bg-orange-50 text-orange-800 ring-1 ring-orange-200'
+                    : 'hover:bg-slate-50',
+                )}
+              >
+                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-slate-100 text-[10px] font-bold">
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+                <span className="min-w-0">
+                  <strong className="block truncate text-xs">{item.name}</strong>
+                  <small className="block truncate text-[10px] text-muted-foreground">
+                    {item.categoryName} · v{item.version} · {item.status}
+                  </small>
+                </span>
+              </button>
+            ))}
+            {visibleTemplates.length === 0 ? (
+              <p className="rounded-lg bg-slate-50 p-3 text-xs text-muted-foreground">
+                Sin plantillas que coincidan.
+              </p>
+            ) : null}
+          </div>
+        </Card>
+        {template ? (
+          <Card className="p-5 sm:p-7">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_260px]">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary">
+                  Plantilla PIM · versión {template.version}
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight">{template.name}</h2>
+                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                  <span className="rounded bg-slate-100 px-2 py-1">
+                    Categoría: {template.categoryName}
+                  </span>
+                  <span className="rounded bg-slate-100 px-2 py-1">Estado: {template.status}</span>
+                </div>
+                <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {[
+                    ['Atributos', template.attributes?.length ?? 0],
+                    [
+                      'Inactivos',
+                      (template.attributes ?? []).filter((item) => !item.active).length,
+                    ],
+                    [
+                      'Obligatorios activos',
+                      (template.attributes ?? []).filter((item) => item.active && item.required)
+                        .length,
+                    ],
+                    [
+                      'Opcionales',
+                      (template.attributes ?? []).filter((item) => item.active && !item.required)
+                        .length,
+                    ],
+                    [
+                      'Replicables',
+                      (template.attributes ?? []).filter((item) => item.active && item.replicable)
+                        .length,
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border p-3">
+                      <dt className="text-[10px] uppercase leading-tight text-muted-foreground">
+                        {label}
+                      </dt>
+                      <dd className="mt-1 text-2xl font-bold">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+                <h3 className="text-sm font-semibold">Autoridades de fuente</h3>
+                <ol className="mt-4 space-y-3 text-xs">
+                  {[
+                    ...new Set(
+                      (template.attributes ?? [])
+                        .filter((attribute) => attribute.active)
+                        .map((attribute) => attribute.sourceAuthority),
+                    ),
+                  ].map((source, index) => (
+                    <li key={source} className="flex items-center gap-3">
+                      <span className="grid size-6 place-items-center rounded-full bg-orange-50 font-bold text-primary">
+                        {index + 1}
+                      </span>
+                      {source}
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
+                  Fuentes declaradas por los atributos persistidos. El contrato actual no publica un
+                  orden global de prioridad, por lo que no se infiere uno.
+                </p>
+              </aside>
+            </div>
+          </Card>
+        ) : (
+          <Card className="grid min-h-64 place-items-center p-6 text-center text-sm text-muted-foreground">
+            Selecciona una plantilla para consultar su definición.
+          </Card>
+        )}
+      </div>
 
       <Card className="mb-5 p-4 sm:p-5">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,0.8fr)_minmax(300px,1.2fr)_minmax(260px,1fr)_auto] xl:items-end">

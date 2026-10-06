@@ -1,6 +1,6 @@
 'use client';
 
-import { LoaderCircle, LockKeyhole, Mail } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
@@ -51,60 +51,54 @@ export function LoginForm({ returnTo }: LoginFormProps) {
   };
 
   return (
-    <form className="mt-8 space-y-5" onSubmit={submit} noValidate>
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-foreground" htmlFor="email">
+    <form className="mt-5" onSubmit={submit} noValidate>
+      <div className="my-5">
+        <label
+          className="mb-1.5 block text-[10px] font-medium text-muted-foreground"
+          htmlFor="email"
+        >
           Correo electrónico
         </label>
-        <div className="relative">
-          <Mail
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="username"
-            placeholder="correo@empresa.com"
-            className="h-12 pl-10"
-            required
-            disabled={pending}
-          />
-        </div>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="username"
+          placeholder="correo@empresa.com"
+          className="h-10 rounded-md text-xs"
+          required
+          disabled={pending}
+        />
       </div>
 
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-foreground" htmlFor="password">
+      <div className="my-5">
+        <label
+          className="mb-1.5 block text-[10px] font-medium text-muted-foreground"
+          htmlFor="password"
+        >
           Contraseña
         </label>
-        <div className="relative">
-          <LockKeyhole
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="••••••••"
-            className="h-12 pl-10"
-            required
-            disabled={pending}
-          />
-        </div>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          placeholder="••••••••"
+          className="h-10 rounded-md text-xs"
+          required
+          disabled={pending}
+        />
       </div>
 
-      <div aria-live="polite" aria-atomic="true" className="min-h-6">
+      <div aria-live="polite" aria-atomic="true">
         {error ? (
-          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
           </p>
         ) : null}
       </div>
 
-      <Button type="submit" className="h-12 w-full" disabled={pending}>
+      <Button type="submit" className="mt-2 h-10 w-full rounded-md text-xs" disabled={pending}>
         {pending ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
         {pending ? 'Validando acceso…' : 'Iniciar sesión'}
       </Button>

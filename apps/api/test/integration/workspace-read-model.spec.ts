@@ -8,6 +8,12 @@ import { type TestDatabase, createTestDatabase, testDatabaseUrl } from './databa
 
 const PRODUCT_ID = '10000000-0000-4000-8000-000000000001';
 const GROUP_ID = '20000000-0000-4000-8000-000000000001';
+const CATEGORY_ID = '30000000-0000-4000-8000-000000000001';
+const TEMPLATE_ID = '40000000-0000-4000-8000-000000000001';
+const ATTRIBUTE_ID = '50000000-0000-4000-8000-000000000001';
+const APPLICATION_ID = '60000000-0000-4000-8000-000000000001';
+const HOMOLOG_ID = '70000000-0000-4000-8000-000000000001';
+const BATCH_ID = '80000000-0000-4000-8000-000000000001';
 
 const actor: AuthenticatedActor = {
   id: 'integration-viewer',
@@ -52,6 +58,39 @@ describe('PostgresWorkspaceReadModel', () => {
       INSERT INTO equivalence_group_members (group_id, product_id, role)
       VALUES (${GROUP_ID}, ${PRODUCT_ID}, 'member')
     `;
+    await database.sql`
+      INSERT INTO catalog_categories (id, slug, name, path, position)
+      VALUES (${CATEGORY_ID}, 'rodamientos', 'Rodamientos', 'rodamientos', 1)
+    `;
+    await database.sql`
+      INSERT INTO attribute_templates (id, category_id, name, version, status)
+      VALUES (${TEMPLATE_ID}, ${CATEGORY_ID}, 'Rodamiento', 1, 'active')
+    `;
+    await database.sql`
+      INSERT INTO attribute_definitions (id, key, label, data_type, unit, source_authority)
+      VALUES (${ATTRIBUTE_ID}, 'diametro_interior', 'Diámetro interior', 'measurement', 'mm', 'pim')
+    `;
+    await database.sql`
+      INSERT INTO template_attribute_assignments (
+        template_id, attribute_definition_id, position, required, replicable, active
+      ) VALUES (${TEMPLATE_ID}, ${ATTRIBUTE_ID}, 1, true, true, true)
+    `;
+    await database.sql`
+      INSERT INTO group_applications (
+        id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source
+      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'Automotriz', 'Toyota', 'Corolla', 2014, 2018, true, 'manual')
+    `;
+    await database.sql`
+      INSERT INTO external_homologs (
+        id, equivalence_group_id, external_code, external_brand, active, approval_status, source
+      ) VALUES (${HOMOLOG_ID}, ${GROUP_ID}, 'ALT-001', 'WAGNER', true, 'approved', 'manual')
+    `;
+    await database.sql`
+      INSERT INTO import_batches (
+        id, target, format, status, idempotency_key, payload_hash, created_by,
+        total_rows, valid_rows, invalid_rows
+      ) VALUES (${BATCH_ID}, 'applications', 'json', 'confirmed', 'workspace-test', 'hash', ${actor.id}, 2, 1, 1)
+    `;
   });
 
   afterAll(async () => {
@@ -70,13 +109,16 @@ describe('PostgresWorkspaceReadModel', () => {
   });
 
   it('uses persisted catalog and equivalence data without inventing missing capabilities', async () => {
-    const [equivalences, quality, publication, reports, templates] = await Promise.all([
-      readModel.read('equivalences', actor),
-      readModel.read('quality', actor),
-      readModel.read('publication', actor),
-      readModel.read('reports', actor),
-      readModel.read('templates', actor),
-    ]);
+    const [equivalences, quality, publication, reports, templates, applications, imports] =
+      await Promise.all([
+        readModel.read('equivalences', actor),
+        readModel.read('quality', actor),
+        readModel.read('publication', actor),
+        readModel.read('reports', actor),
+        readModel.read('templates', actor),
+        readModel.read('applications', actor),
+        readModel.read('imports', actor),
+      ]);
 
     expect(equivalences.rows[0]?.values).toMatchObject({
       code: 'UNIF-001',
@@ -92,7 +134,29 @@ describe('PostgresWorkspaceReadModel', () => {
       value: 1,
       format: 'integer',
     });
-    expect(templates.operationalStatus).toBe('blocked');
-    expect(templates.rows).toEqual([]);
+    expect(templates.operationalStatus).toBe('operational');
+    expect(templates.rows[0]?.values).toMatchObject({
+      category: 'Rodamientos',
+      attributes: 1,
+      replicable: 1,
+    });
+    expect(applications.rows[0]?.values).toMatchObject({
+      unifiedCode: 'UNIF-001',
+      make: 'Toyota',
+      model: 'Corolla',
+      status: 'Activo',
+    });
+    expect(equivalences.metrics).toContainEqual({
+      key: 'eligible-homologs',
+      label: 'Activos y aprobados',
+      value: 1,
+      format: 'integer',
+    });
+    expect(imports.rows[0]?.values).toMatchObject({
+      target: 'applications',
+      status: 'confirmed',
+      totalRows: 2,
+      invalidRows: 1,
+    });
   });
 });

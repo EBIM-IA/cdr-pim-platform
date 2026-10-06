@@ -1,7 +1,20 @@
 'use client';
 
 import type { GroupApplicationDto } from '@cdr/contracts';
-import { Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import {
+  CarFront,
+  Download,
+  Layers3,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
+import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -11,6 +24,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   createApplication,
@@ -64,11 +78,15 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState('');
+  const [makeFilter, setMakeFilter] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ApplicationForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [view, setView] = useState<'context' | 'all'>('context');
+  const [selectedCode, setSelectedCode] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,13 +108,53 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('es');
-    if (!normalized) return items;
-    return items.filter((item) =>
-      [item.unifiedCode, item.vehicleType, item.make, item.model, item.engine, item.notes]
-        .filter(Boolean)
-        .some((value) => String(value).toLocaleLowerCase('es').includes(normalized)),
+    return items.filter(
+      (item) =>
+        (!normalized ||
+          [item.unifiedCode, item.vehicleType, item.make, item.model, item.engine, item.notes]
+            .filter(Boolean)
+            .some((value) => String(value).toLocaleLowerCase('es').includes(normalized))) &&
+        (!vehicleTypeFilter || item.vehicleType === vehicleTypeFilter) &&
+        (!makeFilter || item.make === makeFilter),
     );
-  }, [items, query]);
+  }, [items, makeFilter, query, vehicleTypeFilter]);
+
+  const unifiedCodes = useMemo(
+    () => [...new Set(items.map((item) => item.unifiedCode))].sort(),
+    [items],
+  );
+  const effectiveCode = selectedCode || unifiedCodes[0] || '';
+  const contextRows = filtered.filter((item) => item.unifiedCode === effectiveCode);
+  const visibleRows = view === 'context' ? contextRows : filtered;
+  const vehicleTypes = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.map((item) => item.vehicleType).filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(),
+    [items],
+  );
+  const makes = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.map((item) => item.make).filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(),
+    [items],
+  );
+
+  const downloadTemplate = () => {
+    const content =
+      'codigo_unificador,tipo_vehiculo,marca,modelo,anio_desde,anio_hasta,motor,notas\n';
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'plantilla-aplicaciones.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const updateField = (field: keyof ApplicationForm, value: string) =>
     setForm((current) => ({ ...current, [field]: value }));
@@ -158,20 +216,22 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       <PageHeader
         eyebrow="Compatibilidad"
         title="Aplicaciones"
-        description="Gestiona compatibilidades heredadas por todos los SKU del mismo código unificador."
+        description="Aplicaciones automotrices e industriales compartidas por los SKU de un mismo código unificador."
         actions={
           <>
-            <Button variant="outline" onClick={load} disabled={loading}>
-              <RefreshCw
-                aria-hidden="true"
-                className={loading ? 'size-4 animate-spin' : 'size-4'}
-              />
-              Actualizar
+            <Button variant="outline" onClick={downloadTemplate}>
+              <Download aria-hidden="true" className="size-4" /> Plantilla CSV
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/imports">
+                <Upload aria-hidden="true" className="size-4" /> Carga masiva
+              </Link>
             </Button>
             {canWrite ? (
               <Button
                 onClick={() => {
                   closeForm();
+                  setForm({ ...emptyForm, unifiedCode: effectiveCode });
                   setShowForm(true);
                 }}
               >
@@ -182,7 +242,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         }
       />
       <ScreenGuide
-        objective="Consulta y mantiene las aplicaciones técnicas asociadas al código unificador, no a un SKU aislado."
+        objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
         actions={[
           'Busca por código, marca, modelo, motor o notas.',
           'Crea o edita compatibilidades si tu rol cuenta con permiso de escritura.',
@@ -191,6 +251,92 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         dataSource="Los registros se leen y escriben en el API de aplicaciones. Cada cambio genera auditoría en el backend."
         limitation="El código unificador debe existir previamente; una aplicación no puede asociarse a un código desconocido."
       />
+
+      <nav className="mb-5 grid gap-3 sm:grid-cols-2" aria-label="Vistas de aplicaciones">
+        <button
+          type="button"
+          className={`rounded-xl border p-4 text-left ${view === 'context' ? 'border-primary bg-orange-50/50 ring-1 ring-primary' : 'bg-white'}`}
+          onClick={() => setView('context')}
+        >
+          <strong className="text-sm">Código unificador en contexto</strong>
+          <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
+            {contextRows.length}
+          </span>
+          <small className="mt-1 block text-muted-foreground">
+            Aplicaciones heredadas por todos los SKU del grupo
+          </small>
+        </button>
+        <button
+          type="button"
+          className={`rounded-xl border p-4 text-left ${view === 'all' ? 'border-primary bg-orange-50/50 ring-1 ring-primary' : 'bg-white'}`}
+          onClick={() => setView('all')}
+        >
+          <strong className="text-sm">Todas las aplicaciones</strong>
+          <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
+            {items.length}
+          </span>
+          <small className="mt-1 block text-muted-foreground">
+            Vista de catálogo y mantenimiento masivo
+          </small>
+        </button>
+      </nav>
+
+      {view === 'context' ? (
+        <Card className="mb-5 overflow-hidden">
+          <div className="grid gap-5 border-b bg-slate-50/70 p-5 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,2fr)] lg:items-end">
+            <Select
+              label="Código unificador"
+              value={effectiveCode}
+              onChange={(event) => setSelectedCode(event.target.value)}
+            >
+              {unifiedCodes.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </Select>
+            <div className="flex flex-wrap gap-3">
+              <div className="min-w-40 rounded-xl border bg-white p-4">
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Layers3 className="size-4 text-primary" /> Aplicaciones heredadas
+                </span>
+                <strong className="mt-1 block text-2xl">{contextRows.length}</strong>
+              </div>
+              <div className="min-w-40 rounded-xl border bg-white p-4">
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <CarFront className="size-4 text-primary" /> Marcas / industrias
+                </span>
+                <strong className="mt-1 block text-2xl">
+                  {new Set(contextRows.map((item) => item.make).filter(Boolean)).size}
+                </strong>
+              </div>
+              <div className="min-w-48 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-950">
+                <strong className="block">Regla de herencia vigente</strong>
+                <span className="mt-1 block leading-relaxed opacity-75">
+                  El backend persiste la aplicación en el grupo; no duplica registros por SKU.
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {view === 'all' ? (
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumen">
+          {[
+            ['Aplicaciones', items.length, 'registradas'],
+            ['Códigos unificadores', unifiedCodes.length, 'grupos con aplicaciones'],
+            ['Marcas / industrias', makes.length, 'valores registrados'],
+            ['Inactivas', items.filter((item) => !item.active).length, 'con historial'],
+          ].map(([label, value, note]) => (
+            <Card key={label} className="min-h-28 p-5">
+              <small className="text-muted-foreground">{label}</small>
+              <strong className="mt-1 block text-2xl">{value}</strong>
+              <span className="text-[10px] text-muted-foreground">{note}</span>
+            </Card>
+          ))}
+        </section>
+      ) : null}
 
       {notice ? (
         <div
@@ -301,7 +447,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       ) : null}
 
       <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_220px_220px_auto_auto] xl:items-end">
           <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
             Buscar aplicaciones
             <span className="relative block">
@@ -317,6 +463,30 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               />
             </span>
           </label>
+          <Select
+            label="Tipo"
+            value={vehicleTypeFilter}
+            onChange={(event) => setVehicleTypeFilter(event.target.value)}
+          >
+            <option value="">Todos</option>
+            {vehicleTypes.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Marca / industria"
+            value={makeFilter}
+            onChange={(event) => setMakeFilter(event.target.value)}
+          >
+            <option value="">Todas</option>
+            {makes.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </Select>
           <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm">
             <input
               type="checkbox"
@@ -325,12 +495,16 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             />{' '}
             Mostrar inactivos
           </label>
+          <Button variant="ghost" onClick={load} disabled={loading}>
+            <RefreshCw aria-hidden="true" className={loading ? 'size-4 animate-spin' : 'size-4'} />
+            Actualizar
+          </Button>
         </div>
       </Card>
 
       {loading ? (
         <Skeleton className="h-80 rounded-xl" />
-      ) : filtered.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <StatePanel
           variant="empty"
           title="Sin aplicaciones"
@@ -353,7 +527,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filtered.map((item) => (
+                {visibleRows.map((item) => (
                   <tr key={item.id} className="hover:bg-orange-50/40">
                     <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
                     <td className="px-4 py-3">{item.vehicleType ?? '—'}</td>

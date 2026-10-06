@@ -24,17 +24,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (actor) redirect(returnTo);
 
   return (
-    <main className="grid min-h-dvh bg-white lg:grid-cols-2">
-      <section className="relative hidden overflow-hidden bg-cdr-ink px-12 py-16 text-white lg:flex lg:items-center lg:justify-center">
-        <div
-          aria-hidden="true"
-          className="absolute -left-24 -top-24 size-80 rounded-full bg-primary/20 blur-3xl"
-        />
-        <div
-          aria-hidden="true"
-          className="absolute -bottom-32 -right-24 size-96 rounded-full bg-primary/15 blur-3xl"
-        />
-        <div className="relative max-w-lg text-center">
+    <main className="grid min-h-dvh bg-white md:grid-cols-2">
+      <section className="hidden items-center justify-center bg-[#161616] px-12 py-14 text-white md:flex">
+        <div className="w-[min(510px,90%)] text-center">
           <Image
             src="/brand/cdr-isotipo.svg"
             alt="Casa del Rulimán"
@@ -43,28 +35,19 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             priority
             className="mx-auto h-auto w-[142px]"
           />
-          <h1 className="mt-8 text-balance text-4xl font-medium leading-tight tracking-tight">
+          <h1 className="mx-auto my-[26px] max-w-[410px] text-balance text-[29px] font-medium leading-[1.12]">
             Un catálogo más inteligente para un futuro ganador.
           </h1>
-          <p className="mt-6 text-sm text-white/65">
+          <p className="text-[11px] text-white/70">
             Plataforma interna PIM · información de productos confiable
           </p>
         </div>
       </section>
 
-      <section className="flex min-h-dvh items-center justify-center px-5 py-12 sm:px-10 lg:px-16">
-        <div className="w-full max-w-[420px]">
-          <Image
-            src="/brand/cdr-isotipo.svg"
-            alt="Casa del Rulimán"
-            width={88}
-            height={76}
-            priority
-            className="mb-10 h-auto w-20 rounded-xl bg-cdr-ink p-2 lg:hidden"
-          />
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-primary">CDR PIM</p>
-          <h2 className="text-3xl font-semibold tracking-tight">Bienvenido</h2>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+      <section className="flex min-h-dvh items-center justify-center px-5 py-9 sm:px-10 md:px-9">
+        <div className="w-full max-w-[390px]">
+          <h2 className="text-[25px] font-semibold tracking-tight">Bienvenido</h2>
+          <p className="mt-[17px] text-center text-xs leading-relaxed text-muted-foreground">
             Ingresa con tu cuenta autorizada para acceder al catálogo maestro.
           </p>
           <LoginForm returnTo={returnTo} />

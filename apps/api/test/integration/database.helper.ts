@@ -111,6 +111,10 @@ export async function createTestDatabase(): Promise<TestDatabase> {
               TRUNCATE TABLE
                 audit_change_items,
                 audit_entries,
+                import_rows,
+                import_batches,
+                group_applications,
+                external_homologs,
                 catalog_categories,
                 attribute_definitions,
                 product_embeddings,

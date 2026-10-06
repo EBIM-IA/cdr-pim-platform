@@ -257,91 +257,208 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   }
 
   private async readTemplates(): Promise<WorkspaceDto> {
-    const persisted = await this.relationExists('templates');
+    const [templates, summary] = await Promise.all([
+      this.sql<
+        {
+          id: string;
+          category: string;
+          template: string;
+          version: number;
+          status: string;
+          attributes: number;
+          replicable: number;
+        }[]
+      >`
+        SELECT
+          t.id,
+          c.name AS category,
+          t.name AS template,
+          t.version,
+          t.status,
+          COUNT(taa.attribute_definition_id)::int AS attributes,
+          COUNT(taa.attribute_definition_id) FILTER (
+            WHERE taa.active = true AND taa.replicable = true
+          )::int AS replicable
+        FROM attribute_templates t
+        JOIN catalog_categories c ON c.id = t.category_id
+        LEFT JOIN template_attribute_assignments taa ON taa.template_id = t.id
+        GROUP BY t.id, c.name, t.name, t.version, t.status
+        ORDER BY c.name, t.version DESC
+        LIMIT 100
+      `,
+      this.sql<
+        {
+          templates: number;
+          active: number;
+          attributes: number;
+          required: number;
+          replicable: number;
+        }[]
+      >`
+        SELECT
+          (SELECT COUNT(*)::int FROM attribute_templates) AS templates,
+          (SELECT COUNT(*)::int FROM attribute_templates WHERE status = 'active') AS active,
+          (SELECT COUNT(*)::int FROM template_attribute_assignments WHERE active = true) AS attributes,
+          (SELECT COUNT(*)::int FROM template_attribute_assignments
+            WHERE active = true AND required = true) AS required,
+          (SELECT COUNT(*)::int FROM template_attribute_assignments
+            WHERE active = true AND replicable = true) AS replicable
+      `,
+    ]);
+    const counts = summary[0] ?? {
+      templates: 0,
+      active: 0,
+      attributes: 0,
+      required: 0,
+      replicable: 0,
+    };
     return this.response('templates', {
-      operationalStatus: 'blocked',
+      operationalStatus: 'operational',
       metrics: [
-        textMetric(
-          'persistence',
-          'Persistencia de plantillas',
-          persisted ? 'Detectada' : 'No disponible',
-        ),
-        integerMetric('rows', 'Plantillas expuestas', 0),
+        integerMetric('templates', 'Versiones persistidas', counts.templates),
+        integerMetric('active', 'Plantillas activas', counts.active),
+        integerMetric('attributes', 'Atributos activos', counts.attributes),
+        integerMetric('required', 'Atributos obligatorios', counts.required),
+        integerMetric('replicable', 'Atributos replicables', counts.replicable),
       ],
       columns: [
+        { key: 'category', label: 'Categoría', type: 'text' },
         { key: 'template', label: 'Plantilla', type: 'text' },
-        { key: 'version', label: 'Versión', type: 'text' },
+        { key: 'version', label: 'Versión', type: 'number' },
         { key: 'status', label: 'Estado', type: 'status' },
+        { key: 'attributes', label: 'Atributos', type: 'number' },
+        { key: 'replicable', label: 'Replicables', type: 'number' },
       ],
-      rows: [],
+      rows: templates.map((row) => ({
+        id: row.id,
+        values: {
+          category: row.category,
+          template: row.template,
+          version: row.version,
+          status: row.status,
+          attributes: row.attributes,
+          replicable: row.replicable,
+        },
+      })),
+      totalRows: counts.templates,
       notices: [
-        warning(
-          'templates-not-persisted',
-          'No hay registros de plantillas disponibles',
-          persisted
-            ? 'Se detectó una relación de plantillas, pero todavía no existe un contrato aprobado para leerla desde este módulo.'
-            : 'PostgreSQL no contiene todavía tablas de plantillas, versiones ni valores de atributos.',
+        info(
+          'templates-live',
+          'Plantillas y atributos persistidos',
+          'La proyección cuenta versiones, asignaciones activas y atributos replicables directamente en PostgreSQL.',
         ),
       ],
       actions: [
         refreshAction('templates'),
+        {
+          id: 'browse-templates',
+          label: 'Consultar plantillas',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: '/api/v1/catalog/admin/templates',
+        },
         blockedAction(
           'create-template',
           'Crear plantilla',
           'Faltan versionado, compatibilidad y reglas de aprobación.',
-        ),
-        blockedAction(
-          'propagate-attributes',
-          'Propagar atributos',
-          'La replicabilidad está confirmada, pero faltan fuente, conflictos y exclusiones.',
         ),
       ],
     });
   }
 
   private async readApplications(): Promise<WorkspaceDto> {
-    const [persisted, groups] = await Promise.all([
-      this.relationExists('group_applications'),
+    const [groups, applications, counts] = await Promise.all([
       this.groupSummary(),
+      this.sql<
+        {
+          id: string;
+          unifiedCode: string;
+          vehicleType: string | null;
+          make: string | null;
+          model: string | null;
+          years: string;
+          active: boolean;
+          source: string;
+        }[]
+      >`
+        SELECT
+          ga.id,
+          eg.code AS "unifiedCode",
+          ga.vehicle_type AS "vehicleType",
+          ga.make,
+          ga.model,
+          CASE
+            WHEN ga.year_from IS NULL AND ga.year_to IS NULL THEN '—'
+            WHEN ga.year_from = ga.year_to OR ga.year_to IS NULL THEN ga.year_from::text
+            ELSE concat(ga.year_from, '–', ga.year_to)
+          END AS years,
+          ga.active,
+          ga.source
+        FROM group_applications ga
+        JOIN equivalence_groups eg ON eg.id = ga.equivalence_group_id
+        ORDER BY ga.updated_at DESC, eg.code
+        LIMIT 100
+      `,
+      this.sql<{ total: number; active: number }[]>`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE active = true)::int AS active
+        FROM group_applications
+      `,
     ]);
+    const summary = counts[0] ?? { total: 0, active: 0 };
 
     return this.response('applications', {
-      operationalStatus: 'blocked',
+      operationalStatus: 'operational',
       metrics: [
         integerMetric('unifier-groups', 'Grupos unificadores disponibles', groups.groups),
-        textMetric(
-          'persistence',
-          'Persistencia de aplicaciones',
-          persisted ? 'Detectada' : 'No disponible',
-        ),
-        integerMetric('rows', 'Aplicaciones expuestas', 0),
+        integerMetric('applications', 'Aplicaciones registradas', summary.total),
+        integerMetric('active', 'Aplicaciones activas', summary.active),
+        integerMetric('shown', 'Filas mostradas', applications.length),
       ],
       columns: [
-        { key: 'group', label: 'Código unificador', type: 'text' },
-        { key: 'application', label: 'Aplicación', type: 'text' },
+        { key: 'unifiedCode', label: 'Código unificador', type: 'text' },
+        { key: 'vehicleType', label: 'Tipo', type: 'text' },
+        { key: 'make', label: 'Marca / industria', type: 'text' },
+        { key: 'model', label: 'Modelo / equipo', type: 'text' },
+        { key: 'years', label: 'Años / uso', type: 'text' },
         { key: 'status', label: 'Estado', type: 'status' },
+        { key: 'source', label: 'Fuente', type: 'text' },
       ],
-      rows: [],
+      rows: applications.map((row) => ({
+        id: row.id,
+        values: {
+          unifiedCode: row.unifiedCode,
+          vehicleType: row.vehicleType ?? 'Sin tipo',
+          make: row.make ?? 'Sin marca',
+          model: row.model ?? 'Sin modelo',
+          years: row.years,
+          status: row.active ? 'Activo' : 'Inactivo',
+          source: row.source,
+        },
+      })),
+      totalRows: summary.total,
       notices: [
-        warning(
-          'applications-not-persisted',
-          'Las aplicaciones todavía no tienen almacenamiento aprobado',
-          'Los grupos unificadores sí provienen de PostgreSQL, pero no se inventan aplicaciones ni campos de compatibilidad.',
+        info(
+          'applications-by-unifier',
+          'Aplicaciones compartidas por código unificador',
+          'Cada relación se resuelve desde el grupo y es heredada por sus SKU miembros, de acuerdo con la regla confirmada.',
         ),
       ],
       actions: [
         refreshAction('applications'),
-        blockedAction(
-          'manage-applications',
-          'Registrar aplicaciones',
-          'Falta ratificar los campos, vocabularios, estados y manejo de conflictos.',
-        ),
+        {
+          id: 'manage-applications',
+          label: 'Consultar aplicaciones',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: '/api/v1/applications',
+        },
       ],
     });
   }
 
   private async readEquivalences(): Promise<WorkspaceDto> {
-    const [summary, groups] = await Promise.all([
+    const [summary, groups, homologs] = await Promise.all([
       this.groupSummary(),
       this.sql<
         {
@@ -367,14 +484,23 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         ORDER BY eg.code
         LIMIT 100
       `,
+      this.sql<{ total: number; eligible: number; pending: number }[]>`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE active = true AND approval_status = 'approved')::int AS eligible,
+          COUNT(*) FILTER (WHERE approval_status = 'pending')::int AS pending
+        FROM external_homologs
+      `,
     ]);
+    const homologSummary = homologs[0] ?? { total: 0, eligible: 0, pending: 0 };
 
     return this.response('equivalences', {
       operationalStatus: 'partial',
       metrics: [
         integerMetric('groups', 'Grupos persistidos', summary.groups),
         integerMetric('memberships', 'Membresías persistidas', summary.memberships),
-        textMetric('homologs', 'Homólogos externos', 'Sin persistencia'),
+        integerMetric('homologs', 'Homólogos externos', homologSummary.total),
+        integerMetric('eligible-homologs', 'Activos y aprobados', homologSummary.eligible),
       ],
       columns: [
         { key: 'code', label: 'Código unificador', type: 'text' },
@@ -400,19 +526,21 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Lectura real de grupos y miembros',
           'La proyección consulta PostgreSQL y limita la tabla a los primeros 100 grupos ordenados por código.',
         ),
-        warning(
-          'homologs-not-persisted',
-          'La gestión de homólogos continúa bloqueada',
-          'No existe una tabla de homólogos. Cuando se implemente, la búsqueda solo considerará registros activos y aprobados.',
+        info(
+          'homologs-live',
+          'Homólogos externos persistidos',
+          `${homologSummary.eligible} relaciones activas y aprobadas participan en la búsqueda; ${homologSummary.pending} esperan aprobación.`,
         ),
       ],
       actions: [
         refreshAction('equivalences'),
-        blockedAction(
-          'manage-homologs',
-          'Gestionar homólogos',
-          'Faltan persistencia, normalización y matriz de aprobación.',
-        ),
+        {
+          id: 'manage-homologs',
+          label: 'Consultar homólogos',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: '/api/v1/equivalences',
+        },
       ],
     });
   }
@@ -469,60 +597,102 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   }
 
   private async readImports(): Promise<WorkspaceDto> {
-    const persisted = await this.relationExists('import_batches');
     const queueState =
       this.env.QUEUE_DRIVER === 'sqs' ? 'SQS configurado' : 'Memoria local no durable';
     const storageState =
       this.env.STORAGE_DRIVER === 's3' ? 'S3 configurado' : 'Memoria local no durable';
-    const rows: WorkspaceRow[] = [
-      {
-        id: 'queue',
-        values: { component: 'Cola de trabajos', driver: this.env.QUEUE_DRIVER, state: queueState },
-      },
-      {
-        id: 'storage',
-        values: {
-          component: 'Almacenamiento temporal',
-          driver: this.env.STORAGE_DRIVER,
-          state: storageState,
-        },
-      },
-      {
-        id: 'history',
-        values: {
-          component: 'Historial de lotes',
-          driver: 'PostgreSQL',
-          state: persisted ? 'Relación detectada sin contrato aprobado' : 'No disponible',
-        },
-      },
-    ];
+    const [batches, counts] = await Promise.all([
+      this.sql<
+        {
+          id: string;
+          target: string;
+          format: string;
+          status: string;
+          totalRows: number;
+          validRows: number;
+          invalidRows: number;
+          createdBy: string;
+          createdAt: Date | string;
+        }[]
+      >`
+        SELECT
+          id, target, format, status,
+          total_rows AS "totalRows",
+          valid_rows AS "validRows",
+          invalid_rows AS "invalidRows",
+          created_by AS "createdBy",
+          created_at AS "createdAt"
+        FROM import_batches
+        ORDER BY created_at DESC
+        LIMIT 100
+      `,
+      this.sql<{ batches: number; confirmed: number; invalidRows: number }[]>`
+        SELECT
+          COUNT(*)::int AS batches,
+          COUNT(*) FILTER (WHERE status = 'confirmed')::int AS confirmed,
+          COALESCE(SUM(invalid_rows), 0)::int AS "invalidRows"
+        FROM import_batches
+      `,
+    ]);
+    const summary = counts[0] ?? { batches: 0, confirmed: 0, invalidRows: 0 };
 
     return this.response('imports', {
-      operationalStatus: 'blocked',
+      operationalStatus: 'partial',
       metrics: [
-        textMetric('queue', 'Cola', queueState),
-        textMetric('storage', 'Almacenamiento', storageState),
-        textMetric('history', 'Persistencia de lotes', persisted ? 'Detectada' : 'No disponible'),
+        integerMetric('batches', 'Lotes persistidos', summary.batches),
+        integerMetric('confirmed', 'Lotes confirmados', summary.confirmed),
+        integerMetric('invalid-rows', 'Filas con error', summary.invalidRows),
+        textMetric('queue', 'Ejecución', queueState),
       ],
       columns: [
-        { key: 'component', label: 'Componente', type: 'text' },
-        { key: 'driver', label: 'Adaptador', type: 'text' },
-        { key: 'state', label: 'Estado real', type: 'status' },
+        { key: 'target', label: 'Destino', type: 'text' },
+        { key: 'format', label: 'Formato', type: 'text' },
+        { key: 'totalRows', label: 'Registros', type: 'number' },
+        { key: 'validRows', label: 'Válidos', type: 'number' },
+        { key: 'invalidRows', label: 'Con error', type: 'number' },
+        { key: 'status', label: 'Estado', type: 'status' },
+        { key: 'createdBy', label: 'Actor', type: 'text' },
+        { key: 'createdAt', label: 'Creado', type: 'datetime' },
       ],
-      rows,
+      rows: batches.map((row) => ({
+        id: row.id,
+        values: {
+          target: row.target,
+          format: row.format,
+          totalRows: row.totalRows,
+          validRows: row.validRows,
+          invalidRows: row.invalidRows,
+          status: row.status,
+          createdBy: row.createdBy,
+          createdAt: toIsoString(row.createdAt),
+        },
+      })),
+      totalRows: summary.batches,
       notices: [
+        info(
+          'import-preview-live',
+          'Vista previa y confirmación persistidas',
+          `Los lotes y sus resultados por fila se almacenan en PostgreSQL. Almacenamiento temporal: ${storageState}.`,
+        ),
         warning(
-          'batch-import-not-implemented',
-          'El motor de lotes todavía no existe',
-          'La cola técnica puede recibir jobs internos, pero no hay carga, validación, historial ni ejecución idempotente de archivos.',
+          'batch-application-pending',
+          'Aplicación asíncrona pendiente',
+          'Confirmar conserva el lote validado; aplicar sus filas al catálogo requiere el worker transaccional.',
         ),
       ],
       actions: [
         refreshAction('imports'),
+        {
+          id: 'preview-batch',
+          label: 'Validar importación',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/imports/preview',
+        },
         blockedAction(
-          'create-batch',
-          'Crear importación',
-          'Faltan tablas de lotes/filas, formatos aprobados, idempotencia y auditoría.',
+          'apply-batch',
+          'Aplicar lote confirmado',
+          'El worker idempotente de aplicación al catálogo todavía no está disponible.',
         ),
       ],
     });

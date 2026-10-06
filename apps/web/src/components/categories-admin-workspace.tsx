@@ -1,10 +1,24 @@
 'use client';
 
-import type { AdminCatalogCategoryDto } from '@cdr/contracts';
-import { Check, Pencil, RefreshCw, RotateCcw, Search, ToggleLeft, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
+import {
+  Check,
+  CheckCircle2,
+  Clock3,
+  ListChecks,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  ToggleLeft,
+  X,
+} from 'lucide-react';
+import Link from 'next/link';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { MetricCard } from '@/components/metric-card';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
@@ -14,7 +28,9 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   CatalogAdminApiError,
+  getAdminTemplate,
   listAdminCategories,
+  listAdminTemplates,
   updateAdminCategory,
 } from '@/lib/catalog-admin-api';
 
@@ -33,12 +49,24 @@ export function CategoriesAdminWorkspace() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CategoryDraft>({ name: '', position: '0' });
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setCategories(await listAdminCategories(true));
+      const [categoryRows, templateHeaders] = await Promise.all([
+        listAdminCategories(true),
+        listAdminTemplates(),
+      ]);
+      setCategories(categoryRows);
+      setTemplates(
+        await Promise.all(
+          templateHeaders.map((template) =>
+            template.attributes ? Promise.resolve(template) : getAdminTemplate(template.id),
+          ),
+        ),
+      );
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -65,6 +93,29 @@ export function CategoriesAdminWorkspace() {
       )
       .sort((left, right) => left.position - right.position || left.path.localeCompare(right.path));
   }, [categories, query, showInactive]);
+  const activeTemplates = templates.filter((template) => template.status === 'active');
+  const categoriesWithActiveTemplate = new Set(
+    activeTemplates.map((template) => template.categoryId),
+  );
+  const pendingDefinitionCount = categories.filter(
+    (category) => category.active && !categoriesWithActiveTemplate.has(category.id),
+  ).length;
+  const attributeCount = activeTemplates.reduce(
+    (total, template) =>
+      total + (template.attributes?.filter((attribute) => attribute.active).length ?? 0),
+    0,
+  );
+  const requiredCount = activeTemplates.reduce(
+    (total, template) =>
+      total +
+      (template.attributes?.filter((attribute) => attribute.active && attribute.required).length ??
+        0),
+    0,
+  );
+  const templateFor = (categoryId: string) =>
+    templates.find(
+      (template) => template.categoryId === categoryId && template.status === 'active',
+    ) ?? templates.find((template) => template.categoryId === categoryId);
 
   const beginEdit = (category: AdminCatalogCategoryDto) => {
     setEditingId(category.id);
@@ -147,26 +198,70 @@ export function CategoriesAdminWorkspace() {
   return (
     <>
       <PageHeader
-        eyebrow="Estructura del catálogo"
-        title="Categorías"
-        description="Organiza las categorías persistidas y desactiva las que ya no deben utilizarse, sin borrar su historial."
+        title="Categorías y líneas"
+        description="Líneas, categorías y vigencias del catálogo."
         actions={
-          <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} aria-hidden="true" />
-            Actualizar
-          </Button>
+          <>
+            <Button disabled title="El contrato de asociación de línea ERP aún no está aprobado">
+              Asociar línea ERP
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/templates">Administrar plantillas</Link>
+            </Button>
+          </>
         }
       />
       <ScreenGuide
-        objective="Administra el nombre, el orden y la vigencia de la taxonomía que utiliza el catálogo dinámico."
+        objective="Relaciona la línea recibida desde ERP con la plantilla PIM que define qué atributos se enriquecen."
         actions={[
-          'Busca por nombre, identificador o ruta y revisa categorías activas e inactivas.',
-          'Edita el nombre y la posición directamente desde la tabla.',
-          'Desactiva o reactiva una categoría sin eliminar sus plantillas ni su trazabilidad.',
+          'Abre una plantilla o edita el nombre, orden y vigencia de una categoría.',
+          'Revisa las categorías activas, inactivas y pendientes de una plantilla definida.',
         ]}
-        dataSource="La lista y cada cambio provienen de la API administrativa del catálogo; las actualizaciones usan control de concurrencia."
+        dataSource="Las categorías, plantillas y asignaciones provienen de la API administrativa del catálogo; cada actualización usa control de concurrencia."
         limitation="Esta pantalla no crea categorías ni modifica la jerarquía porque esos endpoints todavía no forman parte del contrato aprobado."
       />
+
+      <section
+        className="mb-[18px] grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Indicadores de categorías"
+      >
+        <MetricCard
+          label="Plantillas definidas"
+          value={activeTemplates.length}
+          note="versiones activas persistidas"
+          icon={ListChecks}
+          tone="green"
+          href="/templates"
+        />
+        <MetricCard
+          label="Pendientes de definición"
+          value={pendingDefinitionCount}
+          note="categorías activas sin plantilla"
+          icon={Clock3}
+          tone="orange"
+          href="/templates"
+        />
+        <MetricCard
+          label="Atributos configurados"
+          value={attributeCount}
+          note="asignaciones activas"
+          icon={SlidersHorizontal}
+          href="/templates"
+        />
+        <MetricCard
+          label="Obligatorios"
+          value={requiredCount}
+          note="atributos requeridos"
+          icon={CheckCircle2}
+          tone="orange"
+          href="/templates"
+        />
+      </section>
+
+      <div className="mb-[18px] rounded-lg bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
+        La línea llega desde ERP en cada SKU; la plantilla PIM define qué atributos se enriquecen.
+        Son entidades distintas y esta pantalla mantiene su asociación.
+      </div>
 
       {notice ? (
         <div
@@ -230,25 +325,42 @@ export function CategoriesAdminWorkspace() {
           description="No hay categorías que coincidan con la búsqueda y el estado seleccionados."
         />
       ) : (
-        <Card className="overflow-hidden">
+        <Card id="category-table" className="overflow-hidden">
+          <div className="border-b px-5 py-4">
+            <h2 className="text-[17px] font-semibold">Plantillas y líneas persistidas</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {visibleCategories.filter((category) => Boolean(templateFor(category.id))).length}{' '}
+              definidas · {visibleCategories.filter((category) => !templateFor(category.id)).length}{' '}
+              pendientes de definición
+            </p>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1220px] text-left text-sm">
               <caption className="sr-only">
                 Administración de categorías activas e inactivas
               </caption>
               <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th scope="col" className="px-4 py-3">
-                    Categoría
+                    Plantilla PIM
                   </th>
                   <th scope="col" className="px-4 py-3">
-                    Ruta
+                    Línea recibida del ERP
                   </th>
                   <th scope="col" className="px-4 py-3">
-                    Posición
+                    Categoría BUSQUEDA
                   </th>
                   <th scope="col" className="px-4 py-3">
-                    Estado
+                    Aplicación
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Atributos
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Obligatorios
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Definición
                   </th>
                   <th scope="col" className="px-4 py-3 text-right">
                     Acciones
@@ -256,104 +368,152 @@ export function CategoriesAdminWorkspace() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visibleCategories.map((category) => {
+                {[
+                  ...visibleCategories.filter((category) => Boolean(templateFor(category.id))),
+                  ...visibleCategories.filter((category) => !templateFor(category.id)),
+                ].map((category, index, orderedCategories) => {
                   const editing = editingId === category.id;
                   const saving = savingId === category.id;
+                  const template = templateFor(category.id);
+                  const activeAttributes =
+                    template?.attributes?.filter((attribute) => attribute.active) ?? [];
                   return (
-                    <tr key={category.id} className="hover:bg-orange-50/40">
-                      <td className="px-4 py-3">
-                        {editing ? (
-                          <Input
-                            aria-label={`Nombre de ${category.name}`}
-                            value={draft.name}
-                            disabled={saving}
-                            onChange={(event) =>
-                              setDraft((current) => ({ ...current, name: event.target.value }))
-                            }
-                          />
-                        ) : (
-                          <>
-                            <strong className="block">{category.name}</strong>
-                            <span className="text-xs text-muted-foreground">{category.slug}</span>
-                          </>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {category.path}
-                      </td>
-                      <td className="w-32 px-4 py-3">
-                        {editing ? (
-                          <Input
-                            type="number"
-                            min={0}
-                            step={1}
-                            aria-label={`Posición de ${category.name}`}
-                            value={draft.position}
-                            disabled={saving}
-                            onChange={(event) =>
-                              setDraft((current) => ({ ...current, position: event.target.value }))
-                            }
-                          />
-                        ) : (
-                          category.position
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge tone={category.active ? 'success' : 'neutral'}>
-                          {category.active ? 'Activa' : 'Inactiva'}
-                        </StatusBadge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-1">
+                    <Fragment key={category.id}>
+                      {(index === 0 ||
+                        Boolean(template) !==
+                          Boolean(templateFor(orderedCategories[index - 1]?.id ?? ''))) && (
+                        <tr className="bg-slate-50/80">
+                          <th
+                            colSpan={8}
+                            className="px-4 py-2 text-[10px] uppercase tracking-[0.08em] text-primary"
+                          >
+                            {template
+                              ? 'Plantillas definidas'
+                              : 'Categorías pendientes de definición'}
+                          </th>
+                        </tr>
+                      )}
+                      <tr className="hover:bg-orange-50/40">
+                        <td className="px-4 py-3">
+                          <strong className="block">{template?.name ?? 'Sin plantilla'}</strong>
+                          <span className="text-xs text-muted-foreground">
+                            {template ? `Versión ${template.version}` : 'Pendiente de definición'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
                           {editing ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="dark"
+                            <div className="grid grid-cols-[minmax(180px,1fr)_78px] gap-2">
+                              <Input
+                                aria-label={`Nombre de ${category.name}`}
+                                value={draft.name}
                                 disabled={saving}
-                                onClick={() => void save(category)}
-                              >
-                                {saving ? (
-                                  <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
-                                ) : (
-                                  <Check className="size-4" aria-hidden="true" />
-                                )}
-                                Guardar
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
+                                onChange={(event) =>
+                                  setDraft((current) => ({ ...current, name: event.target.value }))
+                                }
+                              />
+                              <Input
+                                type="number"
+                                min={0}
+                                step={1}
+                                aria-label={`Posición de ${category.name}`}
+                                value={draft.position}
                                 disabled={saving}
-                                onClick={() => setEditingId(null)}
-                              >
-                                <X className="size-4" aria-hidden="true" />
-                                Cancelar
-                              </Button>
-                            </>
+                                onChange={(event) =>
+                                  setDraft((current) => ({
+                                    ...current,
+                                    position: event.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
                           ) : (
                             <>
-                              <Button size="sm" variant="ghost" onClick={() => beginEdit(category)}>
-                                <Pencil className="size-4" aria-hidden="true" />
-                                Editar
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={saving}
-                                onClick={() => void setActive(category, !category.active)}
-                              >
-                                {category.active ? (
-                                  <ToggleLeft className="size-4" aria-hidden="true" />
-                                ) : (
-                                  <RotateCcw className="size-4" aria-hidden="true" />
-                                )}
-                                {category.active ? 'Desactivar' : 'Reactivar'}
-                              </Button>
+                              <strong className="block text-xs">{category.name}</strong>
+                              <span className="font-mono text-[10px] text-muted-foreground">
+                                {category.slug} · orden {category.position}
+                              </span>
                             </>
                           )}
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                          {category.path}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          No modelada en el contrato
+                        </td>
+                        <td className="px-4 py-3 font-semibold">{activeAttributes.length}</td>
+                        <td className="px-4 py-3 font-semibold">
+                          {activeAttributes.filter((attribute) => attribute.required).length}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            tone={
+                              template?.status === 'active' && category.active
+                                ? 'success'
+                                : 'warning'
+                            }
+                          >
+                            {template?.status === 'active' && category.active
+                              ? 'Definida'
+                              : 'Pendiente'}
+                          </StatusBadge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            {editing ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="dark"
+                                  disabled={saving}
+                                  onClick={() => void save(category)}
+                                >
+                                  {saving ? (
+                                    <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
+                                  ) : (
+                                    <Check className="size-4" aria-hidden="true" />
+                                  )}
+                                  Guardar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={saving}
+                                  onClick={() => setEditingId(null)}
+                                >
+                                  <X className="size-4" aria-hidden="true" />
+                                  Cancelar
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => beginEdit(category)}
+                                >
+                                  <Pencil className="size-4" aria-hidden="true" />
+                                  Editar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={saving}
+                                  onClick={() => void setActive(category, !category.active)}
+                                >
+                                  {category.active ? (
+                                    <ToggleLeft className="size-4" aria-hidden="true" />
+                                  ) : (
+                                    <RotateCcw className="size-4" aria-hidden="true" />
+                                  )}
+                                  {category.active ? 'Desactivar' : 'Reactivar'}
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>

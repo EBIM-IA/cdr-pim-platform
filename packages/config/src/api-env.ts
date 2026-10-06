@@ -32,7 +32,7 @@ const apiOnlySchema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 
   /** Comma-separated list of allowed browser origins. Never `*` in QAS/PRD. */
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().default('http://localhost:3100'),
   SWAGGER_ENABLED: booleanEnv(false),
 
   /**

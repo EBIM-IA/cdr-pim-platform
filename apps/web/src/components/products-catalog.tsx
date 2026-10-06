@@ -5,11 +5,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Columns3,
-  LayoutGrid,
+  Download,
+  FileUp,
   List as ListIcon,
-  RefreshCw,
+  PackageSearch,
   Search,
-  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -18,97 +18,196 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { DynamicCatalogSheet } from '@/components/dynamic-catalog-sheet';
 import { ProductArtwork } from '@/components/product-artwork';
-import { ProductCard } from '@/components/product-card';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProductsData } from '@/components/use-products-data';
 import type { Product } from '@/lib/types';
 import { cn, formatNumber, unique } from '@/lib/utils';
 
-type CatalogView = 'cards' | 'table' | 'sheet';
+type CatalogView = 'catalog' | 'table' | 'sheet';
+type CompletenessFilter = '' | 'complete' | 'attention' | 'critical' | 'unavailable';
+
+const catalogFamilies = [
+  { name: 'Rodamientos', patterns: ['rodamiento', 'cojinete'] },
+  { name: 'Retenes y sellos', patterns: ['reten', 'sello'] },
+  { name: 'Frenos', patterns: ['freno', 'pastilla', 'disco'] },
+  { name: 'Transmisión', patterns: ['transmision', 'cardan', 'cruceta'] },
+  { name: 'Lubricantes y fluidos', patterns: ['aceite', 'grasa', 'lubric', 'fluido'] },
+  { name: 'Fijación', patterns: ['perno', 'tuerca', 'arandela', 'fijacion'] },
+] as const;
+
+const activeChipClass =
+  'inline-flex min-h-7 items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-2.5 text-[11px] font-semibold text-orange-800 hover:border-primary';
+
+function normalized(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase();
+}
+
+export function catalogFamily(product: Product): string {
+  const haystack = normalized(`${product.name} ${product.description ?? ''}`);
+  return (
+    catalogFamilies.find((family) => family.patterns.some((pattern) => haystack.includes(pattern)))
+      ?.name ?? 'Otros'
+  );
+}
+
+function availableCatalogValue(value: string): boolean {
+  return Boolean(value && !/^no disponible/i.test(value));
+}
+
+export function matchesCompleteness(
+  completeness: number | null,
+  filter: CompletenessFilter,
+): boolean {
+  if (!filter) return true;
+  if (filter === 'unavailable') return completeness === null;
+  if (completeness === null) return false;
+  if (filter === 'complete') return completeness >= 90;
+  if (filter === 'attention') return completeness >= 70 && completeness < 90;
+  return completeness < 70;
+}
+
+function completenessLabel(filter: CompletenessFilter): string {
+  return {
+    '': 'Todas',
+    complete: '90–100% · completa',
+    attention: '70–89% · por completar',
+    critical: 'Menos de 70% · crítica',
+    unavailable: 'Sin indicador disponible',
+  }[filter];
+}
+
+function CompletenessMeter({ value, sku }: { value: number | null; sku: string }) {
+  if (value === null) {
+    return <span className="text-[10px] text-muted-foreground">No medido por el backend</span>;
+  }
+  const tone = value >= 90 ? 'bg-emerald-500' : value >= 70 ? 'bg-amber-500' : 'bg-red-500';
+  return (
+    <div className="min-w-28" aria-label={`Completitud de ${sku}: ${value}%`}>
+      <span className="text-[11px] font-semibold">{value}% completo</span>
+      <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-slate-200">
+        <span className={cn('block h-full rounded-full', tone)} style={{ width: `${value}%` }} />
+      </span>
+    </div>
+  );
+}
 
 function ProductTable({ products }: { products: Product[] }) {
   return (
     <Card className="min-w-0 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap gap-4">
+          <span>▧ No aplica a la plantilla</span>
+          <span className="text-red-600">□ Obligatorio sin valor</span>
+          <span className="text-orange-600">▌ Editado en esta sesión</span>
+        </div>
+        <span>Consulta del catálogo conectado</span>
+      </div>
       <div className="scrollbar-thin max-w-full overflow-x-auto">
-        <table className="w-full min-w-[940px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1420px] border-collapse text-left text-xs">
           <caption className="sr-only">
             Productos del catálogo con identidad, línea, calidad y estado
           </caption>
-          <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
+          <thead className="border-b text-[11px] text-muted-foreground">
+            <tr className="border-b text-[10px] font-extrabold uppercase tracking-[0.06em] text-orange-700">
+              <th colSpan={4} className="bg-orange-50 px-3 py-2.5">
+                Identificación
+              </th>
+              <th colSpan={5} className="border-l bg-orange-50 px-3 py-2.5">
+                Base ERP · solo lectura
+              </th>
+              <th className="bg-slate-50 px-3 py-2.5">
+                <span className="sr-only">Acciones</span>
+              </th>
+            </tr>
             <tr>
               <th scope="col" className="px-4 py-3 font-semibold">
-                <span className="sr-only">Representación</span>
+                SKU
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
-                Producto
+                Descripción
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
-                Marca
+                Plantilla
+              </th>
+              <th scope="col" className="px-4 py-3 font-semibold">
+                Estado · completitud
+              </th>
+              <th scope="col" className="border-l px-4 py-3 font-semibold">
+                Código de proveedor
+              </th>
+              <th scope="col" className="px-4 py-3 font-semibold">
+                Código unificador
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
                 Línea
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
-                Aplicación
+                Tipo de aplicación
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
-                Completitud
+                Marca
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
-                Estado
+                <span className="sr-only">Acciones</span>
               </th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {products.map((product) => (
               <tr key={product.id} className="transition-colors hover:bg-orange-50/45">
-                <td className="px-4 py-3">
-                  <ProductArtwork compact category={product.category} name={product.name} />
-                </td>
-                <td className="max-w-[270px] px-4 py-3">
+                <td className="whitespace-nowrap px-4 py-3">
                   <Link
                     href={`/products/${encodeURIComponent(product.id)}`}
                     className="font-semibold hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
                   >
-                    {product.name}
+                    {product.sku}
                   </Link>
-                  <span className="mt-1 block text-xs text-muted-foreground">{product.sku}</span>
                 </td>
-                <td className="px-4 py-3 font-semibold">{product.brand}</td>
-                <td className="max-w-[220px] px-4 py-3 text-xs text-muted-foreground">
-                  {product.category}
+                <td className="max-w-[290px] px-4 py-3 font-medium">
+                  {product.name}
+                  {product.description ? (
+                    <span className="mt-1 line-clamp-1 block text-[10px] font-normal text-muted-foreground">
+                      {product.description}
+                    </span>
+                  ) : null}
                 </td>
-                <td className="px-4 py-3 text-xs">{product.application}</td>
-                <td className="w-40 px-4 py-3">
-                  <div className="mb-1.5 flex justify-between text-xs">
-                    <span>Calidad</span>
-                    <strong>
-                      {product.completeness === null
-                        ? 'Regla pendiente'
-                        : `${product.completeness}%`}
-                    </strong>
-                  </div>
-                  {product.completeness === null ? (
-                    <span className="text-xs text-muted-foreground">Sin puntaje aprobado</span>
-                  ) : (
-                    <Progress
-                      value={product.completeness}
-                      label={`Completitud de ${product.sku}`}
-                    />
-                  )}
-                </td>
+                <td className="px-4 py-3">{product.category}</td>
                 <td className="px-4 py-3">
                   <StatusBadge tone={statusTone(product.status)}>
                     {statusLabel(product.status)}
                   </StatusBadge>
+                  <span className="ml-2 text-[10px] text-muted-foreground">
+                    {product.completeness === null ? 'No medido' : `${product.completeness}%`}
+                  </span>
+                </td>
+                <td className="border-l px-4 py-3 font-mono text-[11px] text-muted-foreground">
+                  {product.providerCode ?? '—'}
+                </td>
+                <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground">
+                  {product.unifiedCode ?? '—'}
+                </td>
+                <td className="px-4 py-3">{product.category}</td>
+                <td className="px-4 py-3">{product.application}</td>
+                <td className="px-4 py-3 font-semibold">{product.brand}</td>
+                <td className="whitespace-nowrap px-4 py-3">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
+                  </Button>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
+                      Editar
+                    </Link>
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -116,6 +215,71 @@ function ProductTable({ products }: { products: Product[] }) {
         </table>
       </div>
     </Card>
+  );
+}
+
+function ProductCatalogList({ products }: { products: Product[] }) {
+  return (
+    <ul className="space-y-3">
+      {products.map((product) => (
+        <li
+          key={product.id}
+          className="grid min-w-0 gap-5 rounded-xl border bg-white p-4 shadow-sm transition hover:border-orange-200 hover:shadow-md md:grid-cols-[130px_minmax(0,1fr)_180px_170px] md:items-center md:p-5"
+        >
+          <ProductArtwork
+            category={product.category}
+            name={product.name}
+            className="aspect-square h-auto min-h-28 rounded-lg"
+          />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/products/${encodeURIComponent(product.id)}`}
+                className="break-all text-xl font-extrabold tracking-tight hover:text-primary"
+              >
+                {product.sku}
+              </Link>
+              <StatusBadge tone="info">Registro del backend</StatusBadge>
+            </div>
+            <p className="mt-1 text-sm font-semibold">{product.name}</p>
+            {product.description ? (
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                {product.description}
+              </p>
+            ) : null}
+            <dl className="mt-4 grid gap-x-6 gap-y-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ['Marca', product.brand],
+                ['Línea / categoría', product.category],
+                ['Aplicación', product.application],
+                ['Código unificador', product.unifiedCode ?? 'Sin código'],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                  <dd className="mt-0.5 break-words font-semibold">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <div className="flex flex-col items-start gap-3">
+            <StatusBadge tone={statusTone(product.status)}>
+              {statusLabel(product.status)}
+            </StatusBadge>
+            <CompletenessMeter value={product.completeness} sku={product.sku} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Button asChild>
+              <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
+            </Button>
+            <Button asChild variant="ghost">
+              <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
+                Editar enriquecimiento
+              </Link>
+            </Button>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -149,10 +313,31 @@ export function ProductsCatalog({
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [brand, setBrand] = useState(initialBrand);
   const [status, setStatus] = useState<ProductStatus | ''>(initialStatus);
+  const [family, setFamily] = useState('');
+  const [category, setCategory] = useState('');
+  const [application, setApplication] = useState('');
+  const [completeness, setCompleteness] = useState<CompletenessFilter>('');
   const [requestedPage, setRequestedPage] = useState(1);
-  const [requestedPageSize, setRequestedPageSize] = useState(12);
-  const [view, setView] = useState<CatalogView>('cards');
-  const [showFilters, setShowFilters] = useState(false);
+  const [requestedPageSize, setRequestedPageSize] = useState(25);
+  const [view, setView] = useState<CatalogView>('catalog');
+  const [urlReady, setUrlReady] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setFamily(params.get('family') ?? '');
+    setCategory(params.get('category') ?? '');
+    setApplication(params.get('application') ?? '');
+    const completenessParam = params.get('completeness');
+    if (
+      completenessParam === 'complete' ||
+      completenessParam === 'attention' ||
+      completenessParam === 'critical' ||
+      completenessParam === 'unavailable'
+    ) {
+      setCompleteness(completenessParam);
+    }
+    setUrlReady(true);
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -163,6 +348,11 @@ export function ProductsCatalog({
   }, [searchInput]);
 
   useEffect(() => {
+    setRequestedPage(1);
+  }, [application, category, completeness, family]);
+
+  useEffect(() => {
+    if (!urlReady) return;
     const params = new URLSearchParams(window.location.search);
     const update = (key: string, value: string) => {
       if (value) params.set(key, value);
@@ -172,6 +362,10 @@ export function ProductsCatalog({
     update('q', debouncedSearch);
     update('brand', brand);
     update('status', status);
+    update('family', family);
+    update('category', category);
+    update('application', application);
+    update('completeness', completeness);
 
     const query = params.toString();
     window.history.replaceState(
@@ -179,7 +373,7 @@ export function ProductsCatalog({
       '',
       query ? `/products?${query}` : '/products',
     );
-  }, [brand, debouncedSearch, status]);
+  }, [application, brand, category, completeness, debouncedSearch, family, status, urlReady]);
 
   const { products, total, page, pageSize, totalPages, loading, error, reload } = useProductsData({
     q: debouncedSearch || undefined,
@@ -200,11 +394,69 @@ export function ProductsCatalog({
       ).sort(),
     [products, status],
   );
-  const activeFilterCount = [brand, status].filter(Boolean).length;
+  const categories = useMemo(
+    () => unique(products.map((product) => product.category).filter(availableCatalogValue)).sort(),
+    [products],
+  );
+  const applications = useMemo(
+    () =>
+      unique(products.map((product) => product.application).filter(availableCatalogValue)).sort(),
+    [products],
+  );
+  const hasCompletenessData = products.some((product) => product.completeness !== null);
+  const activeFilterCount = [brand, status, family, category, application, completeness].filter(
+    Boolean,
+  ).length;
   const hasCriteria = Boolean(searchInput.trim() || debouncedSearch || activeFilterCount);
   const firstVisible = total > 0 ? (page - 1) * pageSize + 1 : 0;
   const lastVisible = Math.min(page * pageSize, total);
   const searchPending = searchInput.trim() !== debouncedSearch;
+  const familyCounts = useMemo(
+    () =>
+      catalogFamilies.map((item) => ({
+        name: item.name,
+        count: products.filter((product) => catalogFamily(product) === item.name).length,
+      })),
+    [products],
+  );
+  const visibleProducts = useMemo(
+    () =>
+      products.filter(
+        (product) =>
+          (!family || catalogFamily(product) === family) &&
+          (!category || product.category === category) &&
+          (!application || product.application === application) &&
+          matchesCompleteness(product.completeness, completeness),
+      ),
+    [application, category, completeness, family, products],
+  );
+  const hasClientFilters = Boolean(family || category || application || completeness);
+  const visibleTotal = hasClientFilters ? visibleProducts.length : total;
+  const visibleFirst = visibleTotal > 0 ? (hasClientFilters ? 1 : firstVisible) : 0;
+  const visibleLast = hasClientFilters ? visibleProducts.length : lastVisible;
+
+  const exportVisibleProducts = () => {
+    const escape = (value: string) => `"${value.replace(/"/gu, '""')}"`;
+    const rows = [
+      ['SKU', 'Descripción', 'Marca', 'Estado', 'Código proveedor'],
+      ...visibleProducts.map((product) => [
+        product.sku,
+        product.name,
+        product.brand,
+        statusLabel(product.status),
+        product.providerCode ?? '',
+      ]),
+    ];
+    const blob = new Blob([rows.map((row) => row.map(escape).join(',')).join('\n')], {
+      type: 'text/csv;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'catalogo-pim.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const changeBrand = (value: string) => {
     setBrand(value);
@@ -223,47 +475,136 @@ export function ProductsCatalog({
     clearSearch();
     setBrand('');
     setStatus('');
+    setFamily('');
+    setCategory('');
+    setApplication('');
+    setCompleteness('');
   };
 
   return (
     <>
+      <nav
+        aria-label="Ruta del catálogo"
+        className="mb-4 flex items-center gap-2 text-[11px] text-muted-foreground"
+      >
+        <Link href="/" className="hover:text-primary">
+          Inicio
+        </Link>
+        <span aria-hidden="true">/</span>
+        <button type="button" onClick={clearFilters} className="hover:text-primary">
+          Catálogo maestro
+        </button>
+        {family ? (
+          <>
+            <span aria-hidden="true">/</span>
+            <strong className="text-foreground">{family}</strong>
+          </>
+        ) : null}
+      </nav>
       <PageHeader
-        eyebrow="Catálogo"
-        title="Productos"
-        description="Consulta la identidad, los códigos y el estado disponible de cada producto."
+        title="Catálogo maestro de productos"
+        description={`${formatNumber(total || products.length)} SKU disponibles en el catálogo conectado. Los filtros sin contrato persistente se muestran bloqueados, no simulados.`}
         actions={
-          view !== 'sheet' ? (
-            <Button variant="outline" onClick={reload} disabled={loading}>
-              <RefreshCw aria-hidden="true" className={cn('size-4', loading && 'animate-spin')} />
-              Actualizar
+          <>
+            <Button asChild variant="secondary">
+              <Link href="/quality?view=search">
+                <Search aria-hidden="true" className="size-4" />
+                Búsqueda inteligente
+              </Link>
             </Button>
-          ) : undefined
+            <Button asChild variant="secondary">
+              <Link href="/imports">
+                <FileUp aria-hidden="true" className="size-4" />
+                Importaciones
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setView('sheet')}
+              aria-pressed={view === 'sheet'}
+            >
+              <Columns3 aria-hidden="true" className="size-4" />
+              Actualización masiva
+            </Button>
+            <Button variant="outline" onClick={exportVisibleProducts} disabled={loading}>
+              <Download aria-hidden="true" className="size-4" />
+              Exportar vista (Excel)
+            </Button>
+          </>
         }
       />
 
       <ScreenGuide
-        objective="Presenta los SKU maestros para consultarlos o trabajar sus atributos técnicos mediante la plantilla activa de cada categoría."
+        objective="Catálogo maestro: reúne los SKU recibidos desde ERP para buscarlos, filtrarlos y abrirlos. El PIM no crea SKU; los enriquece."
         actions={[
           'Busca por SKU, descripción o marca y combina la consulta con los filtros disponibles.',
-          'Alterna entre tarjetas, tabla y hoja de datos; esta última habilita filtros por atributo y edición según tus permisos.',
-          'Abre cualquier producto para consultar su información detallada y usa «Actualizar» para volver a cargar la vista.',
+          'Alterna entre Catálogo y Tabla; «Actualización masiva» abre la hoja dinámica por plantilla.',
+          'Abre un SKU para revisar su ficha o usa «Actualización masiva» para trabajar por categoría.',
         ]}
         dataSource="Los productos, plantillas, columnas, permisos y valores provienen de la API del catálogo. Las búsquedas, filtros y ediciones se ejecutan en el backend."
         limitation="Las tarjetas y la tabla general son de consulta. La edición se realiza en la hoja de datos, por categoría y solamente sobre atributos habilitados para tu rol."
       />
 
-      <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto] md:items-end">
-          {view === 'sheet' ? (
-            <div className="self-center">
-              <p className="text-sm font-semibold">Modo de trabajo</p>
-              <p className="text-xs text-muted-foreground">
-                Selecciona una categoría para consultar y editar sus atributos técnicos.
-              </p>
-            </div>
-          ) : (
-            <label className="grid min-w-0 gap-1.5 text-xs font-semibold text-muted-foreground">
-              <span>Buscar en el catálogo</span>
+      {view !== 'sheet' ? (
+        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Familias de producto">
+          <button
+            type="button"
+            onClick={() => setFamily('')}
+            aria-pressed={!family}
+            className={cn(
+              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-semibold',
+              !family
+                ? 'border-primary bg-orange-50 text-orange-700'
+                : 'border-slate-200 bg-white hover:border-orange-200',
+            )}
+          >
+            Todas{' '}
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">
+              {products.length}
+            </span>
+          </button>
+          {familyCounts.map((item) => (
+            <button
+              key={item.name}
+              type="button"
+              onClick={() => setFamily(item.name)}
+              aria-pressed={family === item.name}
+              className={cn(
+                'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-semibold',
+                family === item.name
+                  ? 'border-primary bg-orange-50 text-orange-700'
+                  : 'border-slate-200 bg-white hover:border-orange-200',
+              )}
+            >
+              {item.name}
+              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">
+                {item.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {view === 'sheet' ? (
+        <Card className="mb-5 flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
+          <div>
+            <p className="text-sm font-semibold">Actualización masiva por plantilla</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Las columnas, permisos y cambios provienen del backend del catálogo dinámico.
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => setView('catalog')}>
+            Volver al catálogo
+          </Button>
+        </Card>
+      ) : (
+        <Card className="mb-5 overflow-hidden">
+          <div
+            id="catalog-filters"
+            className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-[minmax(260px,1.6fr)_repeat(6,minmax(130px,1fr))_auto] 2xl:items-end"
+          >
+            <label className="grid min-w-0 gap-1.5 text-xs font-semibold text-muted-foreground sm:col-span-2 xl:col-span-2 2xl:col-span-1">
+              <span>Buscar</span>
               <span className="relative block">
                 <Search
                   aria-hidden="true"
@@ -273,7 +614,7 @@ export function ProductsCatalog({
                   type="search"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="SKU, descripción o marca"
+                  placeholder="SKU, marca, categoría o cualquier atributo: 2RS, caucho, C3, FMSI…"
                   className="pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
                   aria-describedby="catalog-search-status"
                 />
@@ -296,68 +637,23 @@ export function ProductsCatalog({
                     : 'Búsqueda actualizada'}
               </span>
             </label>
-          )}
 
-          <div className="flex items-center gap-2">
-            {view !== 'sheet' ? (
-              <Button
-                variant="outline"
-                className="flex-1 md:hidden"
-                onClick={() => setShowFilters((visible) => !visible)}
-                aria-expanded={showFilters}
-                aria-controls="catalog-filters"
-              >
-                <SlidersHorizontal aria-hidden="true" className="size-4" />
-                Filtros{activeFilterCount ? ` (${activeFilterCount})` : ''}
-              </Button>
-            ) : null}
-            <div
-              className="flex rounded-lg border p-1"
-              role="group"
-              aria-label="Formato del catálogo"
+            <Select
+              label="Línea / categoría"
+              value={category}
+              disabled={categories.length === 0}
+              title={categories.length === 0 ? 'La API general no expone categoría.' : undefined}
+              onChange={(event) => setCategory(event.target.value)}
             >
-              <Button
-                variant={view === 'cards' ? 'dark' : 'ghost'}
-                size="sm"
-                onClick={() => setView('cards')}
-                aria-pressed={view === 'cards'}
-                aria-label="Ver como tarjetas"
-              >
-                <LayoutGrid aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">Tarjetas</span>
-              </Button>
-              <Button
-                variant={view === 'table' ? 'dark' : 'ghost'}
-                size="sm"
-                onClick={() => setView('table')}
-                aria-pressed={view === 'table'}
-                aria-label="Ver como tabla"
-              >
-                <ListIcon aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">Tabla</span>
-              </Button>
-              <Button
-                variant={view === 'sheet' ? 'dark' : 'ghost'}
-                size="sm"
-                onClick={() => setView('sheet')}
-                aria-pressed={view === 'sheet'}
-                aria-label="Ver hoja de datos dinámica"
-              >
-                <Columns3 aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">Hoja de datos</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {view !== 'sheet' ? (
-          <div
-            id="catalog-filters"
-            className={cn(
-              'mt-4 gap-3 border-t pt-4 md:grid md:grid-cols-2',
-              showFilters ? 'grid' : 'hidden',
-            )}
-          >
+              <option value="">
+                {categories.length === 0 ? 'No disponible en API' : 'Todas las categorías'}
+              </option>
+              {categories.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </Select>
             <Select
               label="Marca"
               value={brand}
@@ -365,6 +661,26 @@ export function ProductsCatalog({
             >
               <option value="">Todas las marcas</option>
               {brands.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Aplicación"
+              value={application}
+              disabled={applications.length === 0}
+              title={
+                applications.length === 0
+                  ? 'La API general no expone aplicaciones en el listado.'
+                  : undefined
+              }
+              onChange={(event) => setApplication(event.target.value)}
+            >
+              <option value="">
+                {applications.length === 0 ? 'No disponible en API' : 'Todas las aplicaciones'}
+              </option>
+              {applications.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
@@ -382,23 +698,117 @@ export function ProductsCatalog({
                 </option>
               ))}
             </Select>
-            <p className="text-xs leading-relaxed text-muted-foreground md:col-span-3">
-              Las marcas visibles se obtienen de la página actual; el estado y los criterios de
-              búsqueda se validan en el contrato compartido.
-            </p>
+            <Select
+              label="Completitud"
+              value={completeness}
+              disabled={!hasCompletenessData}
+              title={
+                hasCompletenessData
+                  ? undefined
+                  : 'El backend todavía no publica completitud en el listado general.'
+              }
+              onChange={(event) => setCompleteness(event.target.value as CompletenessFilter)}
+            >
+              <option value="">{hasCompletenessData ? 'Todas' : 'Indicador no disponible'}</option>
+              <option value="complete">90–100%</option>
+              <option value="attention">70–89%</option>
+              <option value="critical">Menos de 70%</option>
+              <option value="unavailable">Sin indicador</option>
+            </Select>
+            <Select
+              label="Origen del dato"
+              value=""
+              disabled
+              title="El origen no forma parte del contrato vigente del listado de productos."
+            >
+              <option value="">No disponible en API</option>
+            </Select>
+            <div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+              <span>Vista</span>
+              <div
+                className="flex rounded-lg border bg-slate-50 p-1"
+                role="group"
+                aria-label="Vista del listado"
+              >
+                <Button
+                  variant={view === 'catalog' ? 'dark' : 'ghost'}
+                  size="sm"
+                  onClick={() => setView('catalog')}
+                  aria-pressed={view === 'catalog'}
+                >
+                  <PackageSearch aria-hidden="true" className="size-4" /> Catálogo
+                </Button>
+                <Button
+                  variant={view === 'table' ? 'dark' : 'ghost'}
+                  size="sm"
+                  onClick={() => setView('table')}
+                  aria-pressed={view === 'table'}
+                >
+                  <ListIcon aria-hidden="true" className="size-4" /> Tabla
+                </Button>
+              </div>
+            </div>
           </div>
-        ) : null}
 
-        {view !== 'sheet' && (searchInput || activeFilterCount) ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
-            <span className="text-xs text-muted-foreground">Criterios activos</span>
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              <X aria-hidden="true" className="size-3.5" />
-              Limpiar todo
-            </Button>
-          </div>
-        ) : null}
-      </Card>
+          <p className="border-t bg-slate-50 px-4 py-2.5 text-[11px] leading-5 text-muted-foreground">
+            Búsqueda, marca y estado se procesan en el backend. Categoría, aplicación y completitud
+            se aplican sobre la página cuando existen; los campos ausentes del contrato permanecen
+            bloqueados.
+          </p>
+
+          {searchInput || activeFilterCount ? (
+            <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
+              <span className="text-xs text-muted-foreground">Filtros activos</span>
+              {searchInput ? (
+                <button type="button" className={activeChipClass} onClick={clearSearch}>
+                  “{searchInput}” <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {family ? (
+                <button type="button" className={activeChipClass} onClick={() => setFamily('')}>
+                  {family} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {category ? (
+                <button type="button" className={activeChipClass} onClick={() => setCategory('')}>
+                  {category} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {brand ? (
+                <button type="button" className={activeChipClass} onClick={() => changeBrand('')}>
+                  {brand} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {application ? (
+                <button
+                  type="button"
+                  className={activeChipClass}
+                  onClick={() => setApplication('')}
+                >
+                  {application} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {status ? (
+                <button type="button" className={activeChipClass} onClick={() => changeStatus('')}>
+                  {statusLabel(status)} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              {completeness ? (
+                <button
+                  type="button"
+                  className={activeChipClass}
+                  onClick={() => setCompleteness('')}
+                >
+                  {completenessLabel(completeness)} <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Limpiar todo
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      )}
 
       {view === 'sheet' ? <DynamicCatalogSheet /> : null}
       {view !== 'sheet' && loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
@@ -411,7 +821,7 @@ export function ProductsCatalog({
           onAction={reload}
         />
       ) : null}
-      {view !== 'sheet' && !loading && !error && products.length === 0 ? (
+      {view !== 'sheet' && !loading && !error && visibleProducts.length === 0 ? (
         <StatePanel
           variant="empty"
           title={
@@ -427,27 +837,23 @@ export function ProductsCatalog({
         />
       ) : null}
 
-      {view !== 'sheet' && !loading && !error && products.length > 0 ? (
+      {view !== 'sheet' && !loading && !error && visibleProducts.length > 0 ? (
         <>
           <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold" aria-live="polite">
-              Mostrando {formatNumber(firstVisible)}–{formatNumber(lastVisible)}
+              Mostrando {formatNumber(visibleFirst)}–{formatNumber(visibleLast)}
               {' de '}
-              {formatNumber(total)} productos
+              {formatNumber(visibleTotal)} productos
             </p>
             <p className="text-xs text-muted-foreground">
               Página {page} de {totalPages}
             </p>
           </div>
 
-          {view === 'cards' ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {products.map((product) => (
-                <ProductCard key={product.id} product={product} />
-              ))}
-            </div>
+          {view === 'catalog' ? (
+            <ProductCatalogList products={visibleProducts} />
           ) : (
-            <ProductTable products={products} />
+            <ProductTable products={visibleProducts} />
           )}
 
           <nav
@@ -463,9 +869,9 @@ export function ProductsCatalog({
                   setRequestedPage(1);
                 }}
               >
-                <option value={12}>12 productos</option>
-                <option value={24}>24 productos</option>
-                <option value={48}>48 productos</option>
+                <option value={25}>25 productos</option>
+                <option value={50}>50 productos</option>
+                <option value={100}>100 productos</option>
               </Select>
             </div>
             <div className="flex items-center justify-between gap-3 sm:justify-end">

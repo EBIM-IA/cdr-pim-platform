@@ -1,18 +1,88 @@
 'use client';
 
-import { ArrowRight, CheckCircle2, Layers3, Package, SearchCheck, Tags } from 'lucide-react';
+import type { AuditChangeDto, WorkspaceDto } from '@cdr/contracts';
+import { ArrowRight, Clock3, Copy, FileText, Package, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 
 import { MetricCard } from '@/components/metric-card';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
-import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProductsData } from '@/components/use-products-data';
-import { formatNumber } from '@/lib/utils';
+import { useWorkspaceData } from '@/components/use-workspace-data';
+import { listAuditChanges } from '@/lib/operational-api';
+import type { Product } from '@/lib/types';
+import { cn, formatNumber } from '@/lib/utils';
+
+interface ActivityItem {
+  id: string;
+  title: string;
+  detail: string;
+  state: string;
+  tone: 'amber' | 'blue' | 'green' | 'red';
+  href: string;
+  action: string;
+}
+
+const familyDefinitions = [
+  { name: 'Rodamientos', patterns: ['rodamiento', 'cojinete'] },
+  { name: 'Retenes y sellos', patterns: ['reten', 'sello'] },
+  { name: 'Frenos', patterns: ['freno', 'pastilla', 'disco'] },
+  { name: 'Transmisión', patterns: ['transmision', 'cardan', 'cruceta'] },
+  { name: 'Lubricantes y fluidos', patterns: ['aceite', 'grasa', 'lubric', 'fluido'] },
+  { name: 'Fijación', patterns: ['perno', 'tuerca', 'arandela', 'fijacion'] },
+] as const;
+
+const activityTones = {
+  amber: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700' },
+  blue: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-600' },
+  green: { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700' },
+  red: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-600' },
+};
+
+function normalized(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase();
+}
+
+function metric(workspace: WorkspaceDto | null, key: string): number {
+  const value = workspace?.metrics.find((item) => item.key === key)?.value;
+  return typeof value === 'number' ? value : 0;
+}
+
+function familyFor(product: Product): string {
+  const haystack = normalized(`${product.name} ${product.description ?? ''}`);
+  return (
+    familyDefinitions.find((family) =>
+      family.patterns.some((pattern) => haystack.includes(pattern)),
+    )?.name ?? 'Otros'
+  );
+}
+
+function auditActivity(change: AuditChangeDto): ActivityItem {
+  const canOpenProduct = change.resourceType === 'product' || Boolean(change.sku);
+  return {
+    id: change.id,
+    title: `${change.field} · ${change.sku ?? change.resourceType}`,
+    detail: `${change.source} · ${new Intl.DateTimeFormat('es-EC', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date(change.occurredAt))}`,
+    state: 'Cambio',
+    tone: 'blue',
+    href: canOpenProduct
+      ? `/products/${encodeURIComponent(change.resourceId)}`
+      : '/administration?view=audit',
+    action: canOpenProduct ? 'Ver SKU' : 'Ver auditoría',
+  };
+}
 
 function DashboardSkeleton() {
   return (
@@ -20,65 +90,137 @@ function DashboardSkeleton() {
       <span className="sr-only" role="status">
         Cargando indicadores…
       </span>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => (
-          <Skeleton key={index} className="h-32 rounded-xl" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }, (_, index) => (
+          <Skeleton key={index} className="h-[125px] rounded-xl" />
         ))}
       </div>
-      <div className="mt-5 grid gap-5 lg:grid-cols-2">
-        <Skeleton className="h-80 rounded-xl" />
-        <Skeleton className="h-80 rounded-xl" />
+      <div className="mt-[18px] grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-72 rounded-xl" />
+        <Skeleton className="h-72 rounded-xl" />
       </div>
     </div>
   );
 }
 
-function formatDate(value?: string) {
-  if (!value) return 'Sin fecha';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Sin fecha';
-  return new Intl.DateTimeFormat('es-EC', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+function ActivityList({ items }: { items: readonly ActivityItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="mt-5 rounded-lg bg-slate-50 p-4 text-xs text-muted-foreground">
+        No hay eventos persistidos para mostrar en este momento.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-[18px] divide-y divide-slate-100">
+      {items.map((item) => {
+        const tone = activityTones[item.tone];
+        return (
+          <div key={item.id} className="flex min-h-14 items-center gap-2.5 py-2.5">
+            <span className={cn('size-2.5 shrink-0 rounded-full', tone.dot)} />
+            <div className="min-w-0 flex-1">
+              <strong className="block truncate text-xs">{item.title}</strong>
+              <small className="block truncate text-[10px] text-slate-400">{item.detail}</small>
+            </div>
+            <span
+              className={cn(
+                'hidden shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold sm:inline-flex',
+                tone.badge,
+              )}
+            >
+              {item.state}
+            </span>
+            <Button asChild variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-[11px]">
+              <Link href={item.href}>{item.action}</Link>
+            </Button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function DashboardOverview() {
-  const { products, total, loading, error, reload } = useProductsData({
-    page: 1,
-    pageSize: 100,
-  });
+  const { products, total, loading, error, reload } = useProductsData({ page: 1, pageSize: 100 });
+  const quality = useWorkspaceData('quality');
+  const equivalences = useWorkspaceData('equivalences');
+  const templates = useWorkspaceData('templates');
+  const imports = useWorkspaceData('imports');
+  const integrations = useWorkspaceData('integrations');
+  const [auditChanges, setAuditChanges] = useState<AuditChangeDto[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAuditChanges({ page: 1, pageSize: 3 }, controller.signal)
+      .then((result) => setAuditChanges(result.items))
+      .catch(() => setAuditChanges([]));
+    return () => controller.abort();
+  }, []);
 
   const published = products.filter((product) => product.status === 'published').length;
-  const inReview = products.filter((product) => product.status === 'in_review').length;
-  const brands = new Set(products.map((product) => product.brand)).size;
-  const statusGroups = Object.entries(
-    products.reduce<Record<string, number>>((counts, product) => {
-      counts[product.status] = (counts[product.status] ?? 0) + 1;
-      return counts;
-    }, {}),
-  ).sort((left, right) => right[1] - left[1]);
-  const brandGroups = Object.entries(
-    products.reduce<Record<string, number>>((counts, product) => {
-      counts[product.brand] = (counts[product.brand] ?? 0) + 1;
-      return counts;
-    }, {}),
-  )
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 6);
-  const maximumBrandCount = Math.max(...brandGroups.map(([, count]) => count), 1);
+  const pending = products.filter((product) => product.status === 'in_review').length;
+  const affected = metric(quality.workspace, 'affected-products');
+  const completeness = products.length
+    ? Math.max(0, Math.round(((products.length - affected) / products.length) * 100))
+    : 0;
+  const groups = metric(equivalences.workspace, 'groups');
+  const templateCount = metric(templates.workspace, 'active');
+  const blockedIntegrations = metric(integrations.workspace, 'blocked-external-systems');
+
+  const families = useMemo(() => {
+    const counts = new Map<string, number>(familyDefinitions.map((family) => [family.name, 0]));
+    for (const product of products) {
+      const family = familyFor(product);
+      if (family !== 'Otros') counts.set(family, (counts.get(family) ?? 0) + 1);
+    }
+    return familyDefinitions.map((family) => ({
+      name: family.name,
+      count: counts.get(family.name) ?? 0,
+    }));
+  }, [products]);
+  const maximumFamily = Math.max(...families.map((family) => family.count), 1);
+
+  const activities = useMemo(() => {
+    const items: ActivityItem[] = auditChanges.map(auditActivity);
+    const batch = imports.workspace?.rows[0];
+    if (batch) {
+      const invalid = Number(batch.values.invalidRows ?? 0);
+      items.push({
+        id: `import:${batch.id}`,
+        title: `Importación ${String(batch.values.target ?? '')}`,
+        detail: `${String(batch.values.validRows ?? 0)} de ${String(batch.values.totalRows ?? 0)} registros válidos`,
+        state: invalid > 0 ? 'Advertencia' : String(batch.values.status ?? 'Procesado'),
+        tone: invalid > 0 ? 'amber' : 'green',
+        href: '/imports',
+        action: 'Ver lote',
+      });
+    }
+    const blocked =
+      integrations.workspace?.rows.filter((row) => row.values.configured === false) ?? [];
+    for (const integration of blocked) {
+      items.push({
+        id: `integration:${integration.id}`,
+        title: String(integration.values.system ?? 'Integración externa'),
+        detail: String(integration.values.state ?? 'Contrato pendiente'),
+        state: 'Pendiente',
+        tone: 'red',
+        href: '/integrations',
+        action: 'Ver monitor',
+      });
+    }
+    return items.slice(0, 4);
+  }, [auditChanges, imports.workspace, integrations.workspace]);
 
   return (
     <>
       <PageHeader
-        eyebrow="Operación del catálogo"
-        title="Catálogo maestro"
-        description="Una vista rápida de los productos, estados y marcas que entrega el contrato actual."
+        title="Dashboard"
+        description="Vista general del estado del catálogo y actividad reciente."
         actions={
           <Button asChild>
             <Link href="/products">
-              Explorar productos
+              Ir al catálogo
               <ArrowRight aria-hidden="true" className="size-4" />
             </Link>
           </Button>
@@ -86,14 +228,13 @@ export function DashboardOverview() {
       />
 
       <ScreenGuide
-        objective="Resume el catálogo disponible para orientar la revisión diaria sin inferir métricas de calidad aún no aprobadas."
+        objective="Punto de entrada diario. Resume cómo está el catálogo —completitud, pendientes, publicables y calidad— junto con la actividad reciente de integraciones y revisión."
+        actionsLabel="Qué puedes probar"
         actions={[
-          'Abre cada indicador operativo para llegar al catálogo con el estado correspondiente.',
-          'Consulta la distribución de estados entregada por la API.',
-          'Abre cualquier producto de la consulta para revisar su ficha.',
+          'Haz clic en cualquier indicador para ir al módulo que lo explica.',
+          'La franja «Muestra navegable» cuenta los SKU reales disponibles en este entorno.',
         ]}
-        dataSource="Productos, marcas, estados, totales y fechas proceden del contrato compartido de la API."
-        limitation="Categorías, aplicaciones, código unificador y puntajes de calidad no se calculan porque el contrato actual no entrega esos datos. Las reglas confirmadas se presentan como alcance, no como métricas operativas."
+        dataSource="Todos los valores se calculan con datos persistidos y proyecciones autenticadas de la API. Cuando el backend aún no mide un indicador se presenta como no disponible."
       />
 
       {loading ? <DashboardSkeleton /> : null}
@@ -106,136 +247,169 @@ export function DashboardOverview() {
           onAction={reload}
         />
       ) : null}
-      {!loading && !error && products.length === 0 ? (
-        <StatePanel
-          variant="empty"
-          title="El catálogo todavía está vacío"
-          description="Cuando la API publique productos, sus indicadores y actividad aparecerán aquí."
-        />
-      ) : null}
 
-      {!loading && !error && products.length > 0 ? (
-        <div className="space-y-5">
+      {!loading && !error ? (
+        <div className="space-y-[18px]">
           <section
             aria-label="Indicadores principales"
-            className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+            className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"
           >
             <MetricCard
-              label="Productos registrados"
+              label="Productos"
               value={formatNumber(total || products.length)}
-              note="Total informado por la API"
+              note="SKU persistidos en PIM"
               icon={Package}
               href="/products"
             />
             <MetricCard
-              label="Publicados"
-              value={formatNumber(published)}
-              note="En la consulta actual"
-              icon={CheckCircle2}
+              label="Completitud"
+              value={`${completeness}%`}
+              note="sobre controles base disponibles"
+              icon={ShieldCheck}
               tone="green"
-              href="/products?status=published"
+              href="/quality?view=quality"
             />
             <MetricCard
-              label="En revisión"
-              value={formatNumber(inReview)}
-              note="En la consulta actual"
-              icon={SearchCheck}
+              label="Pendientes"
+              value={formatNumber(pending)}
+              note="en revisión en la muestra"
+              icon={Clock3}
+              tone="red"
+              href="/quality?view=review"
+            />
+            <MetricCard
+              label="Publicables"
+              value={formatNumber(published)}
+              note="publicados en el estado PIM"
+              icon={FileText}
               tone="blue"
-              href="/products?status=in_review"
+              href="/publication"
             />
             <MetricCard
-              label="Marcas visibles"
-              value={formatNumber(brands)}
-              note="Sin duplicados en la consulta"
-              icon={Tags}
-              tone="orange"
-              href="/products"
+              label="Duplicados"
+              value="—"
+              note="motor de candidatos pendiente"
+              icon={Copy}
+              href="/quality?view=duplicates"
             />
           </section>
 
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Distribución por estado</CardTitle>
-                <CardDescription>Estados reales de los productos consultados.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {statusGroups.map(([status, count]) => (
-                  <div
-                    key={status}
-                    className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                  >
-                    <StatusBadge tone={statusTone(status)}>{statusLabel(status)}</StatusBadge>
-                    <strong className="tabular-nums">{formatNumber(count)}</strong>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+          <Card className="flex min-h-[43px] flex-wrap items-center gap-x-6 gap-y-2 px-[18px] py-2.5 text-xs">
+            <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-primary">
+              Muestra navegable
+            </span>
+            <Link
+              href="/products"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(total || products.length)} SKU
+            </Link>
+            <Link
+              href="/templates"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(templateCount)} plantillas activas
+            </Link>
+            <Link
+              href="/quality?view=quality"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(affected)} con obligatorios faltantes
+            </Link>
+            <Link
+              href="/publication"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(published)} publicables
+            </Link>
+            <Link
+              href="/equivalences"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(groups)} grupos de equivalencias
+            </Link>
+            <Link
+              href="/integrations"
+              className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
+            >
+              {formatNumber(blockedIntegrations)} integraciones pendientes
+            </Link>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Productos por marca</CardTitle>
-                <CardDescription>Principales marcas de la consulta actual.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {brandGroups.map(([brand, count]) => (
-                  <div
-                    key={brand}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2"
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card className="min-h-[290px] p-[22px]">
+              <h2 className="text-[17px] font-semibold tracking-[-0.02em]">
+                Productos por familia · muestra
+              </h2>
+              <div className="mt-[22px]">
+                {families.map((family) => (
+                  <Link
+                    key={family.name}
+                    href={`/products?q=${encodeURIComponent(family.name)}`}
+                    className="flex items-center gap-3 py-[9px] text-xs hover:text-primary"
                   >
-                    <span className="truncate text-sm font-semibold" title={brand}>
-                      {brand}
-                    </span>
-                    <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
-                    <span className="col-span-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <span className="w-[110px] shrink-0 text-muted-foreground">{family.name}</span>
+                    <span className="h-3.5 flex-1 overflow-hidden rounded-full bg-slate-100">
                       <span
-                        className="block h-full rounded-full bg-primary"
-                        style={{ width: `${Math.max(8, (count / maximumBrandCount) * 100)}%` }}
+                        className={cn(
+                          'block h-full rounded-full',
+                          family.count === maximumFamily ? 'bg-primary' : 'bg-slate-500',
+                        )}
+                        style={{
+                          width: `${family.count ? Math.max(6, (family.count / maximumFamily) * 100) : 0}%`,
+                        }}
                       />
                     </span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader className="flex-row items-start justify-between gap-4">
-              <div>
-                <CardTitle>Productos de la consulta</CardTitle>
-                <CardDescription>
-                  Primeros registros de la página, ordenados por SKU por el servicio de catálogo.
-                </CardDescription>
-              </div>
-              <Layers3 aria-hidden="true" className="mt-1 size-5 shrink-0 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="divide-y" role="list">
-                {products.slice(0, 6).map((product) => (
-                  <Link
-                    key={product.id}
-                    href={`/products/${encodeURIComponent(product.id)}`}
-                    className="group grid min-w-0 gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2"
-                    role="listitem"
-                  >
-                    <span className="min-w-0">
-                      <strong className="block truncate text-sm group-hover:text-primary">
-                        {product.name}
-                      </strong>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {product.sku} · {product.brand}
-                      </span>
-                    </span>
-                    <StatusBadge tone={statusTone(product.status)}>
-                      {statusLabel(product.status)}
-                    </StatusBadge>
-                    <span className="text-xs text-muted-foreground sm:text-right">
-                      {formatDate(product.updatedAt)}
-                    </span>
+                    <strong className="w-5 text-right tabular-nums">{family.count}</strong>
                   </Link>
                 ))}
               </div>
-            </CardContent>
+            </Card>
+
+            <Card className="min-h-[290px] p-[22px]">
+              <h2 className="text-[17px] font-semibold tracking-[-0.02em]">Actividad reciente</h2>
+              <ActivityList items={activities} />
+            </Card>
+          </div>
+
+          <Card className="bg-[#f8f8f9] p-[22px]">
+            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">Calidad del catálogo</h2>
+            <div className="mt-[18px] grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              {(
+                [
+                  ['Sin imagen', '—', 'text-red-500', '/documents'],
+                  ['Sin ficha técnica', '—', 'text-amber-500', '/documents'],
+                  [
+                    'Obligatorios faltantes',
+                    formatNumber(affected),
+                    'text-primary',
+                    '/quality?view=quality',
+                  ],
+                  ['Con conflicto de fuente', '—', 'text-violet-500', '/quality?view=sources'],
+                  [
+                    'Listos para publicación',
+                    formatNumber(published),
+                    'text-emerald-600',
+                    '/publication',
+                  ],
+                ] satisfies ReadonlyArray<readonly [string, string, string, string]>
+              ).map(([label, value, color, href]) => (
+                <Link
+                  key={label}
+                  href={href}
+                  className="rounded-xl bg-white p-5 text-center transition hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                >
+                  <small className="block text-[11px] text-muted-foreground">{label}</small>
+                  <strong className={cn('mt-2 block text-2xl font-semibold', color)}>
+                    {value}
+                  </strong>
+                </Link>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              Los guiones identifican indicadores cuyo modelo persistente todavía no está
+              disponible; no se reemplazan por cifras ilustrativas.
+            </p>
           </Card>
         </div>
       ) : null}
