@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Uuid } from '@cdr/shared';
+import { ConflictError, type Uuid } from '@cdr/shared';
 import { and, asc, eq } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
+import { recordAuditWithinTransaction } from '../../../../shared/persistence/record-audit-within-transaction';
+import { AuditAction, createAuditEntry } from '../../../audit/domain/entities/audit-entry';
+import type { AuditWriteContext } from '../../../audit/domain/ports/audit.port';
 import {
   ImportBatch,
   type ImportBatchSnapshot,
@@ -61,6 +64,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
             rowNumber: row.rowNumber,
             valid: row.valid,
             data: row.data,
+            metadata: metadataWithWarnings(row.metadata, row.warnings),
             errors: row.errors,
           })),
         );
@@ -87,12 +91,128 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
     });
   }
 
-  async saveConfirmation(batch: ImportBatch): Promise<void> {
-    const snapshot = batch.toSnapshot();
+  async claimConfirmation(
+    id: Uuid,
+    audit: AuditWriteContext,
+  ): Promise<
+    | { readonly kind: 'claimed'; readonly batch: ImportBatch }
+    | { readonly kind: 'confirmed'; readonly batch: ImportBatch }
+    | { readonly kind: 'busy'; readonly status: string }
+    | { readonly kind: 'not_found' }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(importBatches)
+        .where(eq(importBatches.id, id))
+        .for('update')
+        .limit(1);
+      if (!existing) return { kind: 'not_found' } as const;
+      const rows = await tx
+        .select()
+        .from(importRows)
+        .where(eq(importRows.batchId, id))
+        .orderBy(asc(importRows.rowNumber));
+      const batch = this.toDomain(existing, rows);
+      if (existing.status === 'confirmed') return { kind: 'confirmed', batch } as const;
+      const staleBefore = new Date(audit.occurredAt.getTime() - CONFIRMATION_LEASE_MS);
+      const canClaim =
+        existing.status === 'previewed' ||
+        (existing.status === 'processing' &&
+          (existing.processingStartedAt === null || existing.processingStartedAt < staleBefore));
+      if (!canClaim) return { kind: 'busy', status: existing.status } as const;
+
+      const [claimed] = await tx
+        .update(importBatches)
+        .set({ status: 'processing', processingStartedAt: audit.occurredAt })
+        .where(eq(importBatches.id, id))
+        .returning();
+      if (!claimed) return { kind: 'not_found' } as const;
+      await recordAuditWithinTransaction(
+        tx,
+        createAuditEntry({
+          resourceType: 'import_batch',
+          resourceId: claimed.id,
+          action: AuditAction.Updated,
+          actorId: audit.actorId,
+          source: `import:${claimed.target}`,
+          correlationId: audit.correlationId,
+          occurredAt: audit.occurredAt,
+          changes: {
+            status: { before: existing.status, after: 'processing' },
+            processingStartedAt: {
+              before: existing.processingStartedAt,
+              after: audit.occurredAt,
+            },
+          },
+        }),
+      );
+      return { kind: 'claimed', batch: this.toDomain(claimed, rows) } as const;
+    });
+  }
+
+  async updateRowResult(
+    batchId: Uuid,
+    rowNumber: number,
+    valid: boolean,
+    errors: readonly string[],
+  ): Promise<void> {
     await this.db
-      .update(importBatches)
-      .set({ status: snapshot.status, confirmedAt: snapshot.confirmedAt })
-      .where(eq(importBatches.id, snapshot.id));
+      .update(importRows)
+      .set({ valid, errors: [...errors] })
+      .where(and(eq(importRows.batchId, batchId), eq(importRows.rowNumber, rowNumber)));
+  }
+
+  async saveConfirmation(batch: ImportBatch, audit: AuditWriteContext): Promise<void> {
+    const snapshot = batch.toSnapshot();
+    const validRows = snapshot.rows.filter((row) => row.valid).length;
+    await this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(importBatches)
+        .where(eq(importBatches.id, snapshot.id))
+        .for('update')
+        .limit(1);
+      if (!current) throw new ConflictError('The claimed import batch no longer exists');
+      if (current.status !== 'processing') {
+        throw new ConflictError('The import batch no longer owns the confirmation claim', {
+          batchId: snapshot.id,
+          status: current.status,
+        });
+      }
+      await tx
+        .update(importBatches)
+        .set({
+          status: snapshot.status,
+          confirmedAt: snapshot.confirmedAt,
+          processingStartedAt: null,
+          validRows,
+          invalidRows: snapshot.rows.length - validRows,
+        })
+        .where(eq(importBatches.id, snapshot.id));
+      await recordAuditWithinTransaction(
+        tx,
+        createAuditEntry({
+          resourceType: 'import_batch',
+          resourceId: snapshot.id,
+          action: snapshot.status === 'confirmed' ? AuditAction.Imported : AuditAction.Updated,
+          actorId: audit.actorId,
+          source: `import:${snapshot.target}`,
+          correlationId: audit.correlationId,
+          occurredAt: audit.occurredAt,
+          changes: {
+            status: { before: current.status, after: snapshot.status },
+            confirmedAt: { before: current.confirmedAt, after: snapshot.confirmedAt },
+            processingStartedAt: { before: current.processingStartedAt, after: null },
+            validRows: { before: current.validRows, after: validRows },
+            invalidRows: {
+              before: current.invalidRows,
+              after: snapshot.rows.length - validRows,
+            },
+          },
+        }),
+      );
+    });
   }
 
   private loadRows(batchId: string): Promise<ImportRowRow[]> {
@@ -136,10 +256,34 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
         rowNumber: row.rowNumber,
         valid: row.valid,
         data: row.data as ImportRecord,
+        metadata: row.metadata,
         errors: row.errors as string[],
+        warnings: warningsFromMetadata(row.metadata),
       })),
       createdAt: batch.createdAt,
       confirmedAt: batch.confirmedAt,
     });
   }
+}
+
+const CONFIRMATION_LEASE_MS = 15 * 60 * 1_000;
+const WARNINGS_METADATA_KEY = '_warnings';
+
+function metadataWithWarnings(
+  metadata: unknown,
+  warnings: readonly string[],
+): Record<string, unknown> {
+  const base =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {};
+  return { ...base, [WARNINGS_METADATA_KEY]: [...warnings] };
+}
+
+function warningsFromMetadata(metadata: unknown): string[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const warnings = (metadata as Record<string, unknown>)[WARNINGS_METADATA_KEY];
+  return Array.isArray(warnings)
+    ? warnings.filter((warning): warning is string => typeof warning === 'string')
+    : [];
 }

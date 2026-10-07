@@ -11,7 +11,11 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   resolve: {
     // Mirrors the `@/*` path mapping in tsconfig.json, which Vite does not read.
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Next resolves this marker at build time; unit tests only need a side-effect-free module.
+      'server-only': fileURLToPath(new URL('./src/test/server-only.ts', import.meta.url)),
+    },
   },
   test: {
     environment: 'jsdom',

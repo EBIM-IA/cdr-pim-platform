@@ -126,14 +126,11 @@ export class UpdateTemplateAttributeUseCase {
     },
     actor: AuthenticatedActor,
   ): Promise<AdminTemplateAttribute> {
-    // Template flags are part of day-to-day catalogue operations, but the role-access
-    // matrix is an authorization policy and therefore requires an administrative grant.
-    // Keep this check in the application boundary so it also protects non-HTTP callers.
-    if (
-      input.roleAccess !== undefined &&
-      !actorHasCapability(actor, Capability.AdministrationManage)
-    ) {
-      throw new ForbiddenError('Insufficient capability to modify attribute role access', {
+    // Template rules determine catalogue governance (including completeness,
+    // propagation and role visibility). Keep the authorization check in the
+    // application boundary so non-HTTP callers cannot bypass the approved matrix.
+    if (!actorHasCapability(actor, Capability.AdministrationManage)) {
+      throw new ForbiddenError('Insufficient capability to modify template attributes', {
         required: [Capability.AdministrationManage],
       });
     }

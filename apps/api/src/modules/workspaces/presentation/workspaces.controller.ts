@@ -31,7 +31,8 @@ export class WorkspacesController {
     @Param('slug', new ZodValidationPipe(workspaceSlugSchema)) slug: WorkspaceSlug,
     @Req() request: AuthenticatedRequest,
   ): Promise<WorkspaceDto> {
-    // The global guards establish the actor and enforce catalog read access before this runs.
+    // The global guards establish the actor and enforce catalog read access before this runs;
+    // the use case also enforces the capability of the requested workspace slug.
     // Output validation is intentional. These projections combine SQL and configuration;
     // parsing here prevents a malformed cell from leaking into the generic web renderer.
     return workspaceSchema.parse(await this.getWorkspace.execute(slug, request.actor));

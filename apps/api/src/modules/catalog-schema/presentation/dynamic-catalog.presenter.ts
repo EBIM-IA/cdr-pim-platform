@@ -1,12 +1,20 @@
 import type {
   CatalogGridProductDto,
   CatalogGridSchemaDto,
+  CatalogWorkbookResultDto,
   ProductAttributeSheetDto,
   UpdatedProductAttributeDto,
+  UpdatedProductAttributesBatchDto,
 } from '@cdr/contracts';
 
-import type { CatalogGridProduct, DynamicCatalogSchema } from '../domain/entities/catalog-schema';
+import type {
+  CatalogGridProduct,
+  CatalogWorkbookProduct,
+  DynamicCatalogSchema,
+} from '../domain/entities/catalog-schema';
+import type { CatalogWorkbookResult } from '../domain/ports/dynamic-catalog.repository.port';
 import type { UpdatedProductAttribute } from '../application/update-product-attribute.use-case';
+import type { UpdatedProductAttributes } from '../application/update-product-attributes.use-case';
 
 export function toGridSchemaDto(schema: DynamicCatalogSchema): CatalogGridSchemaDto {
   return {
@@ -42,6 +50,43 @@ export function toGridProductDto(product: CatalogGridProduct): CatalogGridProduc
   };
 }
 
+function toWorkbookProductDto(product: CatalogWorkbookProduct) {
+  return {
+    ...product,
+    applicationTypes: [...product.applicationTypes],
+    updatedAt: product.updatedAt.toISOString(),
+    attributes: Object.fromEntries(
+      Object.entries(product.attributes).map(([key, cell]) => [
+        key,
+        cell.applicable ? { ...cell, updatedAt: cell.updatedAt.toISOString() } : cell,
+      ]),
+    ),
+  };
+}
+
+export function toWorkbookResultDto(
+  result: CatalogWorkbookResult,
+  page: number,
+  pageSize: number,
+): CatalogWorkbookResultDto {
+  return {
+    columns: result.columns.map((column) => ({
+      ...column,
+      allowedValues: [...column.allowedValues],
+      applicableTemplateIds: [...column.applicableTemplateIds],
+    })),
+    facets: {
+      brands: [...result.facets.brands],
+      applicationTypes: [...result.facets.applicationTypes],
+      statuses: [...result.facets.statuses],
+    },
+    items: result.items.map(toWorkbookProductDto),
+    page,
+    pageSize,
+    total: result.total,
+  };
+}
+
 export function toProductAttributeSheetDto(input: {
   schema: DynamicCatalogSchema;
   product: CatalogGridProduct;
@@ -56,5 +101,14 @@ export function toUpdatedProductAttributeDto(
     ...attribute,
     updatedAt: attribute.updatedAt.toISOString(),
     replicatedProductIds: [...attribute.replicatedProductIds],
+  };
+}
+
+export function toUpdatedProductAttributesBatchDto(
+  result: UpdatedProductAttributes,
+): UpdatedProductAttributesBatchDto {
+  return {
+    productId: result.productId,
+    attributes: result.attributes.map(toUpdatedProductAttributeDto),
   };
 }

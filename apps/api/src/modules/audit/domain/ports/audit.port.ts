@@ -1,5 +1,11 @@
 import type { AuditEntry } from '../entities/audit-entry';
 
+export interface AuditWriteContext {
+  readonly actorId: string | null;
+  readonly correlationId: string;
+  readonly occurredAt: Date;
+}
+
 /**
  * Outbound port for the audit trail.
  *

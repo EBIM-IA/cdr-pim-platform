@@ -21,3 +21,4 @@ and update the status of the old one — never edit history.
 | [011](./ADR-011-unified-code-inheritance-and-homolog-search.md) | Unified-code inheritance and homolog search eligibility | Accepted |
 | [012](./ADR-012-template-driven-product-data.md)                | Template-driven dynamic product data                    | Accepted |
 | [013](./ADR-013-capability-and-attribute-authorization.md)      | Capability and attribute-level authorization            | Accepted |
+| [014](./ADR-014-executable-unified-code-propagation.md)         | Executable unified-code propagation                     | Accepted |

@@ -25,6 +25,7 @@ export const importBatches = pgTable(
     invalidRows: integer('invalid_rows').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    processingStartedAt: timestamp('processing_started_at', { withTimezone: true }),
   },
   (table) => [index('import_batches_created_at_idx').on(table.createdAt)],
 );
@@ -38,6 +39,7 @@ export const importRows = pgTable(
     rowNumber: integer('row_number').notNull(),
     valid: boolean('valid').notNull(),
     data: jsonb('data').notNull(),
+    metadata: jsonb('metadata').notNull().default({}),
     errors: jsonb('errors').notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

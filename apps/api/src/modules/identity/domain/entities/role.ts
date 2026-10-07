@@ -47,6 +47,7 @@ export const Capability = {
   EquivalencesWrite: 'equivalences:write',
   ImportsExecute: 'imports:execute',
   AiQualityExecute: 'ai-quality:execute',
+  AiDocumentExtract: 'ai-document:extract',
   PublicationExecute: 'publication:execute',
   IntegrationsManage: 'integrations:manage',
   ReportsRead: 'reports:read',
@@ -86,6 +87,7 @@ const PURCHASING_CAPABILITIES: readonly Capability[] = [
   Capability.EquivalencesWrite,
   Capability.ImportsExecute,
   Capability.AiQualityExecute,
+  Capability.AiDocumentExtract,
 ];
 
 const SALES_CAPABILITIES: readonly Capability[] = [

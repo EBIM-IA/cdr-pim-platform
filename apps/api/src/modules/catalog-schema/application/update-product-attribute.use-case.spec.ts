@@ -23,12 +23,19 @@ const actor: AuthenticatedActor = {
 function repository(
   result: Awaited<ReturnType<DynamicCatalogRepositoryPort['updateAttribute']>>,
   sourceAuthority: AttributeSourceAuthority = AttributeSourceAuthority.Pim,
+  required = true,
 ): DynamicCatalogRepositoryPort {
   return {
     listActiveCategories: async () => [],
     getActiveSchema: async () => null,
     getProductSheet: async () => null,
     listGrid: async () => ({ items: [], total: 0 }),
+    listWorkbook: async () => ({
+      columns: [],
+      facets: { brands: [], applicationTypes: [], statuses: [] },
+      items: [],
+      total: 0,
+    }),
     findProductAttributeAssignment: async () => ({
       productId,
       definition: {
@@ -39,7 +46,7 @@ function repository(
         unit: 'mm',
         allowedValues: [],
         sourceAuthority,
-        required: true,
+        required,
         replicable: true,
         searchable: true,
         includeInTechnicalSheet: true,
@@ -52,6 +59,7 @@ function repository(
       expect(input.audit.actorId).toBe(actor.id);
       return result;
     },
+    updateAttributes: async () => ({ kind: 'updated', updates: [] }),
   };
 }
 
@@ -98,6 +106,48 @@ describe('UpdateProductAttributeUseCase', () => {
         actor,
       ),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('returns the tombstone version when an optional value is cleared', async () => {
+    const useCase = new UpdateProductAttributeUseCase(
+      repository(
+        {
+          kind: 'updated',
+          changes: [
+            {
+              productId,
+              before: {
+                value: 25,
+                version: 1,
+                source: AttributeValueSource.Manual,
+                updatedAt: now,
+              },
+              after: {
+                value: null,
+                version: 2,
+                source: AttributeValueSource.Manual,
+                updatedAt: now,
+              },
+            },
+          ],
+        },
+        AttributeSourceAuthority.Pim,
+        false,
+      ),
+      new FixedClock(now),
+    );
+
+    await expect(
+      useCase.execute(
+        {
+          productId,
+          attributeKey: 'diametro_interior',
+          value: null,
+          expectedVersion: 1,
+        },
+        actor,
+      ),
+    ).resolves.toMatchObject({ value: null, version: 2 });
   });
 
   it('rejects human edits to ERP-authoritative attributes', async () => {

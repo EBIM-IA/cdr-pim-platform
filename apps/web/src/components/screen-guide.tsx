@@ -1,4 +1,8 @@
+'use client';
+
 import { ChevronDown, CircleHelp } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 export function ScreenGuide({
   objective,
@@ -13,9 +17,31 @@ export function ScreenGuide({
   dataSource: string;
   limitation?: string;
 }) {
+  const pathname = usePathname();
+  const storageKey = `cdr:screen-guide:${pathname}`;
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored !== null) setOpen(stored === 'open');
+    } catch {
+      // Storage may be disabled; the guide remains available for the current render.
+    }
+  }, [storageKey]);
+
   return (
     <details
-      open
+      open={open}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        try {
+          window.localStorage.setItem(storageKey, nextOpen ? 'open' : 'closed');
+        } catch {
+          // Persisting this optional UI preference must never block the screen.
+        }
+      }}
       className="group -mt-2 mb-[18px] rounded-xl border border-[#ffd1af] bg-[#fff8f2] text-xs text-slate-700"
     >
       <summary className="flex min-h-[47px] cursor-pointer list-none items-start gap-3 rounded-xl px-4 py-3 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">

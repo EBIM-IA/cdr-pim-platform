@@ -115,7 +115,7 @@ El patrón y las escrituras antiguas pendientes de migración están en
 | Tiempo          | `timestamptz` en UTC; localización solo en presentación                                                     |
 | Enumeraciones   | `text` + `CHECK`, no tipos `ENUM` de PostgreSQL                                                             |
 | Borrado         | Cascada para datos estrictamente dependientes; desactivación lógica para información que conserva historial |
-| Binarios        | No se almacenan en PostgreSQL; la persistencia S3 de activos sigue pendiente de implementación              |
+| Binarios        | PostgreSQL conserva metadatos en `product_assets`; los bytes viven en el storage privado configurado        |
 
 ## Migraciones y Drizzle
 
@@ -142,6 +142,9 @@ de capacidad actual.
 ## Backup y activos
 
 La estrategia objetivo continúa siendo RDS con recuperación a un instante y restauración a
-una instancia nueva. Los buckets S3 versionados y su IaC pertenecen al repositorio de
-infraestructura; este repositorio todavía no implementa persistencia de imágenes, planos o
-documentos y no debe presentarla como disponible.
+una instancia nueva. `product_assets` conserva metadatos, historial de reemplazos y borrado
+lógico; el binario se guarda mediante `@cdr/storage` en memoria para desarrollo o en un bucket
+S3 privado y cifrado según la configuración. La API autenticada limita tamaño y formato,
+verifica firma/MIME/extensión y protege los ZIP contra rutas inseguras y expansión anómala.
+El escaneo antimalware y la política de ciclo de vida del bucket siguen siendo responsabilidades
+pendientes de plataforma.

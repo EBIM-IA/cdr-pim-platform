@@ -12,10 +12,8 @@ import { StatePanel } from '@/components/state-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useProductsData } from '@/components/use-products-data';
 import { useWorkspaceData } from '@/components/use-workspace-data';
 import { listAuditChanges } from '@/lib/operational-api';
-import type { Product } from '@/lib/types';
 import { cn, formatNumber } from '@/lib/utils';
 
 interface ActivityItem {
@@ -56,8 +54,8 @@ function metric(workspace: WorkspaceDto | null, key: string): number {
   return typeof value === 'number' ? value : 0;
 }
 
-function familyFor(product: Product): string {
-  const haystack = normalized(`${product.name} ${product.description ?? ''}`);
+function familyForCategory(category: string): string {
+  const haystack = normalized(category);
   return (
     familyDefinitions.find((family) =>
       family.patterns.some((pattern) => haystack.includes(pattern)),
@@ -142,10 +140,7 @@ function ActivityList({ items }: { items: readonly ActivityItem[] }) {
 }
 
 export function DashboardOverview() {
-  const { products, total, loading, error, reload } = useProductsData({ page: 1, pageSize: 100 });
-  const quality = useWorkspaceData('quality');
-  const equivalences = useWorkspaceData('equivalences');
-  const templates = useWorkspaceData('templates');
+  const reports = useWorkspaceData('reports');
   const imports = useWorkspaceData('imports');
   const integrations = useWorkspaceData('integrations');
   const [auditChanges, setAuditChanges] = useState<AuditChangeDto[]>([]);
@@ -158,27 +153,34 @@ export function DashboardOverview() {
     return () => controller.abort();
   }, []);
 
-  const published = products.filter((product) => product.status === 'published').length;
-  const pending = products.filter((product) => product.status === 'in_review').length;
-  const affected = metric(quality.workspace, 'affected-products');
-  const completeness = products.length
-    ? Math.max(0, Math.round(((products.length - affected) / products.length) * 100))
-    : 0;
-  const groups = metric(equivalences.workspace, 'groups');
-  const templateCount = metric(templates.workspace, 'active');
-  const blockedIntegrations = metric(integrations.workspace, 'blocked-external-systems');
+  const total = metric(reports.workspace, 'products');
+  const loading = reports.loading;
+  const error = reports.error;
+  const reload = reports.reload;
+  const pending = metric(reports.workspace, 'in-review');
+  const publishable = metric(reports.workspace, 'publishable');
+  const affected = metric(reports.workspace, 'affected-products');
+  const completeness = metric(reports.workspace, 'completion');
+  const groups = metric(reports.workspace, 'groups');
+  const templateCount = metric(reports.workspace, 'active-templates');
+  const blockedIntegrations = metric(reports.workspace, 'blocked-external-systems');
 
   const families = useMemo(() => {
     const counts = new Map<string, number>(familyDefinitions.map((family) => [family.name, 0]));
-    for (const product of products) {
-      const family = familyFor(product);
-      if (family !== 'Otros') counts.set(family, (counts.get(family) ?? 0) + 1);
+    const categoryRows =
+      reports.workspace?.rows.filter((row) => row.values.section === 'Categoría') ?? [];
+    for (const row of categoryRows) {
+      const family = familyForCategory(String(row.values.indicator ?? ''));
+      const productCount = Number(row.values.value ?? 0);
+      if (family !== 'Otros' && Number.isFinite(productCount)) {
+        counts.set(family, (counts.get(family) ?? 0) + productCount);
+      }
     }
     return familyDefinitions.map((family) => ({
       name: family.name,
       count: counts.get(family.name) ?? 0,
     }));
-  }, [products]);
+  }, [reports.workspace]);
   const maximumFamily = Math.max(...families.map((family) => family.count), 1);
 
   const activities = useMemo(() => {
@@ -256,7 +258,7 @@ export function DashboardOverview() {
           >
             <MetricCard
               label="Productos"
-              value={formatNumber(total || products.length)}
+              value={formatNumber(total)}
               note="SKU persistidos en PIM"
               icon={Package}
               href="/products"
@@ -264,7 +266,7 @@ export function DashboardOverview() {
             <MetricCard
               label="Completitud"
               value={`${completeness}%`}
-              note="sobre controles base disponibles"
+              note="promedio de obligatorios activos"
               icon={ShieldCheck}
               tone="green"
               href="/quality?view=quality"
@@ -279,8 +281,8 @@ export function DashboardOverview() {
             />
             <MetricCard
               label="Publicables"
-              value={formatNumber(published)}
-              note="publicados en el estado PIM"
+              value={formatNumber(publishable)}
+              note="cumplen obligatorios activos"
               icon={FileText}
               tone="blue"
               href="/publication"
@@ -302,7 +304,7 @@ export function DashboardOverview() {
               href="/products"
               className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
             >
-              {formatNumber(total || products.length)} SKU
+              {formatNumber(total)} SKU
             </Link>
             <Link
               href="/templates"
@@ -320,7 +322,7 @@ export function DashboardOverview() {
               href="/publication"
               className="font-semibold underline decoration-dashed underline-offset-4 hover:text-primary"
             >
-              {formatNumber(published)} publicables
+              {formatNumber(publishable)} publicables
             </Link>
             <Link
               href="/equivalences"
@@ -339,7 +341,7 @@ export function DashboardOverview() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="min-h-[290px] p-[22px]">
               <h2 className="text-[17px] font-semibold tracking-[-0.02em]">
-                Productos por familia · muestra
+                Productos por familia · catálogo completo
               </h2>
               <div className="mt-[22px]">
                 {families.map((family) => (
@@ -388,7 +390,7 @@ export function DashboardOverview() {
                   ['Con conflicto de fuente', '—', 'text-violet-500', '/quality?view=sources'],
                   [
                     'Listos para publicación',
-                    formatNumber(published),
+                    formatNumber(publishable),
                     'text-emerald-600',
                     '/publication',
                   ],

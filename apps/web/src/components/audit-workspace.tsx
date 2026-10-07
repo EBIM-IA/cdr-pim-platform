@@ -1,7 +1,7 @@
 'use client';
 
 import type { AuditChangeDto, AuditChangeListQuery } from '@cdr/contracts';
-import { ChevronLeft, ChevronRight, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { listAuditChanges } from '@/lib/operational-api';
+import { downloadAuditChangesCsv, listAuditChanges } from '@/lib/operational-api';
 
 interface AuditFilters {
   sku: string;
@@ -60,23 +60,28 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [items, setItems] = useState<AuditChangeDto[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const query: AuditChangeListQuery = {
-      page,
-      pageSize,
+  const currentQuery = useCallback(
+    (queryPage = page, queryPageSize = pageSize): AuditChangeListQuery => ({
+      page: queryPage,
+      pageSize: queryPageSize,
       sku: filters.sku || undefined,
       field: filters.field || undefined,
       source: filters.source || undefined,
       actorId: filters.actorId || undefined,
       from: toIso(filters.from),
       to: toIso(filters.to),
-    };
+    }),
+    [filters, page, pageSize],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const result = await listAuditChanges(query);
+      const result = await listAuditChanges(currentQuery());
       setItems(result.items);
       setTotal(result.total);
     } catch (requestError) {
@@ -90,7 +95,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [filters, page, pageSize]);
+  }, [currentQuery]);
 
   useEffect(() => void load(), [load]);
 
@@ -106,6 +111,23 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  const exportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      await downloadAuditChangesCsv(currentQuery(1, 100));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'No fue posible exportar la auditoría.',
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <>
       {!embedded ? (
@@ -115,13 +137,19 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
             title="Reportes y auditoría"
             description="Consulta el historial inmutable de cambios a nivel de campo, actor y origen."
             actions={
-              <Button variant="outline" onClick={load} disabled={loading}>
-                <RefreshCw
-                  aria-hidden="true"
-                  className={loading ? 'size-4 animate-spin' : 'size-4'}
-                />
-                Actualizar
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => void exportCsv()} disabled={exporting}>
+                  <Download aria-hidden="true" className="size-4" />
+                  {exporting ? 'Exportando…' : 'Exportar CSV'}
+                </Button>
+                <Button variant="outline" onClick={load} disabled={loading}>
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={loading ? 'size-4 animate-spin' : 'size-4'}
+                  />
+                  Actualizar
+                </Button>
+              </div>
             }
           />
           <ScreenGuide
@@ -190,6 +218,17 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
             </label>
           </div>
           <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {embedded ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void exportCsv()}
+                disabled={exporting}
+              >
+                <Download aria-hidden="true" className="size-4" />
+                {exporting ? 'Exportando…' : 'Exportar CSV'}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="outline"
@@ -261,7 +300,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
                   <th className="px-4 py-3">Campo</th>
                   <th className="px-4 py-3">Antes</th>
                   <th className="px-4 py-3">Después</th>
-                  <th className="px-4 py-3">Vigente desde</th>
+                  <th className="px-4 py-3">Fec. Modificación Anterior</th>
                   <th className="px-4 py-3">Actor</th>
                   <th className="px-4 py-3">Origen</th>
                 </tr>
@@ -307,7 +346,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
                             dateStyle: 'short',
                             timeStyle: 'short',
                           }).format(new Date(item.previousValueValidFrom))
-                        : '—'}
+                        : 'Primera modificación'}
                     </td>
                     <td className="px-4 py-3 text-xs">{item.actorId ?? 'Sistema'}</td>
                     <td className="px-4 py-3">

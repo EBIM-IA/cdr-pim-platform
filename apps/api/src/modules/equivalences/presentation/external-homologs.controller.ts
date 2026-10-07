@@ -1,13 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type CreateExternalHomologInput,
+  type DeactivateExternalHomologQuery,
   type EligibleHomologSearchQuery,
   type ExternalHomologDto,
   type HomologListQuery,
   type HomologSearchResultDto,
   type UpdateExternalHomologInput,
   createExternalHomologSchema,
+  deactivateExternalHomologQuerySchema,
   eligibleHomologSearchQuerySchema,
   homologListQuerySchema,
   updateExternalHomologSchema,
@@ -19,6 +21,7 @@ import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import {
   CreateExternalHomologUseCase,
+  DeactivateExternalHomologUseCase,
   ListExternalHomologsUseCase,
   SearchEligibleHomologsUseCase,
   UpdateExternalHomologUseCase,
@@ -33,6 +36,7 @@ export class ExternalHomologsController {
     private readonly listHomologs: ListExternalHomologsUseCase,
     private readonly createHomolog: CreateExternalHomologUseCase,
     private readonly updateHomolog: UpdateExternalHomologUseCase,
+    private readonly deactivateHomolog: DeactivateExternalHomologUseCase,
     private readonly searchHomologs: SearchEligibleHomologsUseCase,
   ) {}
 
@@ -60,6 +64,18 @@ export class ExternalHomologsController {
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ExternalHomologDto> {
     return toDto(await this.updateHomolog.execute(id, body, actor));
+  }
+
+  @Delete('homologs/:id')
+  @RequireCapabilities(Capability.EquivalencesWrite)
+  @ApiOperation({ summary: 'Soft-delete a homolog while retaining its provenance' })
+  async deactivate(
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(deactivateExternalHomologQuerySchema))
+    query: DeactivateExternalHomologQuery,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<ExternalHomologDto> {
+    return toDto(await this.deactivateHomolog.execute(id, query.expectedUpdatedAt, actor));
   }
 
   @Get('homolog-search')

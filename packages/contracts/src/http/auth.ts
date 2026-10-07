@@ -44,6 +44,7 @@ export const authCapabilitySchema = z.enum([
   'equivalences:write',
   'imports:execute',
   'ai-quality:execute',
+  'ai-document:extract',
   'publication:execute',
   'integrations:manage',
   'reports:read',

@@ -37,4 +37,9 @@ describe('dynamic attribute validation', () => {
       ValidationError,
     );
   });
+
+  it('allows clearing optional attributes and protects required ones', () => {
+    expect(() => validateAttributeValue(definition, null, false)).not.toThrow();
+    expect(() => validateAttributeValue(definition, null, true)).toThrow(ValidationError);
+  });
 });

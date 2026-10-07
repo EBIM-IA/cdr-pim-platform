@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchCatalogGrid, patchProductAttribute } from '@/lib/dynamic-catalog-api';
+import {
+  fetchCatalogGrid,
+  fetchCatalogWorkbook,
+  patchProductAttribute,
+} from '@/lib/dynamic-catalog-api';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -50,5 +54,49 @@ describe('dynamic catalog browser client', () => {
       status: 409,
       message: 'El atributo fue modificado.',
     });
+  });
+
+  it('sends optional workbook filters through the authenticated BFF', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          columns: [],
+          facets: { brands: [], applicationTypes: [], statuses: [] },
+          items: [],
+          page: 2,
+          pageSize: 50,
+          total: 0,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchCatalogWorkbook({
+      categoryId: '11111111-1111-4111-8111-111111111111',
+      page: 2,
+      pageSize: 50,
+      q: '2RS',
+      brand: 'FAG',
+      status: 'in_review',
+      applicationType: 'INDUSTRIAL',
+      completeness: 'attention',
+      filter: ['diametro:gte:20'],
+    });
+
+    const [rawUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const url = new URL(rawUrl, 'http://localhost');
+    expect(url.pathname).toBe('/api/catalog/dynamic/workbook');
+    expect(Object.fromEntries(url.searchParams.entries())).toMatchObject({
+      page: '2',
+      pageSize: '50',
+      q: '2RS',
+      brand: 'FAG',
+      status: 'in_review',
+      applicationType: 'INDUSTRIAL',
+      completeness: 'attention',
+    });
+    expect(url.searchParams.getAll('filter')).toEqual(['diametro:gte:20']);
+    expect(init.credentials).toBe('same-origin');
   });
 });

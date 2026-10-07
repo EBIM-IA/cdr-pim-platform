@@ -3,10 +3,12 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type ApplicationListQuery,
   type CreateGroupApplicationInput,
+  type DeactivateGroupApplicationQuery,
   type GroupApplicationDto,
   type UpdateGroupApplicationInput,
   applicationListQuerySchema,
   createGroupApplicationSchema,
+  deactivateGroupApplicationQuerySchema,
   groupApplicationSchema,
   updateGroupApplicationSchema,
 } from '@cdr/contracts';
@@ -68,9 +70,11 @@ export class ApplicationsController {
   @ApiOperation({ summary: 'Soft-delete an application while retaining its provenance' })
   async deactivate(
     @Param('id') id: string,
+    @Query(new ZodValidationPipe(deactivateGroupApplicationQuerySchema))
+    query: DeactivateGroupApplicationQuery,
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<GroupApplicationDto> {
-    return toDto(await this.deactivateApplication.execute(id, actor));
+    return toDto(await this.deactivateApplication.execute(id, query.expectedUpdatedAt, actor));
   }
 }
 

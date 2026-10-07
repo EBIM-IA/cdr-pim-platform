@@ -28,12 +28,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <section className="hidden items-center justify-center bg-[#161616] px-12 py-14 text-white md:flex">
         <div className="w-[min(510px,90%)] text-center">
           <Image
-            src="/brand/cdr-isotipo.svg"
+            src="/brand/cdr-logo-white.png"
             alt="Casa del Rulimán"
-            width={152}
-            height={132}
+            width={520}
+            height={158}
             priority
-            className="mx-auto h-auto w-[142px]"
+            className="mx-auto h-auto w-[min(320px,85%)]"
           />
           <h1 className="mx-auto my-[26px] max-w-[410px] text-balance text-[29px] font-medium leading-[1.12]">
             Un catálogo más inteligente para un futuro ganador.

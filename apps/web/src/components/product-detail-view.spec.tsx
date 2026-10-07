@@ -1,10 +1,19 @@
 import type { ProductAttributeSheetDto } from '@cdr/contracts';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchProduct } from '@/lib/catalog-api';
-import { fetchProductAttributeSheet } from '@/lib/dynamic-catalog-api';
-import { listApplications, listAuditChanges, listHomologs } from '@/lib/operational-api';
+import {
+  fetchProductAttributeSheet,
+  fetchProductTechnicalSheet,
+  patchProductAttributes,
+} from '@/lib/dynamic-catalog-api';
+import {
+  listApplications,
+  listAuditChanges,
+  listHomologs,
+  listOemCodes,
+} from '@/lib/operational-api';
 import type { Product } from '@/lib/types';
 
 import { ProductDetailView } from './product-detail-view';
@@ -30,11 +39,14 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
     }
   },
   fetchProductAttributeSheet: vi.fn(),
+  fetchProductTechnicalSheet: vi.fn(),
+  patchProductAttributes: vi.fn(),
 }));
 vi.mock('@/lib/operational-api', () => ({
   listApplications: vi.fn(),
   listAuditChanges: vi.fn(),
   listHomologs: vi.fn(),
+  listOemCodes: vi.fn(),
 }));
 
 const product: Product = {
@@ -130,12 +142,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchProduct).mockResolvedValue(product);
   vi.mocked(fetchProductAttributeSheet).mockResolvedValue(sheet);
+  vi.mocked(fetchProductTechnicalSheet).mockResolvedValue(sheet);
+  vi.mocked(patchProductAttributes).mockResolvedValue({
+    productId: product.id,
+    attributes: [],
+  });
   vi.mocked(listApplications).mockResolvedValue([
     {
       id: '66666666-6666-4666-8666-666666666666',
       groupId: '77777777-7777-4777-8777-777777777777',
       unifiedCode: 'D1672',
-      vehicleType: 'Automóvil',
+      vehicleType: 'AUTOMOTRIZ',
       make: 'Toyota',
       model: 'Hilux',
       yearFrom: 2016,
@@ -150,6 +167,7 @@ beforeEach(() => {
     },
   ]);
   vi.mocked(listHomologs).mockResolvedValue([]);
+  vi.mocked(listOemCodes).mockResolvedValue([]);
   vi.mocked(listAuditChanges).mockResolvedValue({
     items: [
       {
@@ -190,6 +208,7 @@ describe('ProductDetailView operational data', () => {
         expect.any(AbortSignal),
       );
       expect(listHomologs).toHaveBeenCalledWith({ unifiedCode: 'D1672' }, expect.any(AbortSignal));
+      expect(listOemCodes).toHaveBeenCalledWith({ unifiedCode: 'D1672' }, expect.any(AbortSignal));
       expect(listAuditChanges).toHaveBeenCalledWith(
         { resourceId: product.id, page: 1, pageSize: 100 },
         expect.any(AbortSignal),
@@ -214,5 +233,120 @@ describe('ProductDetailView operational data', () => {
     expect(await screen.findByRole('heading', { name: product.name })).toBeInTheDocument();
     expect(screen.getByText('SKU')).toBeInTheDocument();
     expect(screen.queryByText('No pudimos mostrar esta ficha')).not.toBeInTheDocument();
+  });
+
+  it('previews a technical sheet using only attributes enabled by the template', async () => {
+    const view = render(<ProductDetailView productId={product.id} />);
+    const rendered = within(view.container);
+
+    await rendered.findByRole('heading', { name: product.name });
+    fireEvent.click(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' }));
+
+    const dialog = rendered.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
+    expect(within(dialog).getByText('Especificaciones publicables')).toBeInTheDocument();
+    const exportedAttributes = dialog.querySelector('.sheet-attributes');
+    expect(exportedAttributes).not.toBeNull();
+    expect(
+      within(exportedAttributes as HTMLElement).getByText('Código unificador'),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText('Descripción interna')).not.toBeInTheDocument();
+  });
+
+  it('saves every edited PIM field in one atomic batch', async () => {
+    const editableSheet: ProductAttributeSheetDto = {
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: [
+          sheet.schema.columns[0]!,
+          {
+            ...sheet.schema.columns[1]!,
+            permissions: { edit: true, import: false, export: false },
+          },
+          {
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            key: 'color',
+            label: 'Color',
+            dataType: 'text',
+            unit: null,
+            allowedValues: [],
+            required: false,
+            replicable: true,
+            searchable: true,
+            includeInTechnicalSheet: true,
+            sourceAuthority: 'pim',
+            position: 3,
+            permissions: { edit: true, import: false, export: false },
+          },
+        ],
+      },
+      product: {
+        ...sheet.product,
+        attributes: {
+          ...sheet.product.attributes,
+          color: {
+            value: null,
+            version: 0,
+            source: 'manual',
+            updatedAt: '2026-10-05T10:00:00.000Z',
+          },
+        },
+      },
+    };
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue(editableSheet);
+    vi.mocked(patchProductAttributes).mockResolvedValue({
+      productId: product.id,
+      attributes: [
+        {
+          productId: product.id,
+          attributeKey: 'descripcion_interna',
+          value: 'Pastilla semimetálica',
+          version: 2,
+          source: 'manual',
+          updatedAt: '2026-10-07T10:00:00.000Z',
+          replicatedProductIds: [],
+        },
+        {
+          productId: product.id,
+          attributeKey: 'color',
+          value: 'Negro',
+          version: 1,
+          source: 'manual',
+          updatedAt: '2026-10-07T10:00:00.000Z',
+          replicatedProductIds: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+        },
+      ],
+    });
+
+    const view = render(<ProductDetailView productId={product.id} />);
+    const rendered = within(view.container);
+    const edit = await rendered.findByRole('button', { name: 'Editar enriquecimiento' });
+    expect(edit).toBeEnabled();
+    fireEvent.click(edit);
+
+    fireEvent.change(rendered.getByLabelText('Descripción interna'), {
+      target: { value: 'Pastilla semimetálica' },
+    });
+    fireEvent.change(rendered.getByLabelText('Color'), { target: { value: 'Negro' } });
+    fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
+
+    await waitFor(() => {
+      expect(patchProductAttributes).toHaveBeenCalledTimes(1);
+    });
+    expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
+      updates: [
+        {
+          attributeKey: 'descripcion_interna',
+          value: 'Pastilla semimetálica',
+          expectedVersion: 1,
+        },
+        { attributeKey: 'color', value: 'Negro', expectedVersion: 0 },
+      ],
+    });
+    expect(
+      await rendered.findByText(
+        'Cambios guardados y heredados a 1 SKU del mismo código unificador.',
+      ),
+    ).toBeInTheDocument();
   });
 });

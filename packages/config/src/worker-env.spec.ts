@@ -7,6 +7,23 @@ describe('loadWorkerEnv', () => {
     const env = loadWorkerEnv({ NODE_ENV: 'test', APP_ENV: 'test' });
     expect(env.QUEUE_DRIVER).toBe('memory');
     expect(env.STORAGE_DRIVER).toBe('memory');
+    expect(env.WORKER_PORT).toBe(3002);
+  });
+
+  it('does not reuse the API port from the shared root environment', () => {
+    const env = loadWorkerEnv({ NODE_ENV: 'test', APP_ENV: 'test', PORT: '4100' });
+
+    expect(env.WORKER_PORT).toBe(3002);
+  });
+
+  it('requires a key for each explicitly enabled OpenAI capability', () => {
+    expect(() =>
+      loadWorkerEnv({
+        NODE_ENV: 'test',
+        APP_ENV: 'test',
+        AI_DOCUMENT_EXTRACTION_PROVIDER: 'openai',
+      }),
+    ).toThrow(/OPENAI_API_KEY/);
   });
 
   it('fails closed when a production worker starts with local defaults', () => {

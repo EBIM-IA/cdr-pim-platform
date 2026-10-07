@@ -1,6 +1,9 @@
 const PRIVATE_NO_STORE = 'private, no-store, max-age=0, must-revalidate';
 
 export const UPSTREAM_TIMEOUT_MS = 10_000;
+export const IMPORT_UPSTREAM_TIMEOUT_MS = 60_000;
+/** Provider-backed AI calls need more time than regular CRUD, but may not occupy a BFF worker forever. */
+export const AI_UPSTREAM_TIMEOUT_MS = 45_000;
 
 function appendVary(headers: Headers, value: string): void {
   const entries = (headers.get('vary') ?? '')

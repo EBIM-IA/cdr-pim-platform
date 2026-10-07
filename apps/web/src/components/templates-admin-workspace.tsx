@@ -122,7 +122,7 @@ function flagLabel(value: boolean, positive: string): string {
   return value ? positive : 'No';
 }
 
-export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRoleAccess: boolean }) {
+export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTemplate: boolean }) {
   const [categories, setCategories] = useState<{ id: string; name: string; active: boolean }[]>([]);
   const [categoryId, setCategoryId] = useState('');
   const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
@@ -256,7 +256,7 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
       await updateAdminTemplateAttribute(
         template.id,
         editing.id,
-        buildTemplateAttributeUpdateInput(draft, editing.updatedAt, canManageRoleAccess),
+        buildTemplateAttributeUpdateInput(draft, editing.updatedAt, canManageTemplate),
       );
       setNotice('Configuración del atributo actualizada y auditada correctamente.');
       setEditing(null);
@@ -307,16 +307,15 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
       />
       <ScreenGuide
         objective={
-          canManageRoleAccess
+          canManageTemplate
             ? 'Gobierna el comportamiento de cada atributo y la matriz de permisos de la plantilla seleccionada.'
             : 'Gobierna el comportamiento operativo de cada atributo y consulta la matriz de permisos vigente.'
         }
         actions={[
           'Filtra por categoría y elige una versión de plantilla para revisar todos sus atributos.',
-          'Configura vigencia, obligatoriedad, replicación, búsqueda, ficha técnica y posición.',
-          canManageRoleAccess
-            ? 'Define por rol quién puede ver, editar, importar y exportar cada atributo.'
-            : 'Consulta los permisos por rol; sólo Administración puede modificarlos.',
+          canManageTemplate
+            ? 'Configura vigencia, obligatoriedad, replicación, búsqueda, ficha técnica, posición y permisos por rol.'
+            : 'Consulta reglas y permisos vigentes; sólo Administración puede modificar la plantilla.',
         ]}
         dataSource="Las plantillas, asignaciones y permisos se leen y actualizan mediante la API administrativa con control de concurrencia."
         limitation="No se crean ni publican nuevas versiones desde esta pantalla porque el backend aún no ofrece endpoints aprobados para esas operaciones."
@@ -551,7 +550,7 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
         ) : null}
       </Card>
 
-      {editing && draft ? (
+      {canManageTemplate && editing && draft ? (
         <Card className="mb-5 border-primary/40 p-5">
           <form onSubmit={save}>
             <div className="mb-5 flex items-start justify-between gap-4">
@@ -624,7 +623,7 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
               </div>
             </fieldset>
 
-            <fieldset className="mt-5" disabled={!canManageRoleAccess}>
+            <fieldset className="mt-5">
               <legend className="mb-2 text-sm font-semibold">Permisos por rol</legend>
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full min-w-[600px] text-sm">
@@ -662,9 +661,8 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
                 </table>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                {canManageRoleAccess
-                  ? 'Activar edición, importación o exportación concede también visibilidad. Quitar visibilidad revoca las demás operaciones del rol.'
-                  : 'La matriz es de solo lectura. Únicamente Administración puede cambiar los permisos por rol.'}
+                Activar edición, importación o exportación concede también visibilidad. Quitar
+                visibilidad revoca las demás operaciones del rol.
               </p>
             </fieldset>
 
@@ -799,10 +797,14 @@ export function TemplatesAdminWorkspace({ canManageRoleAccess }: { canManageRole
                         </td>
                       ))}
                       <td className="px-4 py-3 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => beginEdit(attribute)}>
-                          <Pencil className="size-4" aria-hidden="true" />
-                          Configurar
-                        </Button>
+                        {canManageTemplate ? (
+                          <Button size="sm" variant="ghost" onClick={() => beginEdit(attribute)}>
+                            <Pencil className="size-4" aria-hidden="true" />
+                            Configurar
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Solo lectura</span>
+                        )}
                       </td>
                     </tr>
                   );

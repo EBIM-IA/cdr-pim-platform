@@ -84,10 +84,10 @@ export class CatalogAdministrationController {
   }
 
   @Patch('templates/:templateId/attributes/:attributeDefinitionId')
+  @RequireCapabilities(Capability.AdministrationManage)
   @ApiOperation({
     summary: 'Configure a template attribute without deletion',
-    description:
-      'AttributesWrite can change ordinary flags. A payload containing roleAccess additionally requires AdministrationManage.',
+    description: 'Only catalogue administrators can change template rules or role visibility.',
   })
   @ApiOkResponse({ schema: openApiSchema(adminTemplateAttributeSchema) })
   async patchTemplateAttribute(

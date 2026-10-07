@@ -38,7 +38,7 @@ export class ImportsController {
     @Body(new ZodValidationPipe(previewImportSchema)) body: PreviewImportInput,
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ImportBatchDto> {
-    return toImportBatchDto(await this.previewImportBatch.execute(body, actor.id));
+    return toImportBatchDto(await this.previewImportBatch.execute(body, actor));
   }
 
   @Get(':id')
@@ -88,7 +88,13 @@ function toImportBatchDto(batch: ImportBatch): ImportBatchDto {
     totalRows: value.rows.length,
     validRows,
     invalidRows: value.rows.length - validRows,
-    rows: value.rows.map((row) => ({ ...row, errors: [...row.errors] })),
+    rows: value.rows.map((row) => ({
+      rowNumber: row.rowNumber,
+      valid: row.valid,
+      data: row.data,
+      errors: [...row.errors],
+      warnings: [...row.warnings],
+    })),
     createdAt: value.createdAt.toISOString(),
     confirmedAt: value.confirmedAt?.toISOString() ?? null,
   };

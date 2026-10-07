@@ -11,7 +11,7 @@ export class FakeDocumentExtractionAdapter implements DocumentExtractionProvider
   async extract(request: DocumentExtractionRequest): Promise<DocumentExtractionResult> {
     return {
       model: this.model,
-      attributes: (request.expectedAttributes ?? []).map((key) => ({
+      attributes: request.expectedAttributes.map((key) => ({
         key,
         value: '',
         confidence: 0,

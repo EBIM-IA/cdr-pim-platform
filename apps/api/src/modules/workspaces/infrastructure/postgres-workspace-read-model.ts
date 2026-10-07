@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ApiEnv } from '@cdr/config';
+import { resolveAiCapabilityProviders, type ApiEnv } from '@cdr/config';
 import type {
   WorkspaceAction,
   WorkspaceColumn,
@@ -186,7 +186,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   }
 
   private async readCategories(): Promise<WorkspaceDto> {
-    const [summary, brands, statuses] = await Promise.all([
+    const [summary, brands, statuses, categories] = await Promise.all([
       this.productSummary(),
       this.sql<{ brand: string | null; products: number }[]>`
         SELECT NULLIF(BTRIM(brand), '') AS "brand", COUNT(*)::int AS "products"
@@ -200,6 +200,20 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         FROM products
         GROUP BY status
         ORDER BY status
+      `,
+      this.sql<{ category: string; products: number }[]>`
+        SELECT category.name AS "category", COUNT(DISTINCT product.id)::int AS "products"
+        FROM catalog_categories category
+        INNER JOIN attribute_templates template
+          ON template.category_id = category.id
+         AND template.status = 'active'
+        INNER JOIN product_template_assignments assignment
+          ON assignment.template_id = template.id
+        INNER JOIN products product ON product.id = assignment.product_id
+        WHERE category.active = true
+        GROUP BY category.id, category.name
+        ORDER BY COUNT(DISTINCT product.id) DESC, category.name
+        LIMIT 100
       `,
     ]);
 
@@ -216,14 +230,22 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           products: row.products,
         },
       })),
+      ...categories.map((row, index) => ({
+        id: `category:${index}:${row.category}`,
+        values: {
+          dimension: 'Categoría',
+          value: row.category,
+          products: row.products,
+        },
+      })),
     ];
 
     return this.response('categories', {
-      operationalStatus: 'partial',
+      operationalStatus: 'operational',
       metrics: [
         integerMetric('products', 'Productos persistidos', summary.total),
         integerMetric('brands', 'Marcas informadas', summary.brands),
-        integerMetric('dimensions', 'Dimensiones disponibles', 2),
+        integerMetric('dimensions', 'Dimensiones disponibles', 3),
       ],
       columns: [
         { key: 'dimension', label: 'Dimensión', type: 'text' },
@@ -232,10 +254,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       ],
       rows,
       notices: [
-        warning(
-          'taxonomy-not-persisted',
-          'La taxonomía aún no está persistida',
-          'Estos son agregados reales por marca y estado del catálogo; no representan categorías ni una jerarquía comercial.',
+        info(
+          'taxonomy-live',
+          'Taxonomía y agregados persistidos',
+          'Las categorías cuentan todos los SKU asignados a una plantilla activa; las marcas y estados se agregan sobre el catálogo completo.',
         ),
       ],
       actions: [
@@ -250,7 +272,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         blockedAction(
           'manage-taxonomy',
           'Gestionar taxonomía',
-          'Faltan la taxonomía aprobada, su cardinalidad y persistencia.',
+          'La taxonomía está persistida, pero aún falta el flujo aprobado para crear, mover y versionar categorías.',
         ),
       ],
     });
@@ -550,31 +572,94 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     const storage =
       this.env.STORAGE_DRIVER === 's3' ? 'S3 configurado' : 'Memoria local no durable';
 
+    if (!persisted) {
+      return this.response('documents', {
+        operationalStatus: 'blocked',
+        metrics: [
+          textMetric('persistence', 'Persistencia de metadatos', 'No disponible'),
+          textMetric('storage', 'Almacenamiento', storage),
+          integerMetric('assets', 'Activos registrados', 0),
+        ],
+        columns: [
+          { key: 'sku', label: 'SKU', type: 'text' },
+          { key: 'asset', label: 'Activo', type: 'text' },
+          { key: 'type', label: 'Tipo', type: 'text' },
+          { key: 'size', label: 'Bytes', type: 'number' },
+          { key: 'uploadedAt', label: 'Cargado', type: 'datetime' },
+        ],
+        rows: [],
+        notices: [
+          warning(
+            'assets-not-persisted',
+            'No hay metadatos de activos disponibles',
+            'La migración product_assets aún no fue aplicada en esta base de datos.',
+          ),
+        ],
+        actions: [refreshAction('documents')],
+      });
+    }
+
+    const [summary, assets] = await Promise.all([
+      this.sql<{ total: number; bytes: number }[]>`
+        SELECT
+          COUNT(*)::int AS "total",
+          COALESCE(SUM(size_bytes), 0)::float8 AS "bytes"
+        FROM product_assets
+        WHERE deleted_at IS NULL
+      `,
+      this.sql<
+        {
+          id: string;
+          sku: string;
+          asset: string;
+          type: string;
+          size: number;
+          uploadedAt: Date | string;
+        }[]
+      >`
+        SELECT
+          asset.id::text AS "id",
+          product.sku AS "sku",
+          asset.original_filename AS "asset",
+          asset.type_code AS "type",
+          asset.size_bytes::float8 AS "size",
+          asset.uploaded_at AS "uploadedAt"
+        FROM product_assets asset
+        INNER JOIN products product ON product.id = asset.product_id
+        WHERE asset.deleted_at IS NULL
+        ORDER BY asset.uploaded_at DESC, asset.id DESC
+        LIMIT 50
+      `,
+    ]);
+    const totals = summary[0] ?? { total: 0, bytes: 0 };
+
     return this.response('documents', {
-      operationalStatus: 'blocked',
+      operationalStatus: 'partial',
       metrics: [
-        textMetric(
-          'persistence',
-          'Persistencia de metadatos',
-          persisted ? 'Detectada' : 'No disponible',
-        ),
+        textMetric('persistence', 'Persistencia de metadatos', 'Operativa'),
         textMetric('storage', 'Almacenamiento', storage),
-        integerMetric('assets', 'Activos expuestos', 0),
+        integerMetric('assets', 'Activos registrados', totals.total),
+        integerMetric('bytes', 'Bytes almacenados', Math.round(totals.bytes)),
       ],
       columns: [
         { key: 'sku', label: 'SKU', type: 'text' },
         { key: 'asset', label: 'Activo', type: 'text' },
-        { key: 'status', label: 'Estado técnico', type: 'status' },
+        { key: 'type', label: 'Tipo', type: 'text' },
+        { key: 'size', label: 'Bytes', type: 'number' },
+        { key: 'uploadedAt', label: 'Cargado', type: 'datetime' },
       ],
-      rows: [],
+      rows: assets.map((asset) => ({
+        id: asset.id,
+        values: {
+          sku: asset.sku,
+          asset: asset.asset,
+          type: asset.type,
+          size: asset.size,
+          uploadedAt: toIsoString(asset.uploadedAt),
+        },
+      })),
+      totalRows: totals.total,
       notices: [
-        warning(
-          'assets-not-persisted',
-          'No hay metadatos de activos disponibles',
-          persisted
-            ? 'Se detectó persistencia, pero el contrato de activos aún no está aprobado para su lectura.'
-            : 'No existe la tabla product_assets; por eso no se simulan imágenes ni documentos.',
-        ),
         ...(this.env.STORAGE_DRIVER === 'memory'
           ? [
               warning(
@@ -584,21 +669,26 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
               ),
             ]
           : []),
+        warning(
+          'antimalware-external',
+          'Escaneo antimalware pendiente de plataforma',
+          'La API valida firma, MIME, extensión, tamaño, nombre y ZIP seguro; aún no existe un servicio antimalware configurado.',
+        ),
       ],
       actions: [
         refreshAction('documents'),
-        blockedAction(
-          'upload-asset',
-          'Cargar activo',
-          'Faltan MIME permitidos, límites, antivirus, versionado y la entidad persistente.',
-        ),
+        {
+          id: 'upload-asset',
+          label: 'Cargar activo',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/assets',
+        },
       ],
     });
   }
 
   private async readImports(): Promise<WorkspaceDto> {
-    const queueState =
-      this.env.QUEUE_DRIVER === 'sqs' ? 'SQS configurado' : 'Memoria local no durable';
     const storageState =
       this.env.STORAGE_DRIVER === 's3' ? 'S3 configurado' : 'Memoria local no durable';
     const [batches, counts] = await Promise.all([
@@ -637,12 +727,12 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     const summary = counts[0] ?? { batches: 0, confirmed: 0, invalidRows: 0 };
 
     return this.response('imports', {
-      operationalStatus: 'partial',
+      operationalStatus: 'operational',
       metrics: [
         integerMetric('batches', 'Lotes persistidos', summary.batches),
         integerMetric('confirmed', 'Lotes confirmados', summary.confirmed),
         integerMetric('invalid-rows', 'Filas con error', summary.invalidRows),
-        textMetric('queue', 'Ejecución', queueState),
+        textMetric('execution', 'Ejecución', 'Confirmación transaccional por fila'),
       ],
       columns: [
         { key: 'target', label: 'Destino', type: 'text' },
@@ -674,10 +764,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Vista previa y confirmación persistidas',
           `Los lotes y sus resultados por fila se almacenan en PostgreSQL. Almacenamiento temporal: ${storageState}.`,
         ),
-        warning(
-          'batch-application-pending',
-          'Aplicación asíncrona pendiente',
-          'Confirmar conserva el lote validado; aplicar sus filas al catálogo requiere el worker transaccional.',
+        info(
+          'batch-application-live',
+          'Aplicación controlada disponible',
+          'La confirmación reclama el lote una sola vez y aplica cada fila válida junto con su auditoría dentro de la misma transacción.',
         ),
       ],
       actions: [
@@ -689,93 +779,106 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           method: 'POST',
           endpoint: '/api/v1/imports/preview',
         },
-        blockedAction(
-          'apply-batch',
-          'Aplicar lote confirmado',
-          'El worker idempotente de aplicación al catálogo todavía no está disponible.',
-        ),
+        {
+          id: 'apply-batch',
+          label: 'Aplicar lote validado',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/imports/:id/confirm',
+        },
       ],
     });
   }
 
   private async readQuality(): Promise<WorkspaceDto> {
     const [summary, findings] = await Promise.all([
-      this.sql<{ affected: number; findings: number }[]>`
+      this.sql<{ affected: number; findings: number; completion: number }[]>`
+        WITH readiness AS (
+          SELECT
+            product_id AS id,
+            template_id,
+            required,
+            completed
+          FROM catalog_product_readiness
+        )
         SELECT
           COUNT(*) FILTER (
-            WHERE NULLIF(BTRIM(sku), '') IS NULL
-               OR NULLIF(BTRIM(name), '') IS NULL
-               OR NULLIF(BTRIM(brand), '') IS NULL
-               OR NULLIF(BTRIM(description), '') IS NULL
-          )::int AS "affected",
+            WHERE template_id IS NULL OR completed < required
+          )::int AS affected,
           COALESCE(SUM(
-            (CASE WHEN NULLIF(BTRIM(sku), '') IS NULL THEN 1 ELSE 0 END) +
-            (CASE WHEN NULLIF(BTRIM(name), '') IS NULL THEN 1 ELSE 0 END) +
-            (CASE WHEN NULLIF(BTRIM(brand), '') IS NULL THEN 1 ELSE 0 END) +
-            (CASE WHEN NULLIF(BTRIM(description), '') IS NULL THEN 1 ELSE 0 END)
-          ), 0)::int AS "findings"
-        FROM products
+            CASE WHEN template_id IS NULL THEN 1 ELSE GREATEST(required - completed, 0) END
+          ), 0)::int AS findings,
+          COALESCE(ROUND(AVG(
+            CASE
+              WHEN template_id IS NULL THEN 0
+              WHEN required = 0 THEN 100
+              ELSE completed::numeric * 100 / required
+            END
+          )), 0)::int AS completion
+        FROM readiness
       `,
       this.sql<
         {
           id: string;
           sku: string;
           name: string;
-          missingSku: boolean;
-          missingName: boolean;
-          missingBrand: boolean;
-          missingDescription: boolean;
+          required: number;
+          completed: number;
+          missingItems: string;
+          hasTemplate: boolean;
           updatedAt: Date | string;
         }[]
       >`
-        SELECT
-          id,
-          sku,
-          name,
-          NULLIF(BTRIM(sku), '') IS NULL AS "missingSku",
-          NULLIF(BTRIM(name), '') IS NULL AS "missingName",
-          NULLIF(BTRIM(brand), '') IS NULL AS "missingBrand",
-          NULLIF(BTRIM(description), '') IS NULL AS "missingDescription",
-          updated_at AS "updatedAt"
-        FROM products
-        WHERE NULLIF(BTRIM(sku), '') IS NULL
-           OR NULLIF(BTRIM(name), '') IS NULL
-           OR NULLIF(BTRIM(brand), '') IS NULL
-           OR NULLIF(BTRIM(description), '') IS NULL
-        ORDER BY updated_at DESC, sku
+        WITH readiness AS (
+          SELECT
+            product.id,
+            product.sku,
+            product.name,
+            product.updated_at AS "updatedAt",
+            readiness.template_id IS NOT NULL AS "hasTemplate",
+            readiness.required,
+            readiness.completed,
+            readiness.missing_items AS "missingItems"
+          FROM products product
+          INNER JOIN catalog_product_readiness readiness
+            ON readiness.product_id = product.id
+        )
+        SELECT * FROM readiness
+        WHERE "hasTemplate" = false OR completed < required
+        ORDER BY "updatedAt" DESC, sku
         LIMIT 100
       `,
     ]);
-    const counts = summary[0] ?? { affected: 0, findings: 0 };
+    const counts = summary[0] ?? { affected: 0, findings: 0, completion: 0 };
 
-    const rows: WorkspaceRow[] = findings.map((row) => {
-      const issues = [
-        row.missingSku ? 'SKU vacío' : null,
-        row.missingName ? 'nombre vacío' : null,
-        row.missingBrand ? 'marca faltante' : null,
-        row.missingDescription ? 'descripción faltante' : null,
-      ].filter((issue): issue is string => issue !== null);
-      return {
-        id: row.id,
-        values: {
-          sku: row.sku || 'Sin SKU',
-          name: row.name || 'Sin nombre',
-          findings: issues.join(', '),
-          updatedAt: toIsoString(row.updatedAt),
-        },
-      };
-    });
+    const rows: WorkspaceRow[] = findings.map((row) => ({
+      id: row.id,
+      values: {
+        sku: row.sku,
+        name: row.name,
+        completion:
+          row.hasTemplate && row.required > 0
+            ? `${Math.round((row.completed * 100) / row.required)}%`
+            : row.hasTemplate
+              ? '100%'
+              : 'Sin plantilla',
+        findings: row.hasTemplate ? row.missingItems : 'Plantilla activa no asignada',
+        updatedAt: toIsoString(row.updatedAt),
+      },
+    }));
 
     return this.response('quality', {
-      operationalStatus: 'partial',
+      operationalStatus: 'operational',
       metrics: [
         integerMetric('affected-products', 'Productos con hallazgos', counts.affected),
-        integerMetric('findings', 'Hallazgos deterministas', counts.findings),
+        integerMetric('findings', 'Obligatorios faltantes', counts.findings),
+        integerMetric('completion', 'Completitud media (%)', counts.completion),
         integerMetric('shown', 'Filas mostradas', rows.length),
       ],
       columns: [
         { key: 'sku', label: 'SKU', type: 'text' },
         { key: 'name', label: 'Producto', type: 'text' },
+        { key: 'completion', label: 'Completitud', type: 'text' },
         { key: 'findings', label: 'Hallazgos', type: 'status' },
         { key: 'updatedAt', label: 'Actualizado', type: 'datetime' },
       ],
@@ -784,24 +887,62 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       notices: [
         info(
           'deterministic-checks',
-          'Controles deterministas, no puntuación de calidad',
-          'Los hallazgos se calculan en vivo sobre SKU, nombre, marca y descripción. No se declara completitud de plantilla ni se consulta IA.',
+          'Completitud calculada desde la plantilla activa',
+          'Cuentan los atributos y activos obligatorios de la plantilla. Un valor vacío, un archivo no subido o un activo eliminado permanecen como faltantes; no interviene un proveedor de IA.',
+        ),
+        info(
+          'ai-candidates-human-review',
+          'Generación asistida disponible sin escritura automática',
+          'La API puede generar propuestas comerciales y extraer candidatos desde un activo existente. Ambos resultados son temporales, no modifican el catálogo y requieren revisión humana.',
         ),
       ],
       actions: [
         refreshAction('quality'),
+        {
+          id: 'generate-commercial-proposal',
+          label: 'Generar propuesta comercial',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/ai/products/:productId/commercial-proposal',
+        },
+        {
+          id: 'extract-asset-candidates',
+          label: 'Extraer candidatos del activo',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/ai/assets/:assetId/extraction-candidates',
+        },
         blockedAction(
-          'review-ai-suggestion',
-          'Revisar sugerencia de IA',
-          'Faltan contratos de candidatos, evidencia, confianza y aprobación humana.',
+          'persist-ai-candidate',
+          'Aprobar y persistir candidato',
+          'La persistencia y aprobación auditada de candidatos todavía no está implementada; generar o extraer nunca sobrescribe el catálogo.',
         ),
       ],
     });
   }
 
   private async readPublication(): Promise<WorkspaceDto> {
-    const [summary, candidates] = await Promise.all([
+    const [summary, eligibility, candidates] = await Promise.all([
       this.productSummary(),
+      this.sql<{ publishable: number; total: number }[]>`
+        WITH readiness AS (
+          SELECT
+            product.id,
+            product.status,
+            readiness.template_id,
+            readiness.required,
+            readiness.completed
+          FROM products product
+          INNER JOIN catalog_product_readiness readiness
+            ON readiness.product_id = product.id
+        )
+        SELECT
+          COUNT(*) FILTER (
+            WHERE status <> 'archived' AND template_id IS NOT NULL AND completed = required
+          )::int AS publishable,
+          COUNT(*) FILTER (WHERE status <> 'archived')::int AS total
+        FROM readiness
+      `,
       this.sql<
         {
           id: string;
@@ -809,29 +950,52 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           name: string;
           brand: string | null;
           status: string;
+          required: number;
+          completed: number;
+          missingItems: string;
+          hasTemplate: boolean;
           updatedAt: Date | string;
         }[]
       >`
-        SELECT id, sku, name, brand, status, updated_at AS "updatedAt"
-        FROM products
-        WHERE status = 'in_review'
-        ORDER BY updated_at DESC, sku
+        WITH readiness AS (
+          SELECT
+            product.id,
+            product.sku,
+            product.name,
+            product.brand,
+            product.status,
+            product.updated_at AS "updatedAt",
+            readiness.template_id IS NOT NULL AS "hasTemplate",
+            readiness.required,
+            readiness.completed,
+            readiness.missing_items AS "missingItems"
+          FROM products product
+          INNER JOIN catalog_product_readiness readiness
+            ON readiness.product_id = product.id
+        )
+        SELECT * FROM readiness
+        WHERE status <> 'archived'
+        ORDER BY ("hasTemplate" AND completed = required) DESC, "updatedAt" DESC, sku
         LIMIT 100
       `,
     ]);
 
+    const eligibilityCounts = eligibility[0] ?? { publishable: 0, total: 0 };
+
     return this.response('publication', {
-      operationalStatus: 'partial',
+      operationalStatus: 'operational',
       metrics: [
-        integerMetric('draft', 'Borradores', summary.draft),
+        integerMetric('publishable', 'Elegibilidad base', eligibilityCounts.publishable),
         integerMetric('in-review', 'En revisión', summary.inReview),
         integerMetric('published', 'Publicados', summary.published),
-        integerMetric('archived', 'Archivados', summary.archived),
+        integerMetric('draft', 'Borradores', summary.draft),
       ],
       columns: [
         { key: 'sku', label: 'SKU', type: 'text' },
         { key: 'name', label: 'Producto', type: 'text' },
         { key: 'brand', label: 'Marca', type: 'text' },
+        { key: 'eligibility', label: 'Elegibilidad base', type: 'status' },
+        { key: 'missing', label: 'Obligatorios faltantes', type: 'text' },
         { key: 'status', label: 'Estado PIM', type: 'status' },
         { key: 'updatedAt', label: 'Actualizado', type: 'datetime' },
       ],
@@ -841,16 +1005,19 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           sku: row.sku,
           name: row.name,
           brand: row.brand,
+          eligibility:
+            row.hasTemplate && row.completed === row.required ? 'Publicable' : 'No publicable',
+          missing: row.hasTemplate ? row.missingItems || '—' : 'Plantilla activa no asignada',
           status: row.status,
           updatedAt: toIsoString(row.updatedAt),
         },
       })),
-      totalRows: summary.inReview,
+      totalRows: eligibilityCounts.total,
       notices: [
-        warning(
-          'not-eligibility',
-          '“En revisión” no significa elegible para publicar',
-          'La tabla solo lista candidatos por su estado persistido. Faltan las reglas finales de calidad, activos, aplicaciones, aprobación y canal.',
+        info(
+          'base-eligibility',
+          'Elegibilidad base calculada automáticamente',
+          'Un SKU con plantilla activa es elegible cuando todos sus atributos obligatorios tienen valor y todos sus activos requeridos están subidos. La política de excepción y las condiciones específicas del canal siguen pendientes.',
         ),
       ],
       actions: [
@@ -867,6 +1034,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   private async readIntegrations(): Promise<WorkspaceDto> {
     // The query proves the configured PostgreSQL connection is live for this projection.
     await this.sql`SELECT 1`;
+    const aiProviders = resolveAiCapabilityProviders(this.env);
     const rows: WorkspaceRow[] = [
       {
         id: 'postgresql',
@@ -893,8 +1061,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         values: {
           system: 'Proveedor de IA',
           configured: true,
-          state:
-            this.env.AI_PROVIDER === 'openai' ? 'OpenAI configurado' : 'Adaptador simulado local',
+          state: `Embeddings: ${aiProviders.embeddings}; generación: ${aiProviders.generation}; documentos: ${aiProviders.documentExtraction}`,
         },
       },
       {
@@ -957,7 +1124,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   }
 
   private async readReports(): Promise<WorkspaceDto> {
-    const [products, groups, brands] = await Promise.all([
+    const [products, groups, brands, categories, dashboard] = await Promise.all([
       this.productSummary(),
       this.groupSummary(),
       this.sql<{ brand: string | null; products: number }[]>`
@@ -967,7 +1134,64 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         ORDER BY COUNT(*) DESC, NULLIF(BTRIM(brand), '') NULLS LAST
         LIMIT 20
       `,
+      this.sql<{ category: string; products: number }[]>`
+        SELECT category.name AS "category", COUNT(DISTINCT product.id)::int AS "products"
+        FROM catalog_categories category
+        INNER JOIN attribute_templates template
+          ON template.category_id = category.id
+         AND template.status = 'active'
+        INNER JOIN product_template_assignments assignment
+          ON assignment.template_id = template.id
+        INNER JOIN products product ON product.id = assignment.product_id
+        WHERE category.active = true
+        GROUP BY category.id, category.name
+        ORDER BY COUNT(DISTINCT product.id) DESC, category.name
+        LIMIT 100
+      `,
+      this.sql<
+        {
+          affected: number;
+          completion: number;
+          publishable: number;
+          activeTemplates: number;
+        }[]
+      >`
+        WITH readiness AS (
+          SELECT
+            product.id,
+            product.status,
+            readiness.template_id,
+            readiness.required,
+            readiness.completed
+          FROM products product
+          INNER JOIN catalog_product_readiness readiness
+            ON readiness.product_id = product.id
+        )
+        SELECT
+          COUNT(*) FILTER (
+            WHERE template_id IS NULL OR completed < required
+          )::int AS "affected",
+          COALESCE(ROUND(AVG(
+            CASE
+              WHEN template_id IS NULL THEN 0
+              WHEN required = 0 THEN 100
+              ELSE completed::numeric * 100 / required
+            END
+          )), 0)::int AS "completion",
+          COUNT(*) FILTER (
+            WHERE status <> 'archived' AND template_id IS NOT NULL AND completed = required
+          )::int AS "publishable",
+          (SELECT COUNT(*)::int FROM attribute_templates WHERE status = 'active')
+            AS "activeTemplates"
+        FROM readiness
+      `,
     ]);
+    const dashboardCounts = dashboard[0] ?? {
+      affected: 0,
+      completion: 0,
+      publishable: 0,
+      activeTemplates: 0,
+    };
     const rows: WorkspaceRow[] = [
       {
         id: 'status:draft',
@@ -989,6 +1213,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         id: `brand:${row.brand ?? 'missing'}:${index}`,
         values: { section: 'Marca', indicator: row.brand ?? 'Sin marca', value: row.products },
       })),
+      ...categories.map((row, index) => ({
+        id: `category:${index}:${row.category}`,
+        values: { section: 'Categoría', indicator: row.category, value: row.products },
+      })),
     ];
 
     return this.response('reports', {
@@ -998,6 +1226,12 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         integerMetric('brands', 'Marcas', products.brands),
         integerMetric('groups', 'Grupos unificadores', groups.groups),
         integerMetric('memberships', 'Membresías', groups.memberships),
+        integerMetric('in-review', 'En revisión', products.inReview),
+        integerMetric('affected-products', 'Productos con hallazgos', dashboardCounts.affected),
+        integerMetric('completion', 'Completitud media (%)', dashboardCounts.completion),
+        integerMetric('publishable', 'Elegibilidad base', dashboardCounts.publishable),
+        integerMetric('active-templates', 'Plantillas activas', dashboardCounts.activeTemplates),
+        integerMetric('blocked-external-systems', 'Sistemas externos bloqueados', 3),
         ...(products.updatedAt
           ? [
               {
@@ -1019,7 +1253,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         info(
           'live-aggregates',
           'Agregados calculados en PostgreSQL',
-          'Los conteos se calculan sobre los registros persistidos al momento indicado; no representan métricas de calidad inferidas.',
+          'Los conteos, la completitud y la elegibilidad base se calculan sobre todo el catálogo persistido y sus plantillas activas; no se proyectan desde la página visible.',
         ),
       ],
       actions: [refreshAction('reports')],

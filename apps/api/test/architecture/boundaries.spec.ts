@@ -190,6 +190,20 @@ describe('module boundaries', () => {
 });
 
 describe('platform-wide rules', () => {
+  it('keeps source-backed demo data out of the production build', async () => {
+    const buildConfig = JSON.parse(
+      await readFile(path.resolve(process.cwd(), 'tsconfig.build.json'), 'utf8'),
+    ) as { exclude?: string[] };
+
+    expect(buildConfig.exclude).toEqual(
+      expect.arrayContaining([
+        'src/database/client-template-manifest.ts',
+        'src/database/demo-seed.ts',
+        'src/database/seed-demo.cli.ts',
+      ]),
+    );
+  });
+
   it('reads configuration only through the validated schema', async () => {
     const allFiles = await walk(SRC);
     const offenders: string[] = [];

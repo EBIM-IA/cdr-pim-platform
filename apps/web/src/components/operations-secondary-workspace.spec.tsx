@@ -2,13 +2,27 @@ import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const codeAffixApi = vi.hoisted(() => ({
+  createCodeAffix: vi.fn(),
+  deactivateCodeAffix: vi.fn(),
+  listCodeAffixes: vi.fn().mockResolvedValue([]),
+  parseCode: vi.fn(),
+  updateCodeAffix: vi.fn(),
+  validateCodeAffix: vi.fn(),
+}));
+
+vi.mock('@/lib/code-affix-api', () => codeAffixApi);
+
 import {
   OperationsSecondaryWorkspace,
   type OperationsSecondaryView,
   type OperationsWorkspaceSlug,
 } from '@/components/operations-secondary-workspace';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 function workspace(slug: WorkspaceSlug): WorkspaceDto {
   if (slug === 'publication') {
@@ -213,6 +227,21 @@ describe('OperationsSecondaryWorkspace', () => {
     expect(screen.getByText('admin@cdr.local')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Nuevo usuario' })).toBeDisabled();
     expect(screen.queryByText('junior@cdr.example')).not.toBeInTheDocument();
+  });
+
+  it('conecta el catálogo de prefijos y sufijos sin precargar sugerencias ficticias', async () => {
+    renderView('administration', 'settings');
+
+    expect(await screen.findByText('No hay reglas persistidas')).toBeVisible();
+    expect(codeAffixApi.listCodeAffixes).toHaveBeenCalledWith(
+      { includeInactive: false },
+      expect.any(AbortSignal),
+    );
+    const create = screen.getByRole('button', { name: 'Agregar regla' });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    expect(screen.getByRole('heading', { name: 'Nueva regla' })).toBeVisible();
+    expect(screen.queryByText(/57 sugerencias/i)).not.toBeInTheDocument();
   });
 
   it('presenta reportes de búsqueda sin cifras ilustrativas', () => {

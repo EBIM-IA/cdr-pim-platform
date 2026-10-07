@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 
+import { ExportAuditChangesUseCase } from './application/export-audit-changes.use-case';
 import { ListAuditChangesUseCase } from './application/list-audit-changes.use-case';
 import { AUDIT_READ_PORT } from './domain/ports/audit-read.port';
 import { AUDIT_PORT } from './domain/ports/audit.port';
@@ -18,6 +19,7 @@ import { AuditController } from './presentation/audit.controller';
     { provide: AUDIT_PORT, useExisting: PostgresAuditAdapter },
     { provide: AUDIT_READ_PORT, useExisting: PostgresAuditAdapter },
     ListAuditChangesUseCase,
+    ExportAuditChangesUseCase,
   ],
   exports: [AUDIT_PORT, AUDIT_READ_PORT],
 })

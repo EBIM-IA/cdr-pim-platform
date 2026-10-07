@@ -3,9 +3,10 @@
 Plataforma especializada en información de productos (PIM) con capacidades de IA,
 **independiente del ERP**. Monorepo con la aplicación web, la API y el worker.
 
-> **Estado: foundation + primera interfaz operativa.** La base técnica y la navegación del
-> PIM están construidas, verificadas y documentadas. Los módulos distinguen la base ya
-> disponible, las reglas funcionales confirmadas y las capacidades todavía pendientes.
+> **Estado: plataforma operativa en desarrollo.** La base técnica, la navegación y los
+> principales flujos del catálogo están conectados a persistencia real. Los módulos distinguen
+> las capacidades disponibles, las reglas funcionales confirmadas y las integraciones que
+> todavía dependen de contratos o infraestructura del cliente.
 > Ver [KNOWN GAPS](#known-gaps).
 
 ---
@@ -22,15 +23,15 @@ chmod 600 .env           # solo tu usuario puede leer credenciales locales
 
 docker compose up -d     # PostgreSQL 16 + pgvector
 pnpm db:migrate          # aplica drizzle/*.sql
-pnpm db:seed:demo        # opcional: 7 registros locales respaldados por la fuente
-pnpm dev                 # web :3000 · api :3001 · worker :3002
+pnpm db:seed:demo        # opcional: 77 productos de la última plantilla del cliente
+pnpm dev                 # web :3100 · api :3001 · worker :3002
 ```
 
 El repositorio declara la misma versión de Node en `.nvmrc` y `.node-version`. Además,
 `engine-strict` y el `preinstall` detienen la instalación inmediatamente si el shell está usando
 Node 18 u otra versión anterior a la indicada en `engines.node`.
 
-Abre <http://localhost:3000>. La portada consulta el catálogo mediante la API y presenta un
+Abre <http://localhost:3100>. La portada consulta el catálogo mediante la API y presenta un
 estado de error explícito si el servicio no está disponible.
 
 El acceso requiere iniciar sesión con `AUTH_LOCAL_EMAIL` y `AUTH_LOCAL_PASSWORD` de tu
@@ -48,7 +49,7 @@ imagen puede promoverse entre ambientes.
 
 |                   |                                      |
 | ----------------- | ------------------------------------ |
-| Web               | <http://localhost:3000>              |
+| Web               | <http://localhost:3100>              |
 | API               | <http://localhost:3001/api/v1>       |
 | OpenAPI / Swagger | <http://localhost:3001/api/v1/docs>  |
 | Worker health     | <http://localhost:3002/health/ready> |
@@ -85,9 +86,9 @@ packages/
   tsconfig/        configuraciones TypeScript compartidas
 ```
 
-Los módulos delimitados de la API son `catalog`, `categories`, `attributes`,
-`equivalences`, `search`, `ai`, `imports`, `integrations`, `identity`, `audit`, `health` y
-el read model transversal `workspaces`.
+Los módulos delimitados de la API son `catalog`, `catalog-schema`, `applications`,
+`equivalences`, `product-assets`, `code-affixes`, `search`, `ai`, `imports`, `integrations`,
+`identity`, `audit`, `health` y el read model transversal `workspaces`.
 El estado real de cada uno está en
 [`docs/architecture/MODULE_ARCHITECTURE.md`](docs/architecture/MODULE_ARCHITECTURE.md).
 
@@ -111,10 +112,21 @@ pnpm verify             # format + lint + typecheck + test + build (lo que corre
 
 pnpm db:new <nombre>    # crea la siguiente migración numerada
 pnpm db:migrate         # aplica las migraciones pendientes
-pnpm db:seed:demo       # seed local/test idempotente; no sobrescribe datos existentes
+pnpm db:seed:demo       # repetible para el mismo manifiesto; actualiza filas deterministas
 ```
 
 Para un solo workspace: `pnpm --filter @cdr/api <script>`.
+
+El seed demo es idempotente cuando se ejecuta varias veces con el mismo manifiesto. Si el
+manifiesto se regenera, actualiza las filas que reconoce por sus UUID deterministas y conserva las
+filas curadas manualmente. La ausencia de un producto, atributo o relación en una versión nueva no
+es una orden general de borrado: retirar datos del fixture requiere una reconciliación o migración
+explícita para no eliminar información manual por accidente.
+
+El seed genera sus 77 vectores con `fake-embedding-v1` y nunca consume una clave externa. Al
+cambiar `AI_EMBEDDING_PROVIDER` a `openai`, esos vectores no son compatibles con el nuevo modelo: hay que
+reindexar cada producto con `POST /api/v1/search/index/:productId`, o ejecutar el proceso masivo
+cuando esté disponible, antes de validar resultados semánticos del proveedor real.
 
 El web separa los artefactos de Next.js por modo: `next dev` escribe en `.next-dev` y
 `next build`/`next start` usan `.next-build`. Por ello es seguro compilar mientras el servidor de
@@ -142,19 +154,22 @@ con el mismo `correlationId` en todos los logs
 
 ## Decisiones
 
-| ADR                                                                    | Decisión                                                |
-| ---------------------------------------------------------------------- | ------------------------------------------------------- |
-| [001](docs/adr/ADR-001-modular-monolith.md)                            | Modular monolith, no microservicios                     |
-| [002](docs/adr/ADR-002-hexagonal-architecture.md)                      | Arquitectura hexagonal                                  |
-| [003](docs/adr/ADR-003-monorepo-platform-two-repositories.md)          | Monorepo + repo de infraestructura                      |
-| [004](docs/adr/ADR-004-aws-ecs-fargate.md)                             | AWS ECS Fargate                                         |
-| [005](docs/adr/ADR-005-postgresql-pgvector.md)                         | PostgreSQL + pgvector                                   |
-| [006](docs/adr/ADR-006-sqs-eventbridge-no-redis.md)                    | SQS + EventBridge, sin Redis                            |
-| [007](docs/adr/ADR-007-openai-provider-adapter.md)                     | OpenAI detrás de puertos                                |
-| [008](docs/adr/ADR-008-site-to-site-vpn.md)                            | VPN Site-to-Site hacia la red CDR                       |
-| [009](docs/adr/ADR-009-database-access-library.md)                     | Drizzle + migraciones SQL escritas a mano               |
-| [010](docs/adr/ADR-010-iac-terraform.md)                               | Terraform                                               |
-| [011](docs/adr/ADR-011-unified-code-inheritance-and-homolog-search.md) | Herencia por código unificador y búsqueda por homólogos |
+| ADR                                                                    | Decisión                                                 |
+| ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| [001](docs/adr/ADR-001-modular-monolith.md)                            | Modular monolith, no microservicios                      |
+| [002](docs/adr/ADR-002-hexagonal-architecture.md)                      | Arquitectura hexagonal                                   |
+| [003](docs/adr/ADR-003-monorepo-platform-two-repositories.md)          | Monorepo + repo de infraestructura                       |
+| [004](docs/adr/ADR-004-aws-ecs-fargate.md)                             | AWS ECS Fargate                                          |
+| [005](docs/adr/ADR-005-postgresql-pgvector.md)                         | PostgreSQL + pgvector                                    |
+| [006](docs/adr/ADR-006-sqs-eventbridge-no-redis.md)                    | SQS + EventBridge, sin Redis                             |
+| [007](docs/adr/ADR-007-openai-provider-adapter.md)                     | OpenAI detrás de puertos                                 |
+| [008](docs/adr/ADR-008-site-to-site-vpn.md)                            | VPN Site-to-Site hacia la red CDR                        |
+| [009](docs/adr/ADR-009-database-access-library.md)                     | Drizzle + migraciones SQL escritas a mano                |
+| [010](docs/adr/ADR-010-iac-terraform.md)                               | Terraform                                                |
+| [011](docs/adr/ADR-011-unified-code-inheritance-and-homolog-search.md) | Herencia por código unificador y búsqueda por homólogos  |
+| [012](docs/adr/ADR-012-template-driven-product-data.md)                | Datos dinámicos gobernados por plantillas                |
+| [013](docs/adr/ADR-013-capability-and-attribute-authorization.md)      | Autorización por capacidad y atributo                    |
+| [014](docs/adr/ADR-014-executable-unified-code-propagation.md)         | Propagación ejecutable y auditable por código unificador |
 
 Documentación de arquitectura completa en [`docs/architecture/`](docs/architecture/).
 
@@ -180,16 +195,18 @@ Documentación de arquitectura completa en [`docs/architecture/`](docs/architect
 
 Deliberado, no olvidado. Cada punto está justificado en la documentación enlazada.
 
-| Área                   | Falta                                                            | Bloqueado por                                                           |
-| ---------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Dynamics AX            | Adapter real (hoy es un stub que falla con un error documentado) | Superficie de integración, mapeo de entidades y VPN — pendientes de CDR |
-| PrestaShop / pedidos   | Adapters reales                                                  | Acceso a API, mapeo de campos, ubicación de red                         |
-| Categorías y atributos | Persistencia (solo existen los tipos de dominio)                 | La taxonomía y el diccionario de atributos son entregables de CDR       |
-| Autenticación          | Fuente empresarial, refresh y revocación                         | ¿Cuentas administradas en el PIM o Active Directory/OIDC de CDR?        |
-| Auditoría              | Tabla `audit_entries` duradera (hoy va al log estructurado)      | Requisitos de retención y reporte                                       |
-| IA                     | Control de presupuesto y rate limiting                           | Debe existir antes de generar en volumen con una clave real             |
-| AWS                    | `terraform plan` / `apply`                                       | No se entregaron credenciales; no se inventó ninguna                    |
-| API                    | Rate limiting y WAF                                              | Requisito previo a exponer a internet                                   |
+| Área                    | Falta                                                                  | Bloqueado por                                                           |
+| ----------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Dynamics AX             | Adapter real (hoy es un stub que falla con un error documentado)       | Superficie de integración, mapeo de entidades y VPN — pendientes de CDR |
+| PrestaShop / pedidos    | Adapters reales                                                        | Acceso a API, mapeo de campos, ubicación de red                         |
+| Gobierno de plantillas  | Crear, clonar y publicar nuevas versiones desde la interfaz            | Flujo de aprobación y diccionario definitivo del cliente                |
+| Autenticación           | Fuente empresarial, refresh y revocación                               | ¿Cuentas administradas en el PIM o Active Directory/OIDC de CDR?        |
+| Auditoría               | Política final de retención, archivo y acceso a campos sensibles       | Requisitos operativos y regulatorios del cliente                        |
+| Búsqueda semántica      | Reindexación asíncrona del catálogo completo                           | Programación del worker y política operativa de reindexación            |
+| Activos                 | Antimalware y reconciliación/lifecycle de objetos                      | Servicios y políticas de plataforma de producción                       |
+| IA                      | Presupuesto, cuotas distribuidas y flujos completos de revisión humana | Debe existir antes de generar en volumen con una clave real             |
+| AWS                     | `terraform plan` / `apply`                                             | No se entregaron credenciales; no se inventó ninguna                    |
+| Perímetro de producción | WAF y límites de tráfico en el edge                                    | Infraestructura previa a exponer el servicio a internet                 |
 
 ---
 

@@ -1,4 +1,5 @@
 import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
+import { ForbiddenError } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
@@ -33,5 +34,13 @@ describe('GetWorkspaceUseCase', () => {
 
     await expect(useCase.execute('reports', actor)).resolves.toEqual(projection);
     expect(read).toHaveBeenCalledWith('reports', actor);
+  });
+
+  it('rejects a direct workspace request when the actor lacks its menu capability', async () => {
+    const read = vi.fn<WorkspaceReadModelPort['read']>();
+    const useCase = new GetWorkspaceUseCase({ read });
+
+    expect(() => useCase.execute('imports', actor)).toThrow(ForbiddenError);
+    expect(read).not.toHaveBeenCalled();
   });
 });

@@ -72,7 +72,8 @@ export interface DynamicCatalogSchema {
 }
 
 export interface ProductAttributeCell {
-  readonly value: CatalogAttributeValue;
+  /** Null carries the version of a cleared value so a later edit cannot reset to version 0. */
+  readonly value: CatalogAttributeValue | null;
   readonly version: number;
   readonly source: AttributeValueSource;
   readonly updatedAt: Date;
@@ -87,11 +88,56 @@ export interface CatalogGridProduct {
   readonly attributes: Readonly<Record<string, ProductAttributeCell>>;
 }
 
+export interface CatalogWorkbookColumn extends TemplateAttribute {
+  readonly applicableTemplateIds: readonly Uuid[];
+}
+
+export type CatalogWorkbookCell =
+  | { readonly applicable: false }
+  | {
+      readonly applicable: true;
+      readonly value: CatalogAttributeValue | null;
+      readonly version: number;
+      readonly source: AttributeValueSource;
+      readonly updatedAt: Date;
+      readonly required: boolean;
+      readonly permissions: { readonly edit: boolean; readonly export: boolean };
+    };
+
+export interface CatalogWorkbookProduct {
+  readonly id: Uuid;
+  readonly sku: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly brand: string | null;
+  readonly status: string;
+  readonly updatedAt: Date;
+  readonly category: { readonly id: Uuid; readonly name: string };
+  readonly template: {
+    readonly id: Uuid;
+    readonly name: string;
+    readonly version: number;
+  };
+  readonly providerCode: string | null;
+  readonly unifiedCode: string | null;
+  readonly applicationTypes: readonly string[];
+  readonly completeness: number;
+  readonly attributes: Readonly<Record<string, CatalogWorkbookCell>>;
+}
+
 export function validateAttributeValue(
   definition: DynamicAttributeDefinition,
-  value: CatalogAttributeValue,
-  _required: boolean,
+  value: CatalogAttributeValue | null,
+  required: boolean,
 ): void {
+  if (value === null) {
+    if (required) {
+      throw new ValidationError('A required attribute cannot be cleared', {
+        attributeKey: definition.key,
+      });
+    }
+    return;
+  }
   switch (definition.dataType) {
     case CatalogAttributeDataType.Text:
       if (typeof value !== 'string') invalidType(definition, 'string');

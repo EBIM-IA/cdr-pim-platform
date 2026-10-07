@@ -4,6 +4,8 @@ import {
   type CatalogGridQuery,
   type CatalogGridResultDto,
   type CatalogGridSchemaDto,
+  type CatalogWorkbookQuery,
+  type CatalogWorkbookResultDto,
   type CatalogCategorySummaryDto,
   type LivenessResponse,
   type ProductDto,
@@ -13,13 +15,16 @@ import {
   type SemanticSearchResponse,
   type ProductAttributeSheetDto,
   type UpdateProductAttributeInput,
+  type UpdateProductAttributesBatchInput,
   type UpdatedProductAttributeDto,
+  type UpdatedProductAttributesBatchDto,
   type WorkspaceDto,
   type WorkspaceSlug,
   apiErrorSchema,
   catalogCategoryListSchema,
   catalogGridResultSchema,
   catalogGridSchemaSchema,
+  catalogWorkbookResultSchema,
   livenessResponseSchema,
   productListSchema,
   productAttributeSheetSchema,
@@ -27,6 +32,7 @@ import {
   readinessResponseSchema,
   semanticSearchResponseSchema,
   updatedProductAttributeSchema,
+  updatedProductAttributesBatchSchema,
   workspaceSchema,
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
@@ -114,9 +120,33 @@ export class ApiClient {
     return this.get(`/catalog/grid?${params.toString()}`, catalogGridResultSchema);
   }
 
+  listCatalogWorkbook(query: CatalogWorkbookQuery): Promise<CatalogWorkbookResultDto> {
+    const params = new URLSearchParams({
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    });
+    if (query.categoryId) params.set('categoryId', query.categoryId);
+    if (query.q) params.set('q', query.q);
+    if (query.brand) params.set('brand', query.brand);
+    if (query.status) params.set('status', query.status);
+    if (query.applicationType) params.set('applicationType', query.applicationType);
+    if (query.completeness) params.set('completeness', query.completeness);
+    for (const filter of query.filter) params.append('filter', filter);
+    for (const filter of query.columnFilter ?? []) params.append('columnFilter', filter);
+    if (query.sort) params.set('sort', query.sort);
+    return this.get(`/catalog/workbook?${params.toString()}`, catalogWorkbookResultSchema);
+  }
+
   getProductAttributeSheet(productId: string): Promise<ProductAttributeSheetDto> {
     return this.get(
       `/catalog/products/${encodeURIComponent(productId)}`,
+      productAttributeSheetSchema,
+    );
+  }
+
+  getProductTechnicalSheet(productId: string): Promise<ProductAttributeSheetDto> {
+    return this.get(
+      `/catalog/products/${encodeURIComponent(productId)}/technical-sheet`,
       productAttributeSheetSchema,
     );
   }
@@ -129,6 +159,17 @@ export class ApiClient {
     return this.request(
       `/catalog/products/${encodeURIComponent(productId)}/attributes/${encodeURIComponent(attributeKey)}`,
       updatedProductAttributeSchema,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
+  updateProductAttributes(
+    productId: string,
+    input: UpdateProductAttributesBatchInput,
+  ): Promise<UpdatedProductAttributesBatchDto> {
+    return this.request(
+      `/catalog/products/${encodeURIComponent(productId)}/attributes`,
+      updatedProductAttributesBatchSchema,
       { method: 'PATCH', body: JSON.stringify(input) },
     );
   }

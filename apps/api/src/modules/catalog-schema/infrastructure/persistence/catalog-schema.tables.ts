@@ -24,6 +24,11 @@ export const catalogCategories = pgTable(
     slug: text('slug').notNull(),
     name: text('name').notNull(),
     path: text('path').notNull(),
+    application: text('application'),
+    sourcePriority: jsonb('source_priority')
+      .$type<Partial<Record<'tecdoc' | 'fabricante' | 'archivo' | 'manual', number>>>()
+      .notNull()
+      .default({}),
     position: integer('position').notNull().default(0),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -71,6 +76,32 @@ export const attributeTemplates = pgTable(
     uniqueIndex('attribute_templates_one_active_per_category')
       .on(table.categoryId)
       .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+/**
+ * Required digital assets are template policy, not uploaded-file records. Keeping the two
+ * concepts separate prevents workbook flags from fabricating rows in `product_assets`.
+ */
+export const templateAssetRequirements = pgTable(
+  'template_asset_requirements',
+  {
+    templateId: uuid('template_id')
+      .notNull()
+      .references(() => attributeTemplates.id, { onDelete: 'cascade' }),
+    typeCode: text('type_code').notNull(),
+    required: boolean('required').notNull().default(false),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.templateId, table.typeCode] }),
+    index('template_asset_requirements_readiness_idx').on(
+      table.templateId,
+      table.required,
+      table.active,
+    ),
   ],
 );
 
@@ -160,6 +191,7 @@ export const productAttributeValues = pgTable(
     version: integer('version').notNull().default(1),
     validFrom: timestamp('valid_from', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
     primaryKey({ columns: [table.productId, table.attributeDefinitionId] }),

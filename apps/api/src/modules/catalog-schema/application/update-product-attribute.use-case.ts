@@ -26,14 +26,14 @@ import { catalogBusinessRoles } from './catalog-business-roles';
 export interface UpdateProductAttributeCommand {
   readonly productId: string;
   readonly attributeKey: string;
-  readonly value: CatalogAttributeValue;
+  readonly value: CatalogAttributeValue | null;
   readonly expectedVersion: number;
 }
 
 export interface UpdatedProductAttribute {
   readonly productId: string;
   readonly attributeKey: string;
-  readonly value: CatalogAttributeValue;
+  readonly value: CatalogAttributeValue | null;
   readonly version: number;
   readonly source: AttributeValueSource;
   readonly updatedAt: Date;
@@ -67,7 +67,9 @@ export class UpdateProductAttributeUseCase {
         sourceAuthority: assignment.definition.sourceAuthority,
       });
     }
-    validateAttributeValue(assignment.definition, command.value, assignment.definition.required);
+    // A null is an explicit, versioned tombstone. It is allowed for required fields so the
+    // product can be moved back to review and reported as incomplete instead of hiding the gap.
+    validateAttributeValue(assignment.definition, command.value, false);
 
     const now = this.clock.now();
     const result = await this.catalog.updateAttribute({
@@ -100,10 +102,10 @@ export class UpdateProductAttributeUseCase {
     return {
       productId,
       attributeKey: command.attributeKey,
-      value: primary.after.value,
-      version: primary.after.version,
-      source: primary.after.source,
-      updatedAt: primary.after.updatedAt,
+      value: primary.after?.value ?? null,
+      version: primary.after?.version ?? 0,
+      source: primary.after?.source ?? AttributeValueSourceValue.Manual,
+      updatedAt: primary.after?.updatedAt ?? now,
       replicatedProductIds: result.changes
         .filter((change) => change.productId !== productId)
         .map((change) => change.productId),

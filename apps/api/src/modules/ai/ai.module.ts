@@ -1,8 +1,16 @@
 import { Module } from '@nestjs/common';
-import type { ApiEnv } from '@cdr/config';
+import { resolveAiCapabilityProviders, type ApiEnv } from '@cdr/config';
 
 import { API_ENV } from '../../shared/tokens';
+import { CatalogModule } from '../catalog/catalog.module';
+import { CatalogSchemaModule } from '../catalog-schema/catalog-schema.module';
+import { ProductAssetsModule } from '../product-assets/product-assets.module';
+import {
+  ExtractAssetCandidatesUseCase,
+  GenerateCommercialProposalUseCase,
+} from './application/generate-ai-candidates.use-cases';
 import { DOCUMENT_EXTRACTION_PROVIDER } from './domain/ports/document-extraction-provider.port';
+import { AI_DOCUMENT_POLICY } from './domain/ports/ai-policy.port';
 import { EMBEDDING_PROVIDER } from './domain/ports/embedding-provider.port';
 import { TEXT_GENERATION_PROVIDER } from './domain/ports/text-generation-provider.port';
 import { FakeDocumentExtractionAdapter } from './infrastructure/fake/fake-document-extraction.adapter';
@@ -12,6 +20,7 @@ import { OpenAiDocumentExtractionAdapter } from './infrastructure/openai/openai-
 import { OpenAiEmbeddingAdapter } from './infrastructure/openai/openai-embedding.adapter';
 import { OpenAiTextGenerationAdapter } from './infrastructure/openai/openai-text-generation.adapter';
 import { createOpenAiClient } from './infrastructure/openai/openai.client';
+import { AiController } from './presentation/ai.controller';
 
 /**
  * Selects the AI adapter set from configuration.
@@ -23,17 +32,25 @@ import { createOpenAiClient } from './infrastructure/openai/openai.client';
  * `fake` is the default so a developer with no API key, and CI, both get a working system.
  */
 @Module({
+  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule],
+  controllers: [AiController],
   providers: [
+    {
+      provide: AI_DOCUMENT_POLICY,
+      inject: [API_ENV],
+      useFactory: (env: ApiEnv) => ({ maxBytes: env.AI_DOCUMENT_MAX_BYTES }),
+    },
     {
       provide: EMBEDDING_PROVIDER,
       inject: [API_ENV],
       useFactory: (env: ApiEnv) =>
-        env.AI_PROVIDER === 'openai'
+        resolveAiCapabilityProviders(env).embeddings === 'openai'
           ? new OpenAiEmbeddingAdapter(
               createOpenAiClient({
                 apiKey: env.OPENAI_API_KEY as string,
                 ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
                 timeoutMs: env.OPENAI_TIMEOUT_MS,
+                maxRetries: env.OPENAI_MAX_RETRIES,
               }),
               env.AI_EMBEDDING_MODEL,
               env.AI_EMBEDDING_DIMENSIONS,
@@ -44,12 +61,13 @@ import { createOpenAiClient } from './infrastructure/openai/openai.client';
       provide: TEXT_GENERATION_PROVIDER,
       inject: [API_ENV],
       useFactory: (env: ApiEnv) =>
-        env.AI_PROVIDER === 'openai'
+        resolveAiCapabilityProviders(env).generation === 'openai'
           ? new OpenAiTextGenerationAdapter(
               createOpenAiClient({
                 apiKey: env.OPENAI_API_KEY as string,
                 ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
                 timeoutMs: env.OPENAI_TIMEOUT_MS,
+                maxRetries: env.OPENAI_MAX_RETRIES,
               }),
               env.AI_GENERATION_MODEL,
             )
@@ -59,17 +77,20 @@ import { createOpenAiClient } from './infrastructure/openai/openai.client';
       provide: DOCUMENT_EXTRACTION_PROVIDER,
       inject: [API_ENV],
       useFactory: (env: ApiEnv) =>
-        env.AI_PROVIDER === 'openai'
+        resolveAiCapabilityProviders(env).documentExtraction === 'openai'
           ? new OpenAiDocumentExtractionAdapter(
               createOpenAiClient({
                 apiKey: env.OPENAI_API_KEY as string,
                 ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
                 timeoutMs: env.OPENAI_TIMEOUT_MS,
+                maxRetries: env.OPENAI_MAX_RETRIES,
               }),
-              env.AI_GENERATION_MODEL,
+              env.AI_DOCUMENT_EXTRACTION_MODEL,
             )
           : new FakeDocumentExtractionAdapter(),
     },
+    GenerateCommercialProposalUseCase,
+    ExtractAssetCandidatesUseCase,
   ],
   exports: [EMBEDDING_PROVIDER, TEXT_GENERATION_PROVIDER, DOCUMENT_EXTRACTION_PROVIDER],
 })

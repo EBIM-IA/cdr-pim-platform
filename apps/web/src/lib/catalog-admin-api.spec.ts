@@ -34,6 +34,8 @@ describe('catalog administration browser client', () => {
           slug: 'rodamientos',
           name: 'Rodamientos',
           path: '/rodamientos',
+          application: 'INDUSTRIAL',
+          sourcePriority: { fabricante: 1, archivo: 2, manual: 3, tecdoc: 4 },
           position: 2,
           active: true,
           updatedAt,

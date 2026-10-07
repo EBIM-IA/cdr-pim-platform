@@ -1,19 +1,25 @@
 import {
   auditChangeListSchema,
   externalHomologSchema,
+  groupOemCodeSchema,
   groupApplicationSchema,
   homologSearchResultSchema,
+  oemSearchResultSchema,
   importBatchSchema,
   type AuditChangeListDto,
   type AuditChangeListQuery,
   type CreateExternalHomologInput,
+  type CreateGroupOemCodeInput,
   type CreateGroupApplicationInput,
   type ExternalHomologDto,
   type GroupApplicationDto,
+  type GroupOemCodeDto,
   type HomologSearchResultDto,
+  type OemSearchResultDto,
   type ImportBatchDto,
   type PreviewImportInput,
   type UpdateExternalHomologInput,
+  type UpdateGroupOemCodeInput,
   type UpdateGroupApplicationInput,
 } from '@cdr/contracts';
 import { z } from 'zod';
@@ -96,10 +102,15 @@ export function updateApplication(
   });
 }
 
-export function deactivateApplication(id: string): Promise<GroupApplicationDto> {
-  return request(`/api/operations/applications/${encodeURIComponent(id)}`, groupApplicationSchema, {
-    method: 'DELETE',
-  });
+export function deactivateApplication(
+  id: string,
+  expectedUpdatedAt: string,
+): Promise<GroupApplicationDto> {
+  return request(
+    `/api/operations/applications/${encodeURIComponent(id)}${queryString({ expectedUpdatedAt })}`,
+    groupApplicationSchema,
+    { method: 'DELETE' },
+  );
 }
 
 export function listHomologs(
@@ -133,10 +144,64 @@ export function updateHomolog(
   });
 }
 
+export function deactivateHomolog(
+  id: string,
+  expectedUpdatedAt: string,
+): Promise<ExternalHomologDto> {
+  return request(
+    `/api/operations/equivalences/${encodeURIComponent(id)}${queryString({ expectedUpdatedAt })}`,
+    externalHomologSchema,
+    { method: 'DELETE' },
+  );
+}
+
 export function searchEligibleHomologs(q: string): Promise<HomologSearchResultDto[]> {
   return request(
     `/api/operations/equivalences/search${queryString({ q })}`,
     z.array(homologSearchResultSchema),
+  );
+}
+
+export function listOemCodes(
+  filters: { unifiedCode?: string; brand?: string; includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<GroupOemCodeDto[]> {
+  return request(
+    `/api/operations/equivalences/oem${queryString(filters)}`,
+    z.array(groupOemCodeSchema),
+    { signal },
+  );
+}
+
+export function createOemCode(input: CreateGroupOemCodeInput): Promise<GroupOemCodeDto> {
+  return request('/api/operations/equivalences/oem', groupOemCodeSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateOemCode(
+  id: string,
+  input: UpdateGroupOemCodeInput,
+): Promise<GroupOemCodeDto> {
+  return request(`/api/operations/equivalences/oem/${encodeURIComponent(id)}`, groupOemCodeSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deactivateOemCode(id: string, expectedUpdatedAt: string): Promise<GroupOemCodeDto> {
+  return request(
+    `/api/operations/equivalences/oem/${encodeURIComponent(id)}${queryString({ expectedUpdatedAt })}`,
+    groupOemCodeSchema,
+    { method: 'DELETE' },
+  );
+}
+
+export function searchEligibleOemCodes(q: string): Promise<OemSearchResultDto[]> {
+  return request(
+    `/api/operations/equivalences/oem/search${queryString({ q })}`,
+    z.array(oemSearchResultSchema),
   );
 }
 
@@ -166,4 +231,32 @@ export function listAuditChanges(
     auditChangeListSchema,
     { signal },
   );
+}
+
+export async function downloadAuditChangesCsv(query: AuditChangeListQuery): Promise<void> {
+  const response = await authenticatedBffFetch(
+    `/api/operations/audit/export${queryString(
+      query as Record<string, string | number | undefined>,
+    )}`,
+    {
+      headers: { accept: 'text/csv' },
+      cache: 'no-store',
+    },
+  );
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const message =
+      body && typeof body === 'object' && 'message' in body
+        ? String(body.message)
+        : `La exportación respondió con estado ${response.status}.`;
+    throw new OperationalApiError(message, response.status);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'auditoria.csv';
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

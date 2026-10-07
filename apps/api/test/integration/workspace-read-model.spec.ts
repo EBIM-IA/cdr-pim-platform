@@ -11,6 +11,7 @@ const GROUP_ID = '20000000-0000-4000-8000-000000000001';
 const CATEGORY_ID = '30000000-0000-4000-8000-000000000001';
 const TEMPLATE_ID = '40000000-0000-4000-8000-000000000001';
 const ATTRIBUTE_ID = '50000000-0000-4000-8000-000000000001';
+const ASSET_ID = '55000000-0000-4000-8000-000000000001';
 const APPLICATION_ID = '60000000-0000-4000-8000-000000000001';
 const HOMOLOG_ID = '70000000-0000-4000-8000-000000000001';
 const BATCH_ID = '80000000-0000-4000-8000-000000000001';
@@ -76,9 +77,17 @@ describe('PostgresWorkspaceReadModel', () => {
       ) VALUES (${TEMPLATE_ID}, ${ATTRIBUTE_ID}, 1, true, true, true)
     `;
     await database.sql`
+      INSERT INTO product_template_assignments (product_id, template_id)
+      VALUES (${PRODUCT_ID}, ${TEMPLATE_ID})
+    `;
+    await database.sql`
+      INSERT INTO template_asset_requirements (template_id, type_code, required, active)
+      VALUES (${TEMPLATE_ID}, 'FT', true, true)
+    `;
+    await database.sql`
       INSERT INTO group_applications (
         id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source
-      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'Automotriz', 'Toyota', 'Corolla', 2014, 2018, true, 'manual')
+      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'AUTOMOTRIZ', 'Toyota', 'Corolla', 2014, 2018, true, 'manual')
     `;
     await database.sql`
       INSERT INTO external_homologs (
@@ -109,16 +118,25 @@ describe('PostgresWorkspaceReadModel', () => {
   });
 
   it('uses persisted catalog and equivalence data without inventing missing capabilities', async () => {
-    const [equivalences, quality, publication, reports, templates, applications, imports] =
-      await Promise.all([
-        readModel.read('equivalences', actor),
-        readModel.read('quality', actor),
-        readModel.read('publication', actor),
-        readModel.read('reports', actor),
-        readModel.read('templates', actor),
-        readModel.read('applications', actor),
-        readModel.read('imports', actor),
-      ]);
+    const [
+      equivalences,
+      quality,
+      publication,
+      reports,
+      templates,
+      applications,
+      imports,
+      categories,
+    ] = await Promise.all([
+      readModel.read('equivalences', actor),
+      readModel.read('quality', actor),
+      readModel.read('publication', actor),
+      readModel.read('reports', actor),
+      readModel.read('templates', actor),
+      readModel.read('applications', actor),
+      readModel.read('imports', actor),
+      readModel.read('categories', actor),
+    ]);
 
     expect(equivalences.rows[0]?.values).toMatchObject({
       code: 'UNIF-001',
@@ -126,14 +144,40 @@ describe('PostgresWorkspaceReadModel', () => {
       skus: 'SKU-001',
     });
     expect(quality.totalRows).toBe(1);
-    expect(quality.rows[0]?.values.findings).toContain('marca faltante');
+    expect(quality.rows[0]?.values.findings).toContain('Diámetro interior');
+    expect(quality.rows[0]?.values.findings).toContain('Ficha técnica (FT)');
     expect(publication.totalRows).toBe(1);
+    expect(publication.rows[0]?.values).toMatchObject({
+      eligibility: 'No publicable',
+      missing: expect.stringContaining('Diámetro interior'),
+    });
     expect(reports.metrics).toContainEqual({
       key: 'products',
       label: 'Productos',
       value: 1,
       format: 'integer',
     });
+    expect(reports.metrics).toEqual(
+      expect.arrayContaining([
+        {
+          key: 'affected-products',
+          label: 'Productos con hallazgos',
+          value: 1,
+          format: 'integer',
+        },
+        {
+          key: 'active-templates',
+          label: 'Plantillas activas',
+          value: 1,
+          format: 'integer',
+        },
+      ]),
+    );
+    expect(reports.rows).toContainEqual(
+      expect.objectContaining({
+        values: { section: 'Categoría', indicator: 'Rodamientos', value: 1 },
+      }),
+    );
     expect(templates.operationalStatus).toBe('operational');
     expect(templates.rows[0]?.values).toMatchObject({
       category: 'Rodamientos',
@@ -157,6 +201,92 @@ describe('PostgresWorkspaceReadModel', () => {
       status: 'confirmed',
       totalRows: 2,
       invalidRows: 1,
+    });
+    expect(categories.rows).toContainEqual(
+      expect.objectContaining({
+        values: { dimension: 'Categoría', value: 'Rodamientos', products: 1 },
+      }),
+    );
+  });
+
+  it('improves completeness and publication eligibility after the required asset is uploaded', async () => {
+    await database.sql`
+      INSERT INTO product_attribute_values (
+        product_id, attribute_definition_id, value_number, source, confidence, version
+      ) VALUES (${PRODUCT_ID}, ${ATTRIBUTE_ID}, 25, 'manual', 1, 1)
+    `;
+
+    const [beforeQuality, beforePublication, beforeReports] = await Promise.all([
+      readModel.read('quality', actor),
+      readModel.read('publication', actor),
+      readModel.read('reports', actor),
+    ]);
+
+    expect(beforeQuality.totalRows).toBe(1);
+    expect(beforeQuality.metrics).toContainEqual({
+      key: 'completion',
+      label: 'Completitud media (%)',
+      value: 50,
+      format: 'integer',
+    });
+    expect(beforePublication.metrics).toContainEqual({
+      key: 'publishable',
+      label: 'Elegibilidad base',
+      value: 0,
+      format: 'integer',
+    });
+    expect(beforePublication.rows[0]?.values).toMatchObject({
+      eligibility: 'No publicable',
+      missing: 'Ficha técnica (FT)',
+    });
+    expect(beforeReports.metrics).toContainEqual({
+      key: 'completion',
+      label: 'Completitud media (%)',
+      value: 50,
+      format: 'integer',
+    });
+
+    // This row represents the metadata committed by the product-asset upload flow. No workbook
+    // seed ever creates it on behalf of the product.
+    await database.sql`
+      INSERT INTO product_assets (
+        id, product_id, kind, type_code, original_filename, object_key, bucket, mime_type,
+        size_bytes, checksum_sha256, source, uploaded_by
+      ) VALUES (
+        ${ASSET_ID}, ${PRODUCT_ID}, 'document', 'FT', 'SKU-001__FT.pdf',
+        'products/SKU-001/documents/ft.pdf', 'integration-assets', 'application/pdf',
+        128, 'required-asset-checksum', 'manual', ${actor.id}
+      )
+    `;
+
+    const [quality, publication, reports] = await Promise.all([
+      readModel.read('quality', actor),
+      readModel.read('publication', actor),
+      readModel.read('reports', actor),
+    ]);
+
+    expect(quality.totalRows).toBe(0);
+    expect(quality.metrics).toContainEqual({
+      key: 'completion',
+      label: 'Completitud media (%)',
+      value: 100,
+      format: 'integer',
+    });
+    expect(publication.metrics).toContainEqual({
+      key: 'publishable',
+      label: 'Elegibilidad base',
+      value: 1,
+      format: 'integer',
+    });
+    expect(publication.rows[0]?.values).toMatchObject({
+      eligibility: 'Publicable',
+      missing: '—',
+    });
+    expect(reports.metrics).toContainEqual({
+      key: 'completion',
+      label: 'Completitud media (%)',
+      value: 100,
+      format: 'integer',
     });
   });
 });

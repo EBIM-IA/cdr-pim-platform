@@ -8,8 +8,14 @@ import { EquivalencesWorkspace } from '@/components/equivalences-workspace';
 import { ImportsWorkspace } from '@/components/imports-workspace';
 import { ModuleWorkspace } from '@/components/module-workspace';
 import { ReferenceWorkspace } from '@/components/reference-workspace';
+import { StatePanel } from '@/components/state-panel';
 import { TemplatesAdminWorkspace } from '@/components/templates-admin-workspace';
-import { isModuleSlug, moduleDefinitions, moduleSlugs } from '@/lib/module-definitions';
+import {
+  isModuleSlug,
+  moduleDefinitions,
+  moduleMenuCapabilities,
+  moduleSlugs,
+} from '@/lib/module-definitions';
 import { getCurrentActor } from '@/lib/server-auth';
 
 interface ModulePageProps {
@@ -45,12 +51,22 @@ export default async function ModulePage({ params }: ModulePageProps) {
   const actor = await getCurrentActor();
   const capabilities = new Set(actor?.capabilities ?? []);
 
+  if (!capabilities.has(moduleMenuCapabilities[module])) {
+    return (
+      <StatePanel
+        variant="error"
+        title="Sin permisos para esta pantalla"
+        description="Tu rol no tiene habilitado este módulo. Si necesitas acceso, solicítalo a una persona administradora."
+      />
+    );
+  }
+
   if (module === 'categories') {
     return <CategoriesAdminWorkspace />;
   }
   if (module === 'templates') {
     return (
-      <TemplatesAdminWorkspace canManageRoleAccess={capabilities.has('administration:manage')} />
+      <TemplatesAdminWorkspace canManageTemplate={capabilities.has('administration:manage')} />
     );
   }
   if (module === 'applications') {
@@ -63,7 +79,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
     return <ImportsWorkspace canExecute={capabilities.has('imports:execute')} />;
   }
   if (module === 'documents') {
-    return <DocumentsWorkspace />;
+    return <DocumentsWorkspace canWrite={capabilities.has('catalog:write')} />;
   }
   if (
     module === 'quality' ||

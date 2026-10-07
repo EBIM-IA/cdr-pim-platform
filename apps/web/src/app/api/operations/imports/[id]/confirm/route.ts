@@ -1,7 +1,7 @@
 import { importBatchSchema, uuidSchema } from '@cdr/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { securePrivateResponse } from '@/lib/http-security';
+import { IMPORT_UPSTREAM_TIMEOUT_MS, securePrivateResponse } from '@/lib/http-security';
 import { proxyPrivateApi } from '@/lib/private-api-route';
 
 export const dynamic = 'force-dynamic';
@@ -18,5 +18,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     method: 'POST',
     path: `/imports/${encodeURIComponent(id.data)}/confirm`,
     outputSchema: importBatchSchema,
+    timeoutMs: IMPORT_UPSTREAM_TIMEOUT_MS,
   });
 }

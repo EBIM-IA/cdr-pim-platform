@@ -13,6 +13,7 @@ export interface DetailTechnicalAttribute {
   readonly source: AttributeValueSource | null;
   readonly authority: AttributeSourceAuthority;
   readonly includeInTechnicalSheet: boolean;
+  readonly canExport: boolean;
   readonly updatedAt: string | null;
 }
 
@@ -35,6 +36,7 @@ export function technicalAttributesFromSheet(
         source: cell?.source ?? null,
         authority: column.sourceAuthority,
         includeInTechnicalSheet: column.includeInTechnicalSheet,
+        canExport: column.permissions.export,
         updatedAt: cell?.updatedAt ?? null,
       };
     });

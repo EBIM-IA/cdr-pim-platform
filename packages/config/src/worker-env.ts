@@ -1,13 +1,16 @@
 import { z } from 'zod';
 
-import { aiEnvSchema } from './ai';
+import { aiEnvSchema, resolveAiCapabilityProviders } from './ai';
 import { awsEnvSchema, baseEnvSchema, queueDriverSchema, storageDriverSchema } from './common';
 import { parseEnv } from './env-error';
 
 const workerOnlySchema = z.object({
   SERVICE_NAME: z.string().default('cdr-pim-worker'),
-  /** The worker exposes health over HTTP so ECS can run the same probe shape as the API. */
-  PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
+  /**
+   * The API and worker read the same root .env in development. A dedicated name prevents
+   * the API's PORT from making both processes bind the same socket.
+   */
+  WORKER_PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
 
   DATABASE_URL: z.string().url().optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(5),
@@ -60,11 +63,21 @@ export const workerEnvSchema = baseEnvSchema
         message: 'is required when STORAGE_DRIVER=s3',
       });
     }
-    if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY) {
+    if (
+      Object.values(resolveAiCapabilityProviders(env)).includes('openai') &&
+      !env.OPENAI_API_KEY
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['OPENAI_API_KEY'],
-        message: 'is required when AI_PROVIDER=openai',
+        message: 'is required when any AI capability provider is openai',
+      });
+    }
+    if (env.OPENAI_TIMEOUT_MS * (env.OPENAI_MAX_RETRIES + 1) > 35_000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OPENAI_TIMEOUT_MS'],
+        message: 'times total attempts must not exceed the 35000ms provider budget',
       });
     }
     if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {

@@ -32,7 +32,10 @@ describe('pgvector semantic search', () => {
     products = new DrizzleProductRepository(database.db);
     index = new DrizzleProductVectorIndex(database.db);
     indexProduct = new IndexProductUseCase(products, embeddings, index);
-    search = new SemanticSearchUseCase(embeddings, index);
+    search = new SemanticSearchUseCase(embeddings, index, {
+      findDeterministic: async () => [],
+      documentParts: async () => [],
+    });
   });
 
   beforeEach(() => database.truncateAll());
@@ -63,7 +66,7 @@ describe('pgvector semantic search', () => {
     expect(stored[0]?.dimensions).toBe(1536);
     expect(stored[0]?.model).toBe('fake-embedding-v1');
 
-    const result = await search.execute('rodamiento de bolas sellado 6205', 5);
+    const result = await search.execute('rodamiento de bolas sellado 6205', 5, []);
 
     expect(result.model).toBe('fake-embedding-v1');
     expect(result.hits[0]?.sku).toBe('6205-2RS');
@@ -116,7 +119,7 @@ describe('pgvector semantic search', () => {
     expect(rows.map((row) => row.model)).toEqual(['fake-embedding-v1', 'fake-embedding-v2']);
 
     // A search for v1 must not be polluted by v2's vectors.
-    const result = await search.execute('rodamiento', 10);
+    const result = await search.execute('rodamiento', 10, []);
     expect(result.hits).toHaveLength(1);
   });
 

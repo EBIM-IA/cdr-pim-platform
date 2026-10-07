@@ -59,7 +59,7 @@ function repository(): CatalogAdministrationRepositoryPort {
 }
 
 describe('UpdateTemplateAttributeUseCase authorization', () => {
-  it('allows COMPRAS to update ordinary template flags when roleAccess is omitted', async () => {
+  it('rejects COMPRAS template-rule changes before invoking persistence', async () => {
     const catalog = repository();
     const useCase = new UpdateTemplateAttributeUseCase(catalog, new FixedClock(now));
 
@@ -70,15 +70,9 @@ describe('UpdateTemplateAttributeUseCase authorization', () => {
         { required: false, expectedUpdatedAt },
         purchasingActor,
       ),
-    ).resolves.toEqual(attribute);
+    ).rejects.toBeInstanceOf(ForbiddenError);
 
-    expect(catalog.updateTemplateAttribute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        templateId,
-        attributeDefinitionId: definitionId,
-        required: false,
-      }),
-    );
+    expect(catalog.updateTemplateAttribute).not.toHaveBeenCalled();
   });
 
   it('rejects COMPRAS roleAccess changes before invoking persistence', async () => {

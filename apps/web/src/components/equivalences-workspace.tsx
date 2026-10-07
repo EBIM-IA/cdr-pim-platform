@@ -4,6 +4,7 @@ import type {
   ExternalHomologDto,
   HomologApprovalStatus,
   HomologSearchResultDto,
+  WorkspaceRow,
 } from '@cdr/contracts';
 import {
   Boxes,
@@ -19,10 +20,18 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+  ExcelTableFilterBar,
+  ExcelTableHeader,
+  type ExcelTableColumn,
+  useExcelTableRows,
+} from '@/components/excel-table-filter';
 import { PageHeader } from '@/components/page-header';
+import { OemCodesWorkspace } from '@/components/oem-codes-workspace';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
+import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -31,10 +40,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspaceData } from '@/components/use-workspace-data';
 import {
   createHomolog,
+  deactivateHomolog,
   listHomologs,
   searchEligibleHomologs,
   updateHomolog,
 } from '@/lib/operational-api';
+import type { TabularData } from '@/lib/tabular-export';
 import { formatWorkspaceCell, formatWorkspaceMetric } from '@/lib/workspace-view';
 
 interface HomologForm {
@@ -57,6 +68,43 @@ const approvalLabels: Record<HomologApprovalStatus, string> = {
   rejected: 'Rechazado',
 };
 
+type HomologTableColumnKey =
+  'unifiedCode' | 'externalCode' | 'externalBrand' | 'approvalStatus' | 'source' | 'active';
+
+const homologTableColumns: readonly ExcelTableColumn<ExternalHomologDto, HomologTableColumnKey>[] =
+  [
+    {
+      key: 'unifiedCode',
+      label: 'Código unificador',
+      getValue: (homolog) => homolog.unifiedCode,
+    },
+    {
+      key: 'externalCode',
+      label: 'Código externo',
+      getValue: (homolog) => homolog.externalCode,
+    },
+    {
+      key: 'externalBrand',
+      label: 'Marca',
+      getValue: (homolog) => homolog.externalBrand,
+    },
+    {
+      key: 'approvalStatus',
+      label: 'Aprobación',
+      getValue: (homolog) => approvalLabels[homolog.approvalStatus],
+    },
+    {
+      key: 'source',
+      label: 'Origen',
+      getValue: (homolog) => (homolog.source === 'import' ? 'Importación' : 'Manual'),
+    },
+    {
+      key: 'active',
+      label: 'Estado',
+      getValue: (homolog) => (homolog.active ? 'Activo' : 'Inactivo'),
+    },
+  ];
+
 export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
   const [items, setItems] = useState<ExternalHomologDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,22 +115,26 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null);
   const [form, setForm] = useState<HomologForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [eligibleQuery, setEligibleQuery] = useState('');
   const [eligibleResults, setEligibleResults] = useState<HomologSearchResultDto[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [view, setView] = useState<'groups' | 'homologs' | 'identifiers'>('groups');
+  const [view, setView] = useState<'groups' | 'homologs' | 'identifiers' | 'oem'>('groups');
+  const [oemCount, setOemCount] = useState<number | null>(null);
   const [identifierGroupId, setIdentifierGroupId] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const groups = useWorkspaceData('equivalences');
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('view');
-    if (requested === 'homologs' || requested === 'identifiers') setView(requested);
+    if (requested === 'homologs' || requested === 'identifiers' || requested === 'oem') {
+      setView(requested);
+    }
   }, []);
 
-  const changeView = (next: 'groups' | 'homologs' | 'identifiers') => {
+  const changeView = (next: 'groups' | 'homologs' | 'identifiers' | 'oem') => {
     setView(next);
     const url = new URL(window.location.href);
     if (next === 'groups') url.searchParams.delete('view');
@@ -129,6 +181,27 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
       ),
     );
   }, [groupQuery, groupRows]);
+  const groupTableColumns = useMemo<readonly ExcelTableColumn<WorkspaceRow, string>[]>(
+    () =>
+      (groups.workspace?.columns ?? []).map((column) => ({
+        key: column.key,
+        label: column.label,
+        getValue: (row: WorkspaceRow) => row.values[column.key],
+      })),
+    [groups.workspace?.columns],
+  );
+  const groupTable = useExcelTableRows({
+    rows: filteredGroups,
+    columns: groupTableColumns,
+    initialSort: groups.workspace?.columns[0]
+      ? { key: groups.workspace.columns[0].key, direction: 'asc' }
+      : undefined,
+  });
+  const homologTable = useExcelTableRows({
+    rows: filtered,
+    columns: homologTableColumns,
+    initialSort: { key: 'unifiedCode', direction: 'asc' },
+  });
   const selectedGroup = groupRows.find((row) => row.id === selectedGroupId);
   const effectiveIdentifierGroupId = identifierGroupId || groupRows[0]?.id || '';
   const identifierGroup = groupRows.find((row) => row.id === effectiveIdentifierGroupId);
@@ -138,10 +211,66 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
     .map((sku) => sku.trim())
     .filter(Boolean);
   const groupHomologs = items.filter((item) => item.unifiedCode === identifierCode);
+  const exportData: (TabularData & { filename: string }) | null = (() => {
+    if (view === 'groups' && groups.workspace) {
+      return {
+        filename: 'codigos-unificadores-filtrados',
+        sheetName: 'Códigos unificadores',
+        headers: groups.workspace.columns.map((column) => column.label),
+        rows: groupTable.visibleRows.map(
+          (row) =>
+            groups.workspace?.columns.map((column) =>
+              formatWorkspaceCell(row.values[column.key], column),
+            ) ?? [],
+        ),
+      };
+    }
+    if (view === 'homologs') {
+      return {
+        filename: 'homologos-filtrados',
+        sheetName: 'Homólogos',
+        headers: ['Código unificador', 'Código externo', 'Marca', 'Aprobación', 'Origen', 'Estado'],
+        rows: homologTable.visibleRows.map((item) => [
+          item.unifiedCode,
+          item.externalCode,
+          item.externalBrand,
+          approvalLabels[item.approvalStatus],
+          item.source === 'import' ? 'Importación' : 'Manual',
+          item.active ? 'Activo' : 'Inactivo',
+        ]),
+      };
+    }
+    if (view === 'identifiers' && identifierGroup) {
+      return {
+        filename: `identificadores-${identifierCode || 'grupo'}`,
+        sheetName: 'Identificadores',
+        headers: ['Tipo', 'Valor', 'Marca', 'Fuente', 'Vigencia'],
+        rows: [
+          ['Código unificador', identifierCode, null, 'ERP / grupo persistido', 'Vigente'],
+          ...memberSkus.map((sku) => [
+            'Código artículo',
+            sku,
+            null,
+            'Membresía persistida',
+            'Vigente',
+          ]),
+          ...groupHomologs.map((homolog) => [
+            'Código homólogo',
+            homolog.externalCode,
+            homolog.externalBrand,
+            homolog.source === 'import' ? 'Importación' : 'Manual',
+            homolog.active ? approvalLabels[homolog.approvalStatus] : 'Inactivo',
+          ]),
+        ],
+      };
+    }
+    return null;
+  })();
 
   const closeForm = () => {
     setForm(emptyForm);
     setEditingId(null);
+    setEditingUpdatedAt(null);
     setShowForm(false);
   };
 
@@ -151,7 +280,9 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
     setError(null);
     try {
       if (editingId) {
+        if (!editingUpdatedAt) throw new Error('La versión del homólogo no está disponible.');
         await updateHomolog(editingId, {
+          expectedUpdatedAt: editingUpdatedAt,
           externalCode: form.externalCode,
           externalBrand: form.externalBrand,
           approvalStatus: form.approvalStatus,
@@ -176,7 +307,11 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
 
   const setActive = async (item: ExternalHomologDto, active: boolean) => {
     try {
-      await updateHomolog(item.id, { active });
+      if (active) {
+        await updateHomolog(item.id, { expectedUpdatedAt: item.updatedAt, active: true });
+      } else {
+        await deactivateHomolog(item.id, item.updatedAt);
+      }
       setNotice(
         active ? 'Homólogo reactivado.' : 'Homólogo desactivado sin eliminar su historial.',
       );
@@ -219,7 +354,16 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
               />
               Actualizar
             </Button>
-            {canWrite ? (
+            {exportData ? (
+              <TableExportButtons
+                filename={exportData.filename}
+                sheetName={exportData.sheetName}
+                headers={exportData.headers}
+                rows={exportData.rows}
+                disabled={loading || groups.loading}
+              />
+            ) : null}
+            {canWrite && view === 'homologs' ? (
               <Button
                 onClick={() => {
                   closeForm();
@@ -234,17 +378,20 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
         }
       />
       <ScreenGuide
-        objective="Presenta dos relaciones distintas: el código unificador agrupa SKU sin fusionarlos; los homólogos enlazan códigos externos para que la búsqueda los encuentre."
+        objective="El código unificador agrupa SKU sin fusionarlos; homólogos y códigos OEM amplían la búsqueda con relaciones gobernadas."
         actions={[
           'Registra el código, la marca externa y su estado de aprobación.',
           'Desactiva relaciones obsoletas sin borrarlas físicamente.',
-          'Usa la búsqueda de elegibilidad para confirmar qué productos devuelve un código externo.',
+          'Usa las búsquedas de elegibilidad para confirmar qué productos devuelve un homólogo u OEM.',
         ]}
         dataSource="La tabla y la búsqueda se conectan a los endpoints de equivalencias del backend."
-        limitation="La expansión hacia productos solo considera homólogos simultáneamente activos y aprobados."
+        limitation="La expansión solo considera relaciones activas y aprobadas; OEM se limita a grupos automotrices."
       />
 
-      <nav className="mb-5 grid gap-3 sm:grid-cols-3" aria-label="Vistas de equivalencias">
+      <nav
+        className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Vistas de equivalencias"
+      >
         <button
           type="button"
           onClick={() => changeView('groups')}
@@ -282,6 +429,19 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
           </span>
           <small className="mt-1 block text-muted-foreground">
             Código unificador, SKU miembros y códigos externos
+          </small>
+        </button>
+        <button
+          type="button"
+          onClick={() => changeView('oem')}
+          className={`rounded-xl border p-4 text-left ${view === 'oem' ? 'border-primary bg-orange-50/50 ring-1 ring-primary' : 'bg-white'}`}
+        >
+          <strong className="text-sm">Códigos OEM</strong>
+          <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
+            {oemCount ?? '—'}
+          </span>
+          <small className="mt-1 block text-muted-foreground">
+            Fabricante original · solo grupos automotrices
           </small>
         </button>
       </nav>
@@ -351,20 +511,51 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                   </label>
                 </div>
               </div>
+              <ExcelTableFilterBar
+                filteredColumns={groupTable.filteredColumnKeys.map(
+                  (key) => groupTableColumns.find((column) => column.key === key)?.label ?? key,
+                )}
+                sort={
+                  groupTable.sort
+                    ? {
+                        label:
+                          groupTableColumns.find((column) => column.key === groupTable.sort?.key)
+                            ?.label ?? groupTable.sort.key,
+                        direction: groupTable.sort.direction,
+                      }
+                    : undefined
+                }
+                visibleCount={groupTable.visibleRows.length}
+                totalCount={filteredGroups.length}
+                onClear={groupTable.clear}
+              />
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[780px] text-left text-sm">
                   <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                     <tr>
                       {groups.workspace.columns.map((column) => (
-                        <th key={column.key} className="px-4 py-3">
-                          {column.label}
-                        </th>
+                        <ExcelTableHeader
+                          key={column.key}
+                          columnKey={column.key}
+                          label={column.label}
+                          options={groupTable.getValueOptions(column.key)}
+                          selectedValues={groupTable.filters[column.key]}
+                          sortDirection={
+                            groupTable.sort?.key === column.key
+                              ? groupTable.sort.direction
+                              : undefined
+                          }
+                          onFilterChange={(values) =>
+                            groupTable.setColumnFilter(column.key, values)
+                          }
+                          onSort={(direction) => groupTable.setSort(column.key, direction)}
+                        />
                       ))}
                       <th className="px-4 py-3 text-right">Acción</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filteredGroups.map((row) => (
+                    {groupTable.visibleRows.map((row) => (
                       <tr key={row.id} className="hover:bg-orange-50/40">
                         {groups.workspace?.columns.map((column) => (
                           <td key={column.key} className="px-4 py-3">
@@ -382,6 +573,16 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                         </td>
                       </tr>
                     ))}
+                    {groupTable.visibleRows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={groups.workspace.columns.length + 1}
+                          className="px-4 py-10 text-center text-sm text-muted-foreground"
+                        >
+                          Ninguna fila cargada cumple los filtros de columna combinados.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
@@ -524,6 +725,8 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
             description="No hay grupos persistidos para construir el contexto de identificadores."
           />
         )
+      ) : view === 'oem' ? (
+        <OemCodesWorkspace canWrite={canWrite} onCountChange={setOemCount} />
       ) : (
         <>
           {notice ? (
@@ -706,21 +909,52 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
             />
           ) : (
             <Card className="overflow-hidden">
+              <ExcelTableFilterBar
+                filteredColumns={homologTable.filteredColumnKeys.map(
+                  (key) => homologTableColumns.find((column) => column.key === key)?.label ?? key,
+                )}
+                sort={
+                  homologTable.sort
+                    ? {
+                        label:
+                          homologTableColumns.find(
+                            (column) => column.key === homologTable.sort?.key,
+                          )?.label ?? homologTable.sort.key,
+                        direction: homologTable.sort.direction,
+                      }
+                    : undefined
+                }
+                visibleCount={homologTable.visibleRows.length}
+                totalCount={filtered.length}
+                onClear={homologTable.clear}
+              />
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[940px] text-left text-sm">
                   <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                     <tr>
-                      <th className="px-4 py-3">Código unificador</th>
-                      <th className="px-4 py-3">Código externo</th>
-                      <th className="px-4 py-3">Marca</th>
-                      <th className="px-4 py-3">Aprobación</th>
-                      <th className="px-4 py-3">Origen</th>
-                      <th className="px-4 py-3">Estado</th>
+                      {homologTableColumns.map((column) => (
+                        <ExcelTableHeader
+                          key={column.key}
+                          columnKey={column.key}
+                          label={column.label}
+                          options={homologTable.getValueOptions(column.key)}
+                          selectedValues={homologTable.filters[column.key]}
+                          sortDirection={
+                            homologTable.sort?.key === column.key
+                              ? homologTable.sort.direction
+                              : undefined
+                          }
+                          onFilterChange={(values) =>
+                            homologTable.setColumnFilter(column.key, values)
+                          }
+                          onSort={(direction) => homologTable.setSort(column.key, direction)}
+                        />
+                      ))}
                       <th className="px-4 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map((item) => (
+                    {homologTable.visibleRows.map((item) => (
                       <tr key={item.id} className="hover:bg-orange-50/40">
                         <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
                         <td className="px-4 py-3">{item.externalCode}</td>
@@ -755,6 +989,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                                   variant="ghost"
                                   onClick={() => {
                                     setEditingId(item.id);
+                                    setEditingUpdatedAt(item.updatedAt);
                                     setForm({
                                       unifiedCode: item.unifiedCode,
                                       externalCode: item.externalCode,
@@ -794,6 +1029,16 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                         </td>
                       </tr>
                     ))}
+                    {homologTable.visibleRows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="px-4 py-10 text-center text-sm text-muted-foreground"
+                        >
+                          Ninguna fila cumple los filtros de columna combinados.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

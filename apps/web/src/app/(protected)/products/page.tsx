@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { productListQuerySchema, type ProductStatus } from '@cdr/contracts';
 
 import { ProductsCatalog } from '@/components/products-catalog';
+import { getCurrentActor } from '@/lib/server-auth';
 
 export const metadata: Metadata = {
   title: 'Productos',
@@ -26,6 +27,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const initialSearch = parsed.success ? (parsed.data.q ?? '') : '';
   const initialBrand = parsed.success ? (parsed.data.brand ?? '') : '';
   const initialStatus: ProductStatus | '' = parsed.success ? (parsed.data.status ?? '') : '';
+  const actor = await getCurrentActor();
 
   return (
     <ProductsCatalog
@@ -33,6 +35,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       initialSearch={initialSearch}
       initialBrand={initialBrand}
       initialStatus={initialStatus}
+      canEditAttributes={actor?.capabilities.includes('attributes:write') ?? false}
     />
   );
 }

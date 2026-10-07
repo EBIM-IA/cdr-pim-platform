@@ -5,6 +5,7 @@ export interface OpenAiClientOptions {
   readonly apiKey: string;
   readonly baseUrl?: string;
   readonly timeoutMs: number;
+  readonly maxRetries: number;
 }
 
 /**
@@ -18,8 +19,9 @@ export function createOpenAiClient(options: OpenAiClientOptions): OpenAI {
     apiKey: options.apiKey,
     ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
     timeout: options.timeoutMs,
-    // The SDK's own retry, for connection errors and 429/5xx only.
-    maxRetries: 2,
+    // Interactive calls must finish before the BFF deadline. Operators may opt into at
+    // most one retry, but the safe default is zero so a 25s attempt cannot become 75s.
+    maxRetries: options.maxRetries,
   });
 }
 

@@ -1,16 +1,19 @@
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
 
+import { AiController } from '../../src/modules/ai/presentation/ai.controller';
 import { ApplicationsController } from '../../src/modules/applications/presentation/applications.controller';
 import { AuditController } from '../../src/modules/audit/presentation/audit.controller';
 import { CatalogAdministrationController } from '../../src/modules/catalog-schema/presentation/catalog-administration.controller';
 import { DynamicCatalogController } from '../../src/modules/catalog-schema/presentation/dynamic-catalog.controller';
 import { ProductsController } from '../../src/modules/catalog/presentation/products.controller';
+import { CodeAffixesController } from '../../src/modules/code-affixes/presentation/code-affixes.controller';
 import { ExternalHomologsController } from '../../src/modules/equivalences/presentation/external-homologs.controller';
 import { HealthController } from '../../src/modules/health/presentation/health.controller';
 import { AuthController } from '../../src/modules/identity/presentation/auth.controller';
 import { Capability } from '../../src/modules/identity/domain/entities/role';
 import { ImportsController } from '../../src/modules/imports/presentation/imports.controller';
+import { ProductAssetsController } from '../../src/modules/product-assets/presentation/product-assets.controller';
 import { SearchController } from '../../src/modules/search/presentation/search.controller';
 import { WorkspacesController } from '../../src/modules/workspaces/presentation/workspaces.controller';
 import { PUBLIC_ROUTE } from '../../src/shared/http/public.decorator';
@@ -55,7 +58,12 @@ describe('HTTP RBAC policy', () => {
     expect(isPublic(AuditController, 'list')).toBe(false);
     expect(isPublic(CatalogAdministrationController, 'templates')).toBe(false);
     expect(isPublic(DynamicCatalogController, 'grid')).toBe(false);
+    expect(isPublic(CodeAffixesController, 'list')).toBe(false);
+    expect(isPublic(CodeAffixesController, 'parse')).toBe(false);
     expect(isPublic(ExternalHomologsController, 'eligibleSearch')).toBe(false);
+    expect(isPublic(ProductAssetsController, 'list')).toBe(false);
+    expect(isPublic(AiController, 'commercialProposal')).toBe(false);
+    expect(isPublic(AiController, 'extractionCandidates')).toBe(false);
   });
 
   it('requires explicit capabilities for protected reads', () => {
@@ -89,6 +97,12 @@ describe('HTTP RBAC policy', () => {
     expect(requiredCapabilities(DynamicCatalogController, 'productSheet')).toEqual([
       Capability.AttributesRead,
     ]);
+    expect(requiredCapabilities(CodeAffixesController, 'list')).toEqual([
+      Capability.AdministrationManage,
+    ]);
+    expect(requiredCapabilities(CodeAffixesController, 'parse')).toEqual([
+      Capability.AttributesRead,
+    ]);
     expect(requiredCapabilities(ExternalHomologsController, 'list')).toEqual([
       Capability.EquivalencesRead,
     ]);
@@ -96,6 +110,18 @@ describe('HTTP RBAC policy', () => {
       Capability.EquivalencesRead,
     ]);
     expect(requiredCapabilities(ImportsController, 'findOne')).toEqual([Capability.ImportsExecute]);
+    expect(requiredCapabilities(ProductAssetsController, 'list')).toEqual([Capability.CatalogRead]);
+    expect(requiredCapabilities(ProductAssetsController, 'download')).toEqual([
+      Capability.CatalogRead,
+    ]);
+    expect(requiredCapabilities(AiController, 'commercialProposal')).toEqual([
+      Capability.CatalogRead,
+      Capability.AiQualityExecute,
+    ]);
+    expect(requiredCapabilities(AiController, 'extractionCandidates')).toEqual([
+      Capability.CatalogRead,
+      Capability.AiDocumentExtract,
+    ]);
   });
 
   it('uses operation-specific capabilities for mutations', () => {
@@ -115,10 +141,22 @@ describe('HTTP RBAC policy', () => {
       Capability.AttributesWrite,
     ]);
     expect(requiredCapabilities(CatalogAdministrationController, 'patchTemplateAttribute')).toEqual(
-      [Capability.AttributesWrite],
+      [Capability.AdministrationManage],
     );
     expect(requiredCapabilities(DynamicCatalogController, 'patchAttribute')).toEqual([
       Capability.AttributesWrite,
+    ]);
+    expect(requiredCapabilities(CodeAffixesController, 'create')).toEqual([
+      Capability.AdministrationManage,
+    ]);
+    expect(requiredCapabilities(CodeAffixesController, 'update')).toEqual([
+      Capability.AdministrationManage,
+    ]);
+    expect(requiredCapabilities(CodeAffixesController, 'validate')).toEqual([
+      Capability.AdministrationManage,
+    ]);
+    expect(requiredCapabilities(CodeAffixesController, 'deactivate')).toEqual([
+      Capability.AdministrationManage,
     ]);
     expect(requiredCapabilities(ExternalHomologsController, 'create')).toEqual([
       Capability.EquivalencesWrite,
@@ -128,6 +166,15 @@ describe('HTTP RBAC policy', () => {
     ]);
     expect(requiredCapabilities(ImportsController, 'preview')).toEqual([Capability.ImportsExecute]);
     expect(requiredCapabilities(ImportsController, 'confirm')).toEqual([Capability.ImportsExecute]);
+    expect(requiredCapabilities(ProductAssetsController, 'upload')).toEqual([
+      Capability.CatalogWrite,
+    ]);
+    expect(requiredCapabilities(ProductAssetsController, 'bulk')).toEqual([
+      Capability.CatalogWrite,
+    ]);
+    expect(requiredCapabilities(ProductAssetsController, 'remove')).toEqual([
+      Capability.CatalogWrite,
+    ]);
   });
 
   it('reserves the operational skeleton probe for operations administrators', () => {

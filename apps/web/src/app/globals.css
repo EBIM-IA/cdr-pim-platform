@@ -1,17 +1,17 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 :root {
   --background: #ffffff;
   --foreground: #1a1a1a;
   --card: #ffffff;
   --card-foreground: #1a1a1a;
-  --primary: #ff6903;
+  --primary: #ea5b0c;
   --primary-foreground: #ffffff;
   --secondary: #f2f4f7;
   --secondary-foreground: #282b30;
   --muted: #f7f8fa;
   --muted-foreground: #6f7782;
-  --accent: #ff6903;
+  --accent: #ea5b0c;
   --accent-foreground: #ffffff;
   --destructive: #e45858;
   --destructive-foreground: #ffffff;
@@ -38,7 +38,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-cdr-orange: #ff6903;
+  --color-cdr-orange: #ea5b0c;
   --color-cdr-ink: #1a1a1a;
   --color-cdr-green: #20a66a;
   --color-cdr-amber: #d89216;
@@ -64,7 +64,7 @@
   }
 
   ::selection {
-    background: rgba(255, 105, 3, 0.2);
+    background: rgba(234, 91, 12, 0.2);
   }
 
   :focus-visible {

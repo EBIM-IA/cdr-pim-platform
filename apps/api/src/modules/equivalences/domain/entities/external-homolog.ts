@@ -40,12 +40,12 @@ export class ExternalHomolog {
     },
     now: Date,
   ): ExternalHomolog {
-    const externalCode = required(input.externalCode, 'externalCode');
-    const externalBrand = required(input.externalBrand, 'externalBrand');
+    const externalCode = required(input.externalCode, 'externalCode', 160);
+    const externalBrand = required(input.externalBrand, 'externalBrand', 160);
     return new ExternalHomolog({
       id: input.id ?? newUuid(),
       groupId: input.groupId,
-      unifiedCode: required(input.unifiedCode, 'unifiedCode').toUpperCase(),
+      unifiedCode: required(input.unifiedCode, 'unifiedCode', 120).toUpperCase(),
       externalCode,
       externalBrand,
       active: input.active ?? true,
@@ -76,15 +76,23 @@ export class ExternalHomolog {
       externalCode:
         input.externalCode === undefined
           ? this.state.externalCode
-          : required(input.externalCode, 'externalCode'),
+          : required(input.externalCode, 'externalCode', 160),
       externalBrand:
         input.externalBrand === undefined
           ? this.state.externalBrand
-          : required(input.externalBrand, 'externalBrand'),
+          : required(input.externalBrand, 'externalBrand', 160),
       active: input.active ?? this.state.active,
       approvalStatus: input.approvalStatus ?? this.state.approvalStatus,
       updatedAt: now,
     };
+  }
+
+  deactivate(now: Date): void {
+    this.state = { ...this.state, active: false, updatedAt: now };
+  }
+
+  markImported(importBatchId: Uuid, now: Date): void {
+    this.state = { ...this.state, source: 'import', importBatchId, updatedAt: now };
   }
 
   toSnapshot(): ExternalHomologSnapshot {
@@ -92,8 +100,14 @@ export class ExternalHomolog {
   }
 }
 
-function required(value: string, field: string): string {
+function required(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
   if (!normalized) throw new ValidationError(`${field} must not be blank`, { field });
+  if (normalized.length > maxLength) {
+    throw new ValidationError(`${field} must contain at most ${maxLength} characters`, {
+      field,
+      maxLength,
+    });
+  }
   return normalized;
 }

@@ -35,6 +35,7 @@ const batch: ImportBatchDto = {
         model: 'Hilux',
       },
       errors: [],
+      warnings: [],
     },
   ],
   createdAt: '2026-10-05T10:00:00.000Z',
@@ -124,7 +125,7 @@ describe('ImportsWorkspace', () => {
     render(<ImportsWorkspace canExecute />);
 
     fireEvent.click(screen.getByRole('button', { name: /Nueva importación/ }));
-    expect(screen.getByText('Arrastra un archivo CSV o JSON')).toBeInTheDocument();
+    expect(screen.getByText('Arrastra un archivo XLSX, CSV o JSON')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
     expect(screen.getByText('SKU e identidad del lote')).toBeInTheDocument();
@@ -154,5 +155,36 @@ describe('ImportsWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /Nueva importación/ }));
     expect(screen.getByText('Acceso de solo lectura')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Continuar/ })).toBeDisabled();
+  });
+
+  it('offers OEM as its own target with the OEM template instead of the homolog template', () => {
+    render(<ImportsWorkspace canExecute />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Nueva importación/ }));
+    fireEvent.change(screen.getByLabelText('Destino'), { target: { value: 'oem' } });
+
+    expect(screen.getByDisplayValue(/codigo_unificador,codigo_oem,marcas/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/04465-0K240/)).not.toHaveValue(
+      expect.stringContaining('codigo_homologo'),
+    );
+  });
+
+  it('shows persisted row warnings without rejecting an applicable row', async () => {
+    vi.mocked(getImport).mockResolvedValue({
+      ...batch,
+      rows: [
+        {
+          ...batch.rows[0]!,
+          warnings: ['Se ignoró la columna archivo_tecnico: archivo no importable'],
+        },
+      ],
+    });
+    render(<ImportsWorkspace canExecute />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver resultado' }));
+
+    expect(await screen.findByText(/Se ignoró la columna archivo_tecnico/)).toBeInTheDocument();
+    expect(screen.getByText('Advertencia')).toBeInTheDocument();
+    expect(screen.queryByText('Rechazado')).not.toBeInTheDocument();
   });
 });

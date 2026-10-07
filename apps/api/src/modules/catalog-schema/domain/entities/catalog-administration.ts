@@ -18,6 +18,10 @@ export interface AdminCatalogCategory {
   readonly slug: string;
   readonly name: string;
   readonly path: string;
+  readonly application: string | null;
+  readonly sourcePriority: Readonly<
+    Partial<Record<'tecdoc' | 'fabricante' | 'archivo' | 'manual', number>>
+  >;
   readonly position: number;
   readonly active: boolean;
   readonly updatedAt: Date;

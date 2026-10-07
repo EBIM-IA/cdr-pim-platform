@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { aiEnvSchema } from './ai';
+import { aiEnvSchema, resolveAiCapabilityProviders } from './ai';
 import {
   awsEnvSchema,
   baseEnvSchema,
@@ -140,11 +140,21 @@ export const apiEnvSchema = baseEnvSchema
         message: 'is required when STORAGE_DRIVER=s3',
       });
     }
-    if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY) {
+    if (
+      Object.values(resolveAiCapabilityProviders(env)).includes('openai') &&
+      !env.OPENAI_API_KEY
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['OPENAI_API_KEY'],
-        message: 'is required when AI_PROVIDER=openai',
+        message: 'is required when any AI capability provider is openai',
+      });
+    }
+    if (env.OPENAI_TIMEOUT_MS * (env.OPENAI_MAX_RETRIES + 1) > 35_000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OPENAI_TIMEOUT_MS'],
+        message: 'times total attempts must not exceed the 35000ms provider budget',
       });
     }
     // One variable per check, in this exact shape: cdr-pim-infrastructure derives its

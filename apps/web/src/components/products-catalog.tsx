@@ -1,11 +1,14 @@
 'use client';
 
-import type { ProductStatus } from '@cdr/contracts';
+import type {
+  CatalogCategorySummaryDto,
+  CatalogWorkbookResultDto,
+  ProductStatus,
+} from '@cdr/contracts';
 import {
   ChevronLeft,
   ChevronRight,
   Columns3,
-  Download,
   FileUp,
   List as ListIcon,
   PackageSearch,
@@ -13,20 +16,23 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { CatalogWorkbookTable } from '@/components/catalog-workbook-table';
 import { DynamicCatalogSheet } from '@/components/dynamic-catalog-sheet';
 import { ProductArtwork } from '@/components/product-artwork';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
+import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProductsData } from '@/components/use-products-data';
+import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
 import type { Product } from '@/lib/types';
 import { cn, formatNumber, unique } from '@/lib/utils';
 
@@ -98,123 +104,6 @@ function CompletenessMeter({ value, sku }: { value: number | null; sku: string }
         <span className={cn('block h-full rounded-full', tone)} style={{ width: `${value}%` }} />
       </span>
     </div>
-  );
-}
-
-function ProductTable({ products }: { products: Product[] }) {
-  return (
-    <Card className="min-w-0 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-[11px] text-muted-foreground">
-        <div className="flex flex-wrap gap-4">
-          <span>▧ No aplica a la plantilla</span>
-          <span className="text-red-600">□ Obligatorio sin valor</span>
-          <span className="text-orange-600">▌ Editado en esta sesión</span>
-        </div>
-        <span>Consulta del catálogo conectado</span>
-      </div>
-      <div className="scrollbar-thin max-w-full overflow-x-auto">
-        <table className="w-full min-w-[1420px] border-collapse text-left text-xs">
-          <caption className="sr-only">
-            Productos del catálogo con identidad, línea, calidad y estado
-          </caption>
-          <thead className="border-b text-[11px] text-muted-foreground">
-            <tr className="border-b text-[10px] font-extrabold uppercase tracking-[0.06em] text-orange-700">
-              <th colSpan={4} className="bg-orange-50 px-3 py-2.5">
-                Identificación
-              </th>
-              <th colSpan={5} className="border-l bg-orange-50 px-3 py-2.5">
-                Base ERP · solo lectura
-              </th>
-              <th className="bg-slate-50 px-3 py-2.5">
-                <span className="sr-only">Acciones</span>
-              </th>
-            </tr>
-            <tr>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                SKU
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Descripción
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Plantilla
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Estado · completitud
-              </th>
-              <th scope="col" className="border-l px-4 py-3 font-semibold">
-                Código de proveedor
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Código unificador
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Línea
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Tipo de aplicación
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                Marca
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold">
-                <span className="sr-only">Acciones</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {products.map((product) => (
-              <tr key={product.id} className="transition-colors hover:bg-orange-50/45">
-                <td className="whitespace-nowrap px-4 py-3">
-                  <Link
-                    href={`/products/${encodeURIComponent(product.id)}`}
-                    className="font-semibold hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-                  >
-                    {product.sku}
-                  </Link>
-                </td>
-                <td className="max-w-[290px] px-4 py-3 font-medium">
-                  {product.name}
-                  {product.description ? (
-                    <span className="mt-1 line-clamp-1 block text-[10px] font-normal text-muted-foreground">
-                      {product.description}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="px-4 py-3">{product.category}</td>
-                <td className="px-4 py-3">
-                  <StatusBadge tone={statusTone(product.status)}>
-                    {statusLabel(product.status)}
-                  </StatusBadge>
-                  <span className="ml-2 text-[10px] text-muted-foreground">
-                    {product.completeness === null ? 'No medido' : `${product.completeness}%`}
-                  </span>
-                </td>
-                <td className="border-l px-4 py-3 font-mono text-[11px] text-muted-foreground">
-                  {product.providerCode ?? '—'}
-                </td>
-                <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground">
-                  {product.unifiedCode ?? '—'}
-                </td>
-                <td className="px-4 py-3">{product.category}</td>
-                <td className="px-4 py-3">{product.application}</td>
-                <td className="px-4 py-3 font-semibold">{product.brand}</td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
-                  </Button>
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
-                      Editar
-                    </Link>
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
   );
 }
 
@@ -304,10 +193,12 @@ export function ProductsCatalog({
   initialSearch = '',
   initialBrand = '',
   initialStatus = '',
+  canEditAttributes = false,
 }: {
   initialSearch?: string;
   initialBrand?: string;
   initialStatus?: ProductStatus | '';
+  canEditAttributes?: boolean;
 }) {
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
@@ -319,8 +210,28 @@ export function ProductsCatalog({
   const [completeness, setCompleteness] = useState<CompletenessFilter>('');
   const [requestedPage, setRequestedPage] = useState(1);
   const [requestedPageSize, setRequestedPageSize] = useState(25);
-  const [view, setView] = useState<CatalogView>('catalog');
+  const [view, setView] = useState<CatalogView>('table');
   const [urlReady, setUrlReady] = useState(false);
+  const [catalogCategories, setCatalogCategories] = useState<CatalogCategorySummaryDto[]>([]);
+  const [workbookFacets, setWorkbookFacets] = useState<CatalogWorkbookResultDto['facets']>({
+    brands: [],
+    applicationTypes: [],
+    statuses: [],
+  });
+  const updateWorkbookFacets = useCallback((facets: CatalogWorkbookResultDto['facets']) => {
+    setWorkbookFacets(facets);
+    setApplication((current) =>
+      current && !facets.applicationTypes.includes(current) ? '' : current,
+    );
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCatalogCategories(controller.signal)
+      .then(setCatalogCategories)
+      .catch(() => setCatalogCategories([]));
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -384,25 +295,32 @@ export function ProductsCatalog({
   });
 
   const brands = useMemo(
-    () => unique([...products.map((product) => product.brandFilter), brand || undefined]).sort(),
-    [brand, products],
+    () =>
+      unique([
+        ...products.map((product) => product.brandFilter),
+        ...workbookFacets.brands,
+        brand || undefined,
+      ]).sort(),
+    [brand, products, workbookFacets.brands],
   );
   const statuses = useMemo<ProductStatus[]>(
     () =>
       Array.from(
-        new Set([...products.map((product) => product.status), ...(status ? [status] : [])]),
+        new Set([
+          ...products.map((product) => product.status),
+          ...workbookFacets.statuses,
+          ...(status ? [status] : []),
+        ]),
       ).sort(),
-    [products, status],
+    [products, status, workbookFacets.statuses],
   );
-  const categories = useMemo(
-    () => unique(products.map((product) => product.category).filter(availableCatalogValue)).sort(),
-    [products],
-  );
-  const applications = useMemo(
+  const catalogApplications = useMemo(
     () =>
       unique(products.map((product) => product.application).filter(availableCatalogValue)).sort(),
     [products],
   );
+  const applicationOptions =
+    view === 'table' ? workbookFacets.applicationTypes : catalogApplications;
   const hasCompletenessData = products.some((product) => product.completeness !== null);
   const activeFilterCount = [brand, status, family, category, application, completeness].filter(
     Boolean,
@@ -434,29 +352,21 @@ export function ProductsCatalog({
   const visibleTotal = hasClientFilters ? visibleProducts.length : total;
   const visibleFirst = visibleTotal > 0 ? (hasClientFilters ? 1 : firstVisible) : 0;
   const visibleLast = hasClientFilters ? visibleProducts.length : lastVisible;
-
-  const exportVisibleProducts = () => {
-    const escape = (value: string) => `"${value.replace(/"/gu, '""')}"`;
-    const rows = [
-      ['SKU', 'Descripción', 'Marca', 'Estado', 'Código proveedor'],
-      ...visibleProducts.map((product) => [
+  const exportRows = useMemo(
+    () =>
+      visibleProducts.map((product) => [
         product.sku,
         product.name,
         product.brand,
+        product.category,
+        product.application,
         statusLabel(product.status),
-        product.providerCode ?? '',
+        product.completeness,
+        product.providerCode,
+        product.unifiedCode,
       ]),
-    ];
-    const blob = new Blob([rows.map((row) => row.map(escape).join(',')).join('\n')], {
-      type: 'text/csv;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'catalogo-pim.csv';
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
+    [visibleProducts],
+  );
 
   const changeBrand = (value: string) => {
     setBrand(value);
@@ -526,10 +436,25 @@ export function ProductsCatalog({
               <Columns3 aria-hidden="true" className="size-4" />
               Actualización masiva
             </Button>
-            <Button variant="outline" onClick={exportVisibleProducts} disabled={loading}>
-              <Download aria-hidden="true" className="size-4" />
-              Exportar vista (Excel)
-            </Button>
+            {view === 'catalog' ? (
+              <TableExportButtons
+                filename="catalogo-pim-filtrado"
+                sheetName="Productos"
+                headers={[
+                  'SKU',
+                  'Descripción',
+                  'Marca',
+                  'Línea / categoría',
+                  'Aplicación',
+                  'Estado',
+                  'Completitud (%)',
+                  'Código proveedor',
+                  'Código unificador',
+                ]}
+                rows={exportRows}
+                disabled={loading}
+              />
+            ) : null}
           </>
         }
       />
@@ -538,14 +463,14 @@ export function ProductsCatalog({
         objective="Catálogo maestro: reúne los SKU recibidos desde ERP para buscarlos, filtrarlos y abrirlos. El PIM no crea SKU; los enriquece."
         actions={[
           'Busca por SKU, descripción o marca y combina la consulta con los filtros disponibles.',
-          'Alterna entre Catálogo y Tabla; «Actualización masiva» abre la hoja dinámica por plantilla.',
-          'Abre un SKU para revisar su ficha o usa «Actualización masiva» para trabajar por categoría.',
+          'La vista Tabla reúne la unión real de atributos visibles; usa los encabezados para filtrar y ordenar.',
+          'Haz clic en una celda editable y pulsa Enter; «-» vacía un atributo opcional y un blanco no modifica nada.',
         ]}
         dataSource="Los productos, plantillas, columnas, permisos y valores provienen de la API del catálogo. Las búsquedas, filtros y ediciones se ejecutan en el backend."
-        limitation="Las tarjetas y la tabla general son de consulta. La edición se realiza en la hoja de datos, por categoría y solamente sobre atributos habilitados para tu rol."
+        limitation="La tabla se pagina en el backend; filtros de encabezado y exportación operan sobre las filas visibles de la página. Los valores ERP permanecen de solo lectura."
       />
 
-      {view !== 'sheet' ? (
+      {view === 'catalog' ? (
         <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Familias de producto">
           <button
             type="button"
@@ -641,16 +566,20 @@ export function ProductsCatalog({
             <Select
               label="Línea / categoría"
               value={category}
-              disabled={categories.length === 0}
-              title={categories.length === 0 ? 'La API general no expone categoría.' : undefined}
+              disabled={view === 'catalog' || catalogCategories.length === 0}
+              title={
+                view === 'catalog'
+                  ? 'La categoría se aplica a la tabla dinámica.'
+                  : catalogCategories.length === 0
+                    ? 'No hay categorías visibles para tu rol.'
+                    : undefined
+              }
               onChange={(event) => setCategory(event.target.value)}
             >
-              <option value="">
-                {categories.length === 0 ? 'No disponible en API' : 'Todas las categorías'}
-              </option>
-              {categories.map((item) => (
-                <option key={item} value={item}>
-                  {item}
+              <option value="">Todas las categorías</option>
+              {catalogCategories.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
                 </option>
               ))}
             </Select>
@@ -669,18 +598,20 @@ export function ProductsCatalog({
             <Select
               label="Aplicación"
               value={application}
-              disabled={applications.length === 0}
+              disabled={applicationOptions.length === 0}
               title={
-                applications.length === 0
-                  ? 'La API general no expone aplicaciones en el listado.'
+                applicationOptions.length === 0
+                  ? 'No hay aplicaciones activas para el alcance seleccionado.'
                   : undefined
               }
               onChange={(event) => setApplication(event.target.value)}
             >
               <option value="">
-                {applications.length === 0 ? 'No disponible en API' : 'Todas las aplicaciones'}
+                {applicationOptions.length === 0
+                  ? 'Sin aplicaciones activas'
+                  : 'Todas las aplicaciones'}
               </option>
-              {applications.map((item) => (
+              {applicationOptions.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
@@ -701,27 +632,29 @@ export function ProductsCatalog({
             <Select
               label="Completitud"
               value={completeness}
-              disabled={!hasCompletenessData}
+              disabled={view === 'catalog' && !hasCompletenessData}
               title={
-                hasCompletenessData
+                view === 'table' || hasCompletenessData
                   ? undefined
                   : 'El backend todavía no publica completitud en el listado general.'
               }
               onChange={(event) => setCompleteness(event.target.value as CompletenessFilter)}
             >
-              <option value="">{hasCompletenessData ? 'Todas' : 'Indicador no disponible'}</option>
+              <option value="">
+                {view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'}
+              </option>
               <option value="complete">90–100%</option>
               <option value="attention">70–89%</option>
               <option value="critical">Menos de 70%</option>
-              <option value="unavailable">Sin indicador</option>
+              {view === 'catalog' ? <option value="unavailable">Sin indicador</option> : null}
             </Select>
             <Select
               label="Origen del dato"
               value=""
               disabled
-              title="El origen no forma parte del contrato vigente del listado de productos."
+              title="Cada atributo conserva su propia fuente; falta acordar una regla única de origen por SKU."
             >
-              <option value="">No disponible en API</option>
+              <option value="">Pendiente de regla por SKU</option>
             </Select>
             <div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
               <span>Vista</span>
@@ -733,7 +666,12 @@ export function ProductsCatalog({
                 <Button
                   variant={view === 'catalog' ? 'dark' : 'ghost'}
                   size="sm"
-                  onClick={() => setView('catalog')}
+                  onClick={() => {
+                    setCategory('');
+                    setApplication('');
+                    setCompleteness('');
+                    setView('catalog');
+                  }}
                   aria-pressed={view === 'catalog'}
                 >
                   <PackageSearch aria-hidden="true" className="size-4" /> Catálogo
@@ -741,7 +679,12 @@ export function ProductsCatalog({
                 <Button
                   variant={view === 'table' ? 'dark' : 'ghost'}
                   size="sm"
-                  onClick={() => setView('table')}
+                  onClick={() => {
+                    setFamily('');
+                    setApplication('');
+                    setCompleteness('');
+                    setView('table');
+                  }}
                   aria-pressed={view === 'table'}
                 >
                   <ListIcon aria-hidden="true" className="size-4" /> Tabla
@@ -751,9 +694,9 @@ export function ProductsCatalog({
           </div>
 
           <p className="border-t bg-slate-50 px-4 py-2.5 text-[11px] leading-5 text-muted-foreground">
-            Búsqueda, marca y estado se procesan en el backend. Categoría, aplicación y completitud
-            se aplican sobre la página cuando existen; los campos ausentes del contrato permanecen
-            bloqueados.
+            En Tabla, búsqueda, categoría, marca y estado se procesan en el backend; la búsqueda
+            también recorre valores de atributos visibles. Aplicación y completitud pertenecen a la
+            vista Catálogo cuando esos indicadores están disponibles.
           </p>
 
           {searchInput || activeFilterCount ? (
@@ -771,7 +714,8 @@ export function ProductsCatalog({
               ) : null}
               {category ? (
                 <button type="button" className={activeChipClass} onClick={() => setCategory('')}>
-                  {category} <X aria-hidden="true" className="size-3" />
+                  {catalogCategories.find((item) => item.id === category)?.name ?? category}{' '}
+                  <X aria-hidden="true" className="size-3" />
                 </button>
               ) : null}
               {brand ? (
@@ -811,8 +755,28 @@ export function ProductsCatalog({
       )}
 
       {view === 'sheet' ? <DynamicCatalogSheet /> : null}
-      {view !== 'sheet' && loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
-      {view !== 'sheet' && !loading && error ? (
+      {view === 'table' ? (
+        <CatalogWorkbookTable
+          q={debouncedSearch || undefined}
+          brand={brand || undefined}
+          status={status || undefined}
+          categoryId={category || undefined}
+          applicationType={
+            application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL' ? application : undefined
+          }
+          completeness={
+            completeness === 'complete' ||
+            completeness === 'attention' ||
+            completeness === 'critical'
+              ? completeness
+              : undefined
+          }
+          canEdit={canEditAttributes}
+          onFacetsChange={updateWorkbookFacets}
+        />
+      ) : null}
+      {view === 'catalog' && loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
+      {view === 'catalog' && !loading && error ? (
         <StatePanel
           variant="error"
           title="No pudimos cargar los productos"
@@ -821,7 +785,7 @@ export function ProductsCatalog({
           onAction={reload}
         />
       ) : null}
-      {view !== 'sheet' && !loading && !error && visibleProducts.length === 0 ? (
+      {view === 'catalog' && !loading && !error && visibleProducts.length === 0 ? (
         <StatePanel
           variant="empty"
           title={
@@ -837,7 +801,7 @@ export function ProductsCatalog({
         />
       ) : null}
 
-      {view !== 'sheet' && !loading && !error && visibleProducts.length > 0 ? (
+      {view === 'catalog' && !loading && !error && visibleProducts.length > 0 ? (
         <>
           <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold" aria-live="polite">
@@ -850,11 +814,7 @@ export function ProductsCatalog({
             </p>
           </div>
 
-          {view === 'catalog' ? (
-            <ProductCatalogList products={visibleProducts} />
-          ) : (
-            <ProductTable products={visibleProducts} />
-          )}
+          <ProductCatalogList products={visibleProducts} />
 
           <nav
             className="mt-6 flex flex-col gap-4 rounded-xl border bg-slate-50 p-4 sm:flex-row sm:items-end sm:justify-between"

@@ -2,15 +2,21 @@ import {
   type CatalogGridQuery,
   type CatalogGridResultDto,
   type CatalogGridSchemaDto,
+  type CatalogWorkbookQuery,
+  type CatalogWorkbookResultDto,
   type CatalogCategorySummaryDto,
   type ProductAttributeSheetDto,
   type UpdateProductAttributeInput,
+  type UpdateProductAttributesBatchInput,
   type UpdatedProductAttributeDto,
+  type UpdatedProductAttributesBatchDto,
   catalogCategoryListSchema,
   catalogGridResultSchema,
   catalogGridSchemaSchema,
+  catalogWorkbookResultSchema,
   productAttributeSheetSchema,
   updatedProductAttributeSchema,
+  updatedProductAttributesBatchSchema,
 } from '@cdr/contracts';
 import type { ZodType } from 'zod';
 
@@ -86,6 +92,26 @@ export function fetchCatalogGrid(
   return request(`/grid?${params.toString()}`, catalogGridResultSchema, { signal });
 }
 
+export function fetchCatalogWorkbook(
+  query: CatalogWorkbookQuery,
+  signal?: AbortSignal,
+): Promise<CatalogWorkbookResultDto> {
+  const params = new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+  });
+  if (query.categoryId) params.set('categoryId', query.categoryId);
+  if (query.q) params.set('q', query.q);
+  if (query.brand) params.set('brand', query.brand);
+  if (query.status) params.set('status', query.status);
+  if (query.applicationType) params.set('applicationType', query.applicationType);
+  if (query.completeness) params.set('completeness', query.completeness);
+  for (const filter of query.filter) params.append('filter', filter);
+  for (const filter of query.columnFilter ?? []) params.append('columnFilter', filter);
+  if (query.sort) params.set('sort', query.sort);
+  return request(`/workbook?${params.toString()}`, catalogWorkbookResultSchema, { signal });
+}
+
 export function fetchProductAttributeSheet(
   productId: string,
   signal?: AbortSignal,
@@ -93,6 +119,17 @@ export function fetchProductAttributeSheet(
   return request(`/products/${encodeURIComponent(productId)}`, productAttributeSheetSchema, {
     signal,
   });
+}
+
+export function fetchProductTechnicalSheet(
+  productId: string,
+  signal?: AbortSignal,
+): Promise<ProductAttributeSheetDto> {
+  return request(
+    `/products/${encodeURIComponent(productId)}/technical-sheet`,
+    productAttributeSheetSchema,
+    { signal },
+  );
 }
 
 export function patchProductAttribute(
@@ -104,5 +141,17 @@ export function patchProductAttribute(
     `/products/${encodeURIComponent(productId)}/attributes/${encodeURIComponent(attributeKey)}`,
     updatedProductAttributeSchema,
     { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
+export function patchProductAttributes(
+  productId: string,
+  input: UpdateProductAttributesBatchInput,
+  signal?: AbortSignal,
+): Promise<UpdatedProductAttributesBatchDto> {
+  return request(
+    `/products/${encodeURIComponent(productId)}/attributes`,
+    updatedProductAttributesBatchSchema,
+    { method: 'PATCH', body: JSON.stringify(input), signal },
   );
 }

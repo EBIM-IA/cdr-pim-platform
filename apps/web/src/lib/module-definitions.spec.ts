@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { moduleDefinitions, moduleSlugs, type ModuleCapability } from '@/lib/module-definitions';
+import {
+  moduleDefinitions,
+  moduleMenuCapabilities,
+  moduleSlugs,
+  type ModuleCapability,
+} from '@/lib/module-definitions';
 
 const capabilityStatuses: ReadonlySet<ModuleCapability['status']> = new Set([
   'available',
@@ -15,6 +20,11 @@ describe('definiciones de módulos', () => {
   it('mantiene slugs únicos y una definición para cada uno', () => {
     expect(new Set(moduleSlugs).size).toBe(moduleSlugs.length);
     expect(Object.keys(moduleDefinitions).sort()).toEqual([...moduleSlugs].sort());
+  });
+
+  it('declara una capacidad de acceso directo para cada módulo', () => {
+    expect(Object.keys(moduleMenuCapabilities).sort()).toEqual([...moduleSlugs].sort());
+    expect(new Set(Object.values(moduleMenuCapabilities)).size).toBe(moduleSlugs.length);
   });
 
   it.each(moduleSlugs)('mantiene coherente el slug de %s', (slug) => {
@@ -61,7 +71,7 @@ describe('definiciones de módulos', () => {
       expect.objectContaining({ title: 'Elegibilidad de homólogos', status: 'confirmed' }),
     );
     expect(moduleDefinitions.publication.capabilities).toContainEqual(
-      expect.objectContaining({ title: 'Publicabilidad por SKU', status: 'confirmed' }),
+      expect.objectContaining({ title: 'Publicabilidad por SKU', status: 'available' }),
     );
   });
 

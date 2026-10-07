@@ -11,12 +11,12 @@ describe('CatalogAdministrationController authorization', () => {
     ]);
   });
 
-  it('delegates roleAccess enforcement to the application boundary', () => {
+  it('reserves template changes for catalogue administrators', () => {
     expect(
       Reflect.getMetadata(
         REQUIRED_CAPABILITIES,
         CatalogAdministrationController.prototype.patchTemplateAttribute,
       ),
-    ).toBeUndefined();
+    ).toEqual([Capability.AdministrationManage]);
   });
 });

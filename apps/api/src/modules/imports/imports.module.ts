@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 
+import { ApplicationsModule } from '../applications/applications.module';
+import { EquivalencesModule } from '../equivalences/equivalences.module';
+import { CatalogSchemaModule } from '../catalog-schema/catalog-schema.module';
 import { EnqueueProductEmbeddingUseCase } from './application/enqueue-product-embedding.use-case';
 import { EnqueueSkeletonPingUseCase } from './application/enqueue-skeleton-ping.use-case';
 import {
@@ -20,6 +23,7 @@ import { ImportsController } from './presentation/imports.controller';
  * Casa del Rulimán.
  */
 @Module({
+  imports: [ApplicationsModule, CatalogSchemaModule, EquivalencesModule],
   controllers: [ImportsController],
   providers: [
     EnqueueSkeletonPingUseCase,

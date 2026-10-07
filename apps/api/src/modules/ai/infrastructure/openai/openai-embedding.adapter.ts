@@ -28,12 +28,25 @@ export class OpenAiEmbeddingAdapter implements EmbeddingProviderPort {
           input: batch as string[],
           // Explicit: the `text-embedding-3-*` family supports Matryoshka truncation, and
           // the stored `vector(N)` column width is not negotiable at runtime.
-          dimensions: this.dimensions,
+          ...(supportsDimensionParameter(this.model) ? { dimensions: this.dimensions } : {}),
         });
 
         // The API guarantees ordering by `index`, but sorting makes that explicit rather
         // than assumed — a silent reordering would corrupt product/vector association.
-        for (const item of [...response.data].sort((a, b) => a.index - b.index)) {
+        const ordered = [...response.data].sort((a, b) => a.index - b.index);
+        if (
+          ordered.length !== batch.length ||
+          ordered.some((item, position) => item.index !== position)
+        ) {
+          throw new Error('OpenAI returned an incomplete or invalid embedding batch');
+        }
+
+        for (const item of ordered) {
+          if (item.embedding.length !== this.dimensions) {
+            throw new Error(
+              `OpenAI returned ${item.embedding.length} dimensions; expected ${this.dimensions}`,
+            );
+          }
           results.push({
             vector: item.embedding,
             model: response.model,
@@ -46,4 +59,8 @@ export class OpenAiEmbeddingAdapter implements EmbeddingProviderPort {
     }
     return results;
   }
+}
+
+function supportsDimensionParameter(model: string): boolean {
+  return /^text-embedding-3(?:-|$)/u.test(model.toLocaleLowerCase('en'));
 }

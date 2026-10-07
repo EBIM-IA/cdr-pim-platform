@@ -26,13 +26,14 @@ import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspaceData } from '@/components/use-workspace-data';
 import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
 import { formatWorkspaceCell, formatWorkspaceMetric } from '@/lib/workspace-view';
 import { cn } from '@/lib/utils';
+import { readFirstXlsxWorksheet } from '@/lib/xlsx-import';
+import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
 
 const wizardSteps = ['Archivo', 'SKU y plantilla', 'Mapeo', 'Validación', 'Confirmación'] as const;
 
@@ -40,14 +41,16 @@ const targetLabels: Record<ImportTarget, string> = {
   category: 'Atributos por categoría',
   applications: 'Aplicaciones por código unificador',
   homologs: 'Homólogos externos',
+  oem: 'Códigos OEM por grupo automotriz',
 };
 
 const csvExamples: Record<ImportTarget, string> = {
-  category: 'sku,diametro_interior,material\n6202-2RSR-L038-C3,15,acero',
+  category: 'sku,descripcion_tecnica\nD1672,Descripción técnica actualizada por importación',
   applications:
     'unifiedCode,vehicleType,make,model,yearFrom,yearTo,engine\nD1672,Automóvil,Toyota,Hilux,2016,2024,2.8',
   homologs:
-    'unifiedCode,externalCode,externalBrand,approvalStatus,active\nD1672,OEM-123,BOSCH,approved,true',
+    'codigo_unificador,codigo_homologo,marca_homologo,estado_aprobacion,activo\nD1672,P-123,BOSCH,approved,true',
+  oem: 'codigo_unificador,codigo_oem,marcas,estado_aprobacion,activo\nD1672,04465-0K240,TOYOTA;LEXUS,approved,true',
 };
 
 type ImportMode = 'history' | 'new' | 'result';
@@ -58,11 +61,7 @@ function newKey(target: ImportTarget): string {
 
 function sourceColumns(payload: string, format: ImportFormat): string[] {
   if (format === 'csv') {
-    return (payload.split(/\r?\n/, 1)[0] ?? '')
-      .split(',')
-      .map((column) => column.trim())
-      .filter(Boolean)
-      .slice(0, 20);
+    return csvHeaderColumns(payload).slice(0, 20);
   }
   try {
     const value: unknown = JSON.parse(payload);
@@ -71,6 +70,45 @@ function sourceColumns(payload: string, format: ImportFormat): string[] {
   } catch {
     return [];
   }
+}
+
+function csvHeaderColumns(payload: string): string[] {
+  const columns: string[] = [];
+  const delimiter = detectCsvDelimiter(payload);
+  let value = '';
+  let quoted = false;
+  for (let index = 0; index < payload.length; index += 1) {
+    const char = payload[index] as string;
+    if (char === '"') {
+      if (quoted && payload[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else quoted = !quoted;
+    } else if (!quoted && char === delimiter) {
+      columns.push(value.trim());
+      value = '';
+    } else if (!quoted && (char === '\n' || char === '\r')) {
+      break;
+    } else value += char;
+  }
+  columns.push(value.trim());
+  return columns.filter(Boolean);
+}
+
+function detectCsvDelimiter(payload: string): ',' | ';' {
+  let quoted = false;
+  let commas = 0;
+  let semicolons = 0;
+  for (let index = 0; index < payload.length; index += 1) {
+    const char = payload[index];
+    if (char === '"') {
+      if (quoted && payload[index + 1] === '"') index += 1;
+      else quoted = !quoted;
+    } else if (!quoted && (char === '\n' || char === '\r')) break;
+    else if (!quoted && char === ',') commas += 1;
+    else if (!quoted && char === ';') semicolons += 1;
+  }
+  return semicolons > commas ? ';' : ',';
 }
 
 function localRowEstimate(payload: string, format: ImportFormat): number | null {
@@ -84,10 +122,11 @@ function localRowEstimate(payload: string, format: ImportFormat): number | null 
 }
 
 function BatchMetrics({ batch, result = false }: { batch: ImportBatchDto; result?: boolean }) {
+  const warningRows = batch.rows.filter((row) => row.warnings.length > 0).length;
   const items = [
     ['Registros procesados', batch.totalRows, `Lote ${batch.id.slice(0, 8)}`, FileSpreadsheet],
     [result ? 'Aplicables' : 'Válidos', batch.validRows, targetLabels[batch.target], CheckCircle2],
-    ['Advertencias', 0, 'El contrato actual no distingue advertencias', Clock3],
+    ['Advertencias', warningRows, 'Filas aplicables con avisos', Clock3],
     ['Rechazados', batch.invalidRows, 'Requieren corrección', XCircle],
   ] as const;
   return (
@@ -142,7 +181,12 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
         </thead>
         <tbody className="divide-y">
           {batch.rows.map((row) => {
-            const identifier = row.data.sku ?? row.data.unifiedCode ?? row.data.externalCode ?? '—';
+            const identifier =
+              row.data.sku ??
+              row.data.unifiedCode ??
+              row.data.externalCode ??
+              row.data.oemCode ??
+              '—';
             return (
               <tr key={row.rowNumber} className={row.valid ? '' : 'bg-red-50/50'}>
                 <td className="px-4 py-3 font-semibold">{row.rowNumber}</td>
@@ -151,11 +195,23 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
                   {columns.join(', ') || '—'}
                 </td>
                 <td className={cn('px-4 py-3 text-xs', !row.valid && 'text-red-700')}>
-                  {row.errors.join(' · ') || 'Sin observaciones'}
+                  {row.errors.length > 0 ? (
+                    row.errors.join(' · ')
+                  ) : row.warnings.length > 0 ? (
+                    <span className="text-amber-700">{row.warnings.join(' · ')}</span>
+                  ) : (
+                    'Sin observaciones'
+                  )}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge tone={row.valid ? 'success' : 'danger'}>
-                    {row.valid ? 'Correcto' : 'Rechazado'}
+                  <StatusBadge
+                    tone={row.valid ? (row.warnings.length > 0 ? 'warning' : 'success') : 'danger'}
+                  >
+                    {row.valid
+                      ? row.warnings.length > 0
+                        ? 'Advertencia'
+                        : 'Correcto'
+                      : 'Rechazado'}
                   </StatusBadge>
                 </td>
               </tr>
@@ -202,6 +258,9 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [target, setTarget] = useState<ImportTarget>('applications');
   const [format, setFormat] = useState<ImportFormat>('csv');
   const [categoryCode, setCategoryCode] = useState('');
+  const [categoryOptions, setCategoryOptions] = useState<
+    { id: string; slug: string; name: string }[]
+  >([]);
   const [payload, setPayload] = useState(csvExamples.applications);
   const [fileName, setFileName] = useState('aplicaciones.csv');
   const [idempotencyKey, setIdempotencyKey] = useState(() => newKey('applications'));
@@ -210,6 +269,17 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ImportMode>('history');
   const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCatalogCategories(controller.signal)
+      .then((categories) => {
+        setCategoryOptions(categories);
+        setCategoryCode((current) => current || categories[0]?.slug || '');
+      })
+      .catch(() => setCategoryOptions([]));
+    return () => controller.abort();
+  }, []);
   const [resultId, setResultId] = useState('');
   const history = useWorkspaceData('imports');
 
@@ -304,12 +374,28 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
       setError('El archivo supera el límite de 2 MB para esta vista previa.');
       return;
     }
-    setPayload(await file.text());
-    setFileName(file.name);
-    setFormat(file.name.toLocaleLowerCase().endsWith('.json') ? 'json' : 'csv');
-    setIdempotencyKey(newKey(target));
-    setBatch(null);
-    setError(null);
+    try {
+      const lowerName = file.name.toLocaleLowerCase();
+      const nextFormat: ImportFormat =
+        lowerName.endsWith('.json') || lowerName.endsWith('.xlsx') ? 'json' : 'csv';
+      const nextPayload = lowerName.endsWith('.xlsx')
+        ? JSON.stringify(await readFirstXlsxWorksheet(file))
+        : await file.text();
+      if (new TextEncoder().encode(nextPayload).byteLength > 2_000_000) {
+        setError('La primera hoja supera el límite de 2 MB después de convertirla a JSON.');
+        return;
+      }
+      setPayload(nextPayload);
+      setFileName(file.name);
+      setFormat(nextFormat);
+      setIdempotencyKey(newKey(target));
+      setBatch(null);
+      setError(null);
+    } catch (fileError) {
+      setError(fileError instanceof Error ? fileError.message : 'No fue posible leer el archivo.');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const validatePreview = async (): Promise<ImportBatchDto | null> => {
@@ -426,11 +512,11 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
             : [
                 'Selecciona el archivo y su destino.',
                 'Revisa columnas, identidad y validación por fila.',
-                'Confirma únicamente un lote completamente válido.',
+                'Confirma las filas válidas y corrige después las filas rechazadas.',
               ]
         }
         dataSource="La vista previa, idempotencia, filas y confirmación se almacenan en el backend."
-        limitation="Confirmar conserva el lote; aplicar sus filas al catálogo sigue dependiendo del worker transaccional pendiente."
+        limitation="La confirmación es parcial por fila para todos los destinos: las filas válidas se persisten y las rechazadas conservan su detalle. En atributos por categoría solo se aceptan SKU existentes, una categoría con plantilla activa y columnas importables para tu rol."
       />
 
       {error ? (
@@ -580,6 +666,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       <option value="category">Atributos por categoría</option>
                       <option value="applications">Aplicaciones</option>
                       <option value="homologs">Homólogos</option>
+                      <option value="oem">Códigos OEM</option>
                     </Select>
                     <Select
                       label="Formato"
@@ -594,7 +681,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   <label className="grid min-h-40 cursor-pointer place-items-center rounded-xl border border-dashed bg-slate-50 p-6 text-center">
                     <span>
                       <UploadCloud className="mx-auto size-9 text-primary" aria-hidden="true" />
-                      <strong className="mt-3 block">Arrastra un archivo CSV o JSON</strong>
+                      <strong className="mt-3 block">Arrastra un archivo XLSX, CSV o JSON</strong>
                       <small className="mt-1 block text-muted-foreground">
                         Máximo 2 MB · el archivo no crea ni activa SKU.
                       </small>
@@ -604,7 +691,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     </span>
                     <input
                       type="file"
-                      accept=".csv,.json,text/csv,application/json"
+                      accept=".xlsx,.csv,.json,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       disabled={!canExecute}
                       onChange={(event) => void loadFile(event)}
                       className="sr-only"
@@ -663,15 +750,23 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   <Card className="p-4 shadow-none">
                     <h3 className="font-semibold">Plantilla / destino</h3>
                     {target === 'category' ? (
-                      <label className="mt-4 grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                        Código de categoría
-                        <Input
-                          required
-                          value={categoryCode}
-                          disabled={!canExecute}
-                          onChange={(event) => setCategoryCode(event.target.value)}
-                        />
-                      </label>
+                      <Select
+                        label="Categoría con plantilla activa"
+                        className="mt-4"
+                        required
+                        value={categoryCode}
+                        disabled={!canExecute || categoryOptions.length === 0}
+                        onChange={(event) => setCategoryCode(event.target.value)}
+                      >
+                        <option value="" disabled>
+                          Selecciona una categoría
+                        </option>
+                        {categoryOptions.map((category) => (
+                          <option key={category.id} value={category.slug}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </Select>
                     ) : (
                       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                         El destino se determina por el tipo de relación y el código unificador
@@ -753,7 +848,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   <div className="border-b p-5">
                     <h3 className="font-semibold">Confirmar procesamiento</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      La confirmación conserva el lote validado.
+                      La confirmación aplica las filas válidas de aplicaciones, homólogos o códigos
+                      OEM y conserva las rechazadas para corregirlas.
                     </p>
                   </div>
                   <dl className="grid gap-0 divide-y p-5 text-sm">
@@ -775,8 +871,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     ))}
                   </dl>
                   <div className="border-t bg-amber-50 p-4 text-xs leading-relaxed text-amber-950">
-                    Confirmar no significa que los datos ya fueron aplicados al catálogo: el worker
-                    transaccional continúa pendiente.
+                    La carga es parcial: solo las filas marcadas como correctas se aplican. Conserva
+                    el resultado para corregir y volver a cargar las filas rechazadas.
                   </div>
                 </Card>
               ) : null}
@@ -807,7 +903,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
               ) : (
                 <Button
                   onClick={() => void confirm()}
-                  disabled={!canExecute || loading || !batch || batch.invalidRows > 0}
+                  disabled={!canExecute || loading || !batch || batch.validRows === 0}
                 >
                   <FileCheck2 className="size-4" aria-hidden="true" />{' '}
                   {loading ? 'Confirmando…' : 'Confirmar lote'}
@@ -847,7 +943,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                 {batch.status === 'previewed' ? (
                   <Button
                     onClick={() => void confirm()}
-                    disabled={!canExecute || loading || batch.invalidRows > 0}
+                    disabled={!canExecute || loading || batch.validRows === 0}
                   >
                     {loading ? 'Confirmando…' : 'Confirmar lote'}
                   </Button>

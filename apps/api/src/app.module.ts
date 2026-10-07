@@ -9,6 +9,7 @@ import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CatalogSchemaModule } from './modules/catalog-schema/catalog-schema.module';
+import { CodeAffixesModule } from './modules/code-affixes/code-affixes.module';
 import { EquivalencesModule } from './modules/equivalences/equivalences.module';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from './modules/identity/presentation/guards/jwt-auth.gu
 import { RolesGuard } from './modules/identity/presentation/guards/roles.guard';
 import { ImportsModule } from './modules/imports/imports.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { ProductAssetsModule } from './modules/product-assets/product-assets.module';
 import { SearchModule } from './modules/search/search.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
 import { ConfigModule } from './shared/config/config.module';
@@ -111,12 +113,14 @@ import { API_ENV } from './shared/tokens';
     IdentityModule,
     CatalogModule,
     CatalogSchemaModule,
+    CodeAffixesModule,
     ApplicationsModule,
     EquivalencesModule,
     AiModule,
     SearchModule,
     ImportsModule,
     IntegrationsModule,
+    ProductAssetsModule,
     WorkspacesModule,
   ],
   providers: [

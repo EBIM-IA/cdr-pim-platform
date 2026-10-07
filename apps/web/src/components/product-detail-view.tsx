@@ -5,11 +5,14 @@ import type {
   CatalogAttributeValue,
   CatalogGridColumnDto,
   ExternalHomologDto,
+  GroupOemCodeDto,
   GroupApplicationDto,
   ProductAttributeSheetDto,
+  ProductAssetDto,
+  ProductAssetType,
 } from '@cdr/contracts';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -23,6 +26,7 @@ import {
   Pencil,
   Ruler,
   Save,
+  UploadCloud,
   X,
 } from 'lucide-react';
 
@@ -30,24 +34,62 @@ import { ProductArtwork } from '@/components/product-artwork';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
+import { TechnicalSheetPreview } from '@/components/technical-sheet-preview';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CatalogApiError, fetchProduct } from '@/lib/catalog-api';
 import {
   DynamicCatalogApiError,
   fetchProductAttributeSheet,
-  patchProductAttribute,
+  fetchProductTechnicalSheet,
+  patchProductAttributes,
 } from '@/lib/dynamic-catalog-api';
-import { listApplications, listAuditChanges, listHomologs } from '@/lib/operational-api';
+import {
+  listApplications,
+  listAuditChanges,
+  listHomologs,
+  listOemCodes,
+} from '@/lib/operational-api';
 import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
+import {
+  listProductAssets,
+  productAssetDownloadUrl,
+  uploadProductAsset,
+} from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
 import { displayMeasurement, type MeasurementSystem } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
 type DetailTab =
   'technical' | 'applications' | 'equivalences' | 'documents' | 'sources' | 'history';
+
+const UNIT_PREFERENCE_KEY = 'cdr:product-detail:measurement-system';
+const DETAIL_ASSET_TYPES: ReadonlyArray<{
+  value: ProductAssetType;
+  label: string;
+  accept: string;
+}> = [
+  { value: 'FT', label: 'Ficha técnica', accept: '.pdf,application/pdf' },
+  { value: 'MSDS', label: 'Ficha de seguridad', accept: '.pdf,application/pdf' },
+  {
+    value: 'CERT',
+    label: 'Certificado',
+    accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',
+  },
+  {
+    value: 'PLANO',
+    label: 'Plano',
+    accept: '.pdf,.png,.jpg,.jpeg,.dwg,application/pdf,image/png,image/jpeg',
+  },
+  {
+    value: 'FOTO',
+    label: 'Fotografía',
+    accept: '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp',
+  },
+];
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Database }> = [
   { id: 'technical', label: 'Información técnica', icon: Database },
@@ -85,20 +127,22 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-function attributeInputValue(value: CatalogAttributeValue | undefined): string {
-  if (value === undefined) return '';
+function attributeInputValue(value: CatalogAttributeValue | null | undefined): string {
+  if (value === null || value === undefined) return '';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return String(value);
 }
 
-function parsedAttributeValue(column: CatalogGridColumnDto, value: string): CatalogAttributeValue {
+function parsedAttributeValue(
+  column: CatalogGridColumnDto,
+  value: string,
+): CatalogAttributeValue | null {
+  if (!value.trim() || value.trim() === '-') {
+    if (column.required) throw new Error(`${column.label} es obligatorio.`);
+    return null;
+  }
   if (column.dataType === 'boolean') return value === 'true';
   if (column.dataType === 'number' || column.dataType === 'measurement') {
-    if (!value.trim()) {
-      throw new Error(
-        `${column.label} no puede quedar vacío porque el contrato actual no admite valores nulos.`,
-      );
-    }
     const parsed = Number(value.replace(',', '.'));
     if (!Number.isFinite(parsed))
       throw new Error(`${column.label} debe contener un número válido.`);
@@ -172,17 +216,19 @@ function EnrichmentDrawer({
           throw new Error(`${column.label} es obligatorio.`);
         }
       }
-      const results = [];
-      for (const column of changes) {
-        const current = sheet.product.attributes[column.key];
-        results.push(
-          await patchProductAttribute(sheet.product.id, column.key, {
+      const result = await patchProductAttributes(sheet.product.id, {
+        updates: changes.map((column) => {
+          const current = sheet.product.attributes[column.key];
+          return {
+            attributeKey: column.key,
             value: parsedAttributeValue(column, values[column.key] ?? ''),
             expectedVersion: current?.version ?? 0,
-          }),
-        );
-      }
-      onSaved(new Set(results.flatMap((result) => result.replicatedProductIds)).size);
+          };
+        }),
+      });
+      onSaved(
+        new Set(result.attributes.flatMap((attribute) => attribute.replicatedProductIds)).size,
+      );
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -699,6 +745,8 @@ function EquivalencesPanel({
   sheet,
   unifiedCode,
   homologs,
+  oemCodes,
+  oemError,
   loading,
   error,
 }: {
@@ -706,6 +754,8 @@ function EquivalencesPanel({
   sheet: ProductAttributeSheetDto | null;
   unifiedCode?: string;
   homologs: ExternalHomologDto[];
+  oemCodes: GroupOemCodeDto[];
+  oemError: string | null;
   loading: boolean;
   error: string | null;
 }) {
@@ -748,6 +798,9 @@ function EquivalencesPanel({
   const identifiers = sheetIdentifiers.length > 0 ? sheetIdentifiers : fallbackIdentifiers;
   const eligibleHomologs = homologs.filter(
     (homolog) => homolog.active && homolog.approvalStatus === 'approved',
+  );
+  const eligibleOemCodes = oemCodes.filter(
+    (oem) => oem.active && oem.approvalStatus === 'approved',
   );
 
   return (
@@ -851,52 +904,124 @@ function EquivalencesPanel({
           </div>
         )}
       </Card>
+
+      <Card className="overflow-hidden xl:col-span-2">
+        <CardHeader>
+          <CardTitle>
+            Códigos OEM del código unificador {unifiedCode ?? '—'} · {eligibleOemCodes.length}
+          </CardTitle>
+          <CardDescription>
+            Referencias de fabricante original heredadas por el grupo automotriz. Solo se muestran
+            relaciones activas y aprobadas.
+          </CardDescription>
+        </CardHeader>
+        {oemError ? (
+          <div className="px-6 pb-6">
+            <StatePanel
+              variant="error"
+              title="No pudimos cargar los códigos OEM"
+              description={oemError}
+            />
+          </div>
+        ) : eligibleOemCodes.length === 0 ? (
+          <div className="px-6 pb-6">
+            <StatePanel
+              variant="empty"
+              title="Sin códigos OEM elegibles"
+              description="Este código unificador no tiene referencias OEM activas y aprobadas."
+            />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] text-left text-sm">
+              <thead className="border-y bg-slate-50 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Código OEM</th>
+                  <th className="px-4 py-3">Marcas</th>
+                  <th className="px-4 py-3">Fuente</th>
+                  <th className="px-4 py-3">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {eligibleOemCodes.map((oem) => (
+                  <tr key={oem.id}>
+                    <td className="px-4 py-3 font-mono text-xs">{oem.oemCode}</td>
+                    <td className="px-4 py-3 font-semibold">{oem.brands.join(', ')}</td>
+                    <td className="px-4 py-3">
+                      {oem.source === 'import' ? 'Importación' : 'Manual'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge tone="success">Activo · aprobado</StatusBadge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
 
-function DocumentsPanel({
-  product,
-  sheet,
-}: {
-  product: Product;
-  sheet: ProductAttributeSheetDto | null;
-}) {
-  const assetPattern = /ficha|plano|document|archivo|fotograf|foto|imagen|manual|certific/i;
-  const sheetAssets = sheet
-    ? sheet.schema.columns
-        .filter((column) => assetPattern.test(`${column.key} ${column.label}`))
-        .map((column) => ({
-          key: column.key,
-          label: column.label,
-          value: sheet.product.attributes[column.key]?.value,
-          source: sheet.product.attributes[column.key]?.source ?? null,
-          kind: /foto|imagen/i.test(`${column.key} ${column.label}`) ? 'Imagen' : 'Documento',
-          required: column.required,
-        }))
-    : [];
-  const documents =
-    sheetAssets.length > 0
-      ? sheetAssets
-      : product.attributes
-          .filter((attribute) => assetPattern.test(`${attribute.key} ${attribute.label}`))
-          .map((attribute) => ({
-            key: attribute.key,
-            label: attribute.label,
-            value: attribute.rawValue,
-            source: null,
-            kind: /foto|imagen/i.test(`${attribute.key} ${attribute.label}`)
-              ? 'Imagen'
-              : 'Documento',
-            required: false,
-          }));
+function DocumentsPanel({ product, canWrite }: { product: Product; canWrite: boolean }) {
+  const [assets, setAssets] = useState<ProductAssetDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [assetType, setAssetType] = useState<ProductAssetType>('FT');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  if (documents.length === 0) {
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    void listProductAssets({ productId: product.id }, controller.signal)
+      .then(setAssets)
+      .catch((requestError: unknown) => {
+        if (requestError instanceof Error && requestError.name === 'AbortError') return;
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : 'No fue posible consultar los activos.',
+        );
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [product.id, revision]);
+
+  const upload = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    setUploadNotice(null);
+    try {
+      const uploaded = await uploadProductAsset({ productId: product.id, type: assetType, file });
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = '';
+      setUploadNotice(`${uploaded.filename} quedó asociado a ${product.sku}.`);
+      setRevision((current) => current + 1);
+    } catch (requestError) {
+      setUploadError(
+        requestError instanceof Error ? requestError.message : 'No fue posible subir el activo.',
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (loading) return <Skeleton className="h-64 rounded-xl" aria-label="Cargando activos" />;
+  if (error) {
     return (
       <StatePanel
-        variant="empty"
-        title="Sin documentos asociados"
-        description="No se recibieron fichas, planos ni archivos técnicos en la respuesta actual de la API."
+        variant="error"
+        title="No fue posible consultar los activos"
+        description={error}
       />
     );
   }
@@ -905,64 +1030,99 @@ function DocumentsPanel({
     <Card>
       <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>Imágenes y documentos · {documents.length}</CardTitle>
+          <CardTitle>Imágenes y documentos · {assets.length}</CardTitle>
           <CardDescription>
-            Activos definidos por la plantilla activa y valores registrados para este SKU.
+            Archivos persistidos en el storage privado y asociados a {product.sku}.
           </CardDescription>
         </div>
-        <Button type="button" variant="outline" disabled title="Carga de archivos no disponible">
-          Gestionar activos
+        <Button asChild type="button" variant="outline">
+          <Link href={`/documents?productId=${encodeURIComponent(product.id)}`}>
+            {canWrite ? 'Gestionar activos' : 'Ver todos los activos'}
+          </Link>
         </Button>
       </CardHeader>
-      <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {documents.map((document) => (
-          <div
-            key={document.key}
-            className={cn(
-              'flex min-w-0 items-start gap-3 rounded-lg border p-4',
-              document.value === undefined || document.value === null || document.value === ''
-                ? 'border-dashed bg-slate-50'
-                : 'bg-white',
-            )}
+      <CardContent>
+        {canWrite ? (
+          <form
+            className="mb-5 grid gap-3 rounded-lg border bg-slate-50 p-4 md:grid-cols-[220px_minmax(0,1fr)_auto] md:items-end"
+            onSubmit={upload}
           >
-            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-orange-50 text-primary">
-              <FileText aria-hidden="true" className="size-5" />
-            </div>
-            <div className="min-w-0">
-              <strong className="block text-sm">
-                {document.label}
-                {document.required ? <span className="ml-1 text-primary">*</span> : null}
-              </strong>
-              <span className="mt-1 block text-[10px] uppercase tracking-wide text-muted-foreground">
-                {document.kind}
-                {document.source ? ` · ${document.source}` : ''}
-              </span>
-              {typeof document.value === 'string' && /^https?:\/\//i.test(document.value) ? (
-                <a
-                  className="mt-2 block break-all text-xs font-semibold text-primary hover:underline"
-                  href={document.value}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Abrir activo
-                </a>
-              ) : (
-                <span className="mt-2 block break-all text-xs text-muted-foreground">
-                  {document.value === undefined || document.value === null || document.value === ''
-                    ? document.required
-                      ? 'Obligatorio pendiente'
-                      : 'Sin archivo registrado'
-                    : String(document.value)}
-                </span>
-              )}
-            </div>
+            <Select
+              label="Tipo de activo"
+              value={assetType}
+              onChange={(event) => {
+                setAssetType(event.target.value as ProductAssetType);
+                setFile(null);
+                setUploadError(null);
+                setUploadNotice(null);
+                if (fileInput.current) fileInput.current.value = '';
+              }}
+            >
+              {DETAIL_ASSET_TYPES.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.value} · {entry.label}
+                </option>
+              ))}
+            </Select>
+            <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+              Archivo individual
+              <input
+                ref={fileInput}
+                type="file"
+                accept={DETAIL_ASSET_TYPES.find((entry) => entry.value === assetType)?.accept}
+                className="h-11 rounded-md border bg-white p-1.5 text-xs file:mr-3 file:rounded file:border-0 file:bg-orange-50 file:px-3 file:py-1.5 file:font-semibold file:text-primary"
+                onChange={(event) => {
+                  setFile(event.target.files?.[0] ?? null);
+                  setUploadError(null);
+                  setUploadNotice(null);
+                }}
+                required
+              />
+            </label>
+            <Button type="submit" disabled={!file || uploading}>
+              <UploadCloud aria-hidden="true" className="size-4" />
+              {uploading ? 'Subiendo…' : 'Subir al SKU'}
+            </Button>
+            {uploadNotice ? (
+              <p className="text-xs text-emerald-700 md:col-span-3" role="status">
+                {uploadNotice}
+              </p>
+            ) : null}
+            {uploadError ? (
+              <p className="text-xs text-red-700 md:col-span-3" role="alert">
+                {uploadError}
+              </p>
+            ) : null}
+          </form>
+        ) : null}
+        {assets.length === 0 ? (
+          <p className="rounded-lg border border-dashed bg-slate-50 p-5 text-sm text-muted-foreground">
+            Este SKU no tiene imágenes ni documentos registrados.
+          </p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {assets.map((asset) => (
+              <a
+                key={asset.id}
+                href={productAssetDownloadUrl(asset.id)}
+                className="flex min-w-0 items-start gap-3 rounded-lg border p-4 transition hover:border-orange-300 hover:bg-orange-50/30"
+              >
+                <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-orange-50 text-primary">
+                  <FileText aria-hidden="true" className="size-5" />
+                </div>
+                <div className="min-w-0">
+                  <strong className="block truncate text-sm">{asset.filename}</strong>
+                  <span className="mt-1 block text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {asset.type} · {asset.kind === 'image' ? 'Imagen' : 'Documento'} ·{' '}
+                    {(asset.size / 1024).toFixed(1)} KB
+                  </span>
+                  <span className="mt-2 block text-xs font-semibold text-primary">Descargar</span>
+                </div>
+              </a>
+            ))}
           </div>
-        ))}
+        )}
       </CardContent>
-      <p className="mx-6 mb-6 rounded-lg bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-900">
-        La carga binaria todavía no forma parte del contrato del backend. La pantalla consulta y
-        muestra únicamente activos realmente registrados; no simula archivos.
-      </p>
     </Card>
   );
 }
@@ -1078,16 +1238,26 @@ function HistoryPanel({
   );
 }
 
-export function ProductDetailView({ productId }: { productId: string }) {
+export function ProductDetailView({
+  productId,
+  canWriteAssets = false,
+}: {
+  productId: string;
+  canWriteAssets?: boolean;
+}) {
   const [product, setProduct] = useState<Product | null>(null);
   const [attributeSheet, setAttributeSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [attributeSheetError, setAttributeSheetError] = useState<string | null>(null);
+  const [technicalSheet, setTechnicalSheet] = useState<ProductAttributeSheetDto | null>(null);
+  const [technicalSheetError, setTechnicalSheetError] = useState<string | null>(null);
   const [applications, setApplications] = useState<GroupApplicationDto[]>([]);
   const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [homologs, setHomologs] = useState<ExternalHomologDto[]>([]);
   const [homologsError, setHomologsError] = useState<string | null>(null);
   const [homologsLoading, setHomologsLoading] = useState(false);
+  const [oemCodes, setOemCodes] = useState<GroupOemCodeDto[]>([]);
+  const [oemError, setOemError] = useState<string | null>(null);
   const [auditChanges, setAuditChanges] = useState<AuditChangeDto[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -1098,7 +1268,26 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const [activeTab, setActiveTab] = useState<DetailTab>('technical');
   const [unitSystem, setUnitSystem] = useState<MeasurementSystem>('metric');
   const [editOpen, setEditOpen] = useState(false);
+  const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const preference = window.sessionStorage.getItem(UNIT_PREFERENCE_KEY);
+      if (preference === 'metric' || preference === 'imperial') setUnitSystem(preference);
+    } catch {
+      // The preference is optional; private browsing must not break the product sheet.
+    }
+  }, []);
+
+  const changeUnitSystem = useCallback((system: MeasurementSystem) => {
+    setUnitSystem(system);
+    try {
+      window.sessionStorage.setItem(UNIT_PREFERENCE_KEY, system);
+    } catch {
+      // Keep the current view usable when session storage is unavailable.
+    }
+  }, []);
 
   useEffect(() => {
     if (!attributeSheet) return;
@@ -1120,9 +1309,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
     void Promise.allSettled([
       fetchProduct(productId, controller.signal),
       fetchProductAttributeSheet(productId, controller.signal),
+      fetchProductTechnicalSheet(productId, controller.signal),
       listAuditChanges({ resourceId: productId, page: 1, pageSize: 100 }, controller.signal),
     ])
-      .then(([productResult, sheetResult, auditResult]) => {
+      .then(([productResult, sheetResult, technicalSheetResult, auditResult]) => {
         if (controller.signal.aborted) return;
 
         if (productResult.status === 'fulfilled') {
@@ -1149,6 +1339,14 @@ export function ProductDetailView({ productId }: { productId: string }) {
               ? null
               : 'No fue posible consultar la plantilla de atributos.',
           );
+        }
+
+        if (technicalSheetResult.status === 'fulfilled') {
+          setTechnicalSheet(technicalSheetResult.value);
+          setTechnicalSheetError(null);
+        } else {
+          setTechnicalSheet(null);
+          setTechnicalSheetError('No fue posible preparar la ficha técnica descargable.');
         }
 
         if (auditResult.status === 'fulfilled') {
@@ -1183,6 +1381,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
     if (!unifiedCode) {
       setApplications([]);
       setHomologs([]);
+      setOemCodes([]);
+      setOemError(null);
       setApplicationsError(null);
       setHomologsError(null);
       setApplicationsLoading(false);
@@ -1195,7 +1395,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
     void Promise.allSettled([
       listApplications({ unifiedCode }, controller.signal),
       listHomologs({ unifiedCode }, controller.signal),
-    ]).then(([applicationsResult, homologsResult]) => {
+      listOemCodes({ unifiedCode }, controller.signal),
+    ]).then(([applicationsResult, homologsResult, oemResult]) => {
       if (controller.signal.aborted) return;
       if (applicationsResult.status === 'fulfilled') {
         setApplications(applicationsResult.value);
@@ -1217,6 +1418,17 @@ export function ProductDetailView({ productId }: { productId: string }) {
           homologsResult.reason instanceof Error
             ? homologsResult.reason.message
             : 'No fue posible consultar los homólogos.',
+        );
+      }
+      if (oemResult.status === 'fulfilled') {
+        setOemCodes(oemResult.value);
+        setOemError(null);
+      } else {
+        setOemCodes([]);
+        setOemError(
+          oemResult.reason instanceof Error
+            ? oemResult.reason.message
+            : 'No fue posible consultar los códigos OEM.',
         );
       }
       setApplicationsLoading(false);
@@ -1257,13 +1469,16 @@ export function ProductDetailView({ productId }: { productId: string }) {
           sheet={attributeSheet}
           unifiedCode={unifiedCode}
           homologs={homologs}
+          oemCodes={oemCodes}
+          oemError={oemError}
           loading={homologsLoading}
           error={homologsError}
         />
       );
     }
-    if (activeTab === 'documents')
-      return <DocumentsPanel product={product} sheet={attributeSheet} />;
+    if (activeTab === 'documents') {
+      return <DocumentsPanel product={product} canWrite={canWriteAssets} />;
+    }
     if (activeTab === 'sources') return <SourcesPanel product={product} />;
     if (activeTab === 'history') {
       return (
@@ -1281,7 +1496,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         sheet={attributeSheet}
         sheetError={attributeSheetError}
         unitSystem={unitSystem}
-        onUnitSystemChange={setUnitSystem}
+        onUnitSystemChange={changeUnitSystem}
       />
     );
   }, [
@@ -1295,9 +1510,13 @@ export function ProductDetailView({ productId }: { productId: string }) {
     auditError,
     auditLoading,
     auditTotal,
+    canWriteAssets,
+    changeUnitSystem,
     homologs,
     homologsError,
     homologsLoading,
+    oemCodes,
+    oemError,
     product,
     unifiedCode,
     unitSystem,
@@ -1341,24 +1560,40 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const eligibleHomologCount = homologs.filter(
     (homolog) => homolog.active && homolog.approvalStatus === 'approved',
   ).length;
+  const eligibleOemCount = oemCodes.filter(
+    (oem) => oem.active && oem.approvalStatus === 'approved',
+  ).length;
 
   return (
     <>
-      {attributeSheet ? (
-        <EnrichmentDrawer
-          sheet={attributeSheet}
-          open={editOpen}
-          onClose={() => setEditOpen(false)}
-          onSaved={(replicatedProducts) => {
-            setEditOpen(false);
-            setSaveNotice(
-              replicatedProducts > 0
-                ? `Cambios guardados y heredados a ${replicatedProducts} SKU del mismo código unificador.`
-                : 'Cambios guardados para este SKU.',
-            );
-            reload();
-          }}
-        />
+      {attributeSheet || technicalSheet ? (
+        <>
+          {attributeSheet ? (
+            <EnrichmentDrawer
+              sheet={attributeSheet}
+              open={editOpen}
+              onClose={() => setEditOpen(false)}
+              onSaved={(replicatedProducts) => {
+                setEditOpen(false);
+                setSaveNotice(
+                  replicatedProducts > 0
+                    ? `Cambios guardados y heredados a ${replicatedProducts} SKU del mismo código unificador.`
+                    : 'Cambios guardados para este SKU.',
+                );
+                reload();
+              }}
+            />
+          ) : null}
+          {technicalSheet ? (
+            <TechnicalSheetPreview
+              open={technicalSheetOpen}
+              product={product}
+              sheet={technicalSheet}
+              unitSystem={unitSystem}
+              onClose={() => setTechnicalSheetOpen(false)}
+            />
+          ) : null}
+        </>
       ) : null}
       <nav
         aria-label="Migas de pan"
@@ -1382,6 +1617,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           'Consulta las seis secciones o usa los accesos rápidos del SKU.',
           'Edita únicamente los atributos PIM permitidos por la plantilla; los datos ERP quedan bloqueados.',
           'Alterna entre métrico e imperial sin cambiar el valor registrado por la fuente.',
+          'Genera la ficha técnica únicamente con los atributos que la plantilla marcó como publicables.',
         ]}
         dataSource="La identidad proviene del catálogo; los atributos, su procedencia, las aplicaciones, los homólogos y el historial se consultan en sus APIs operativas."
         limitation="Los atributos replicables y las aplicaciones se heredan por código unificador; cada SKU conserva su propia identidad. La búsqueda solo considera homólogos activos y aprobados."
@@ -1506,6 +1742,17 @@ export function ProductDetailView({ productId }: { productId: string }) {
             >
               Revisar información técnica
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => setTechnicalSheetOpen(true)}
+              disabled={!technicalSheet}
+              title={technicalSheetError ?? undefined}
+            >
+              <FileText aria-hidden="true" className="size-4" />
+              Ficha técnica (PDF)
+            </Button>
             <button
               type="button"
               className="mx-auto flex items-center gap-2 text-xs font-semibold text-primary hover:underline"
@@ -1539,6 +1786,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <div className="flex flex-wrap gap-2 text-xs">
             <StatusBadge tone="info">{applications.length} aplicaciones activas</StatusBadge>
             <StatusBadge tone="success">{eligibleHomologCount} homólogos elegibles</StatusBadge>
+            <StatusBadge tone="info">{eligibleOemCount} OEM elegibles</StatusBadge>
           </div>
         </div>
       </section>

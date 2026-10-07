@@ -4,11 +4,17 @@ import type {
   CreateGroupApplicationInput,
   UpdateGroupApplicationInput,
 } from '@cdr/contracts';
-import { type Clock, NotFoundError, assertUuid, getCorrelationId, newUuid } from '@cdr/shared';
+import {
+  type Clock,
+  ConflictError,
+  NotFoundError,
+  assertUuid,
+  getCorrelationId,
+  newUuid,
+} from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
-import { AuditAction, createAuditEntry } from '../../audit/domain/entities/audit-entry';
-import { AUDIT_PORT, type AuditPort } from '../../audit/domain/ports/audit.port';
+import { AuditAction } from '../../audit/domain/entities/audit-entry';
 import type { AuthenticatedActor } from '../../identity/domain/entities/role';
 import { GroupApplication } from '../domain/entities/group-application';
 import {
@@ -38,7 +44,6 @@ export class CreateGroupApplicationUseCase {
     @Inject(GROUP_APPLICATION_REPOSITORY)
     private readonly repository: GroupApplicationRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
   async execute(
@@ -47,6 +52,7 @@ export class CreateGroupApplicationUseCase {
   ): Promise<GroupApplication> {
     const group = await this.repository.findGroupByCode(input.unifiedCode);
     if (!group) throw new NotFoundError('EquivalenceGroup', input.unifiedCode);
+    const occurredAt = this.clock.now();
     const application = GroupApplication.create(
       {
         groupId: group.id,
@@ -59,22 +65,14 @@ export class CreateGroupApplicationUseCase {
         engine: input.engine,
         notes: input.notes,
       },
-      this.clock.now(),
+      occurredAt,
     );
-    await this.repository.save(application);
-    const snapshot = application.toSnapshot();
-    await this.audit.record(
-      createAuditEntry({
-        resourceType: 'group_application',
-        resourceId: snapshot.id,
-        action: AuditAction.Created,
-        actorId: actor.id,
-        source: 'api',
-        correlationId: getCorrelationId() ?? newUuid(),
-        occurredAt: this.clock.now(),
-        changes: toChanges(undefined, snapshot),
-      }),
-    );
+    await this.repository.insertWithAudit(application, {
+      action: AuditAction.Created,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
     return application;
   }
 }
@@ -85,7 +83,6 @@ export class UpdateGroupApplicationUseCase {
     @Inject(GROUP_APPLICATION_REPOSITORY)
     private readonly repository: GroupApplicationRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
   async execute(
@@ -96,35 +93,28 @@ export class UpdateGroupApplicationUseCase {
     const applicationId = assertUuid(id, 'applicationId');
     const application = await this.repository.findById(applicationId);
     if (!application) throw new NotFoundError('GroupApplication', id);
-    const before = application.toSnapshot();
+    const { expectedUpdatedAt, ...fields } = input;
+    const occurredAt = this.clock.now();
     application.update(
       {
-        vehicleType: input.vehicleType,
-        make: input.make,
-        model: input.model,
-        yearFrom: input.yearFrom,
-        yearTo: input.yearTo,
-        engine: input.engine,
-        notes: input.notes,
-        active: input.active,
+        vehicleType: fields.vehicleType,
+        make: fields.make,
+        model: fields.model,
+        yearFrom: fields.yearFrom,
+        yearTo: fields.yearTo,
+        engine: fields.engine,
+        notes: fields.notes,
+        active: fields.active,
       },
-      this.clock.now(),
+      occurredAt,
     );
-    await this.repository.save(application);
-    const after = application.toSnapshot();
-    await this.audit.record(
-      createAuditEntry({
-        resourceType: 'group_application',
-        resourceId: after.id,
-        action: AuditAction.Updated,
-        actorId: actor.id,
-        source: 'api',
-        correlationId: getCorrelationId() ?? newUuid(),
-        occurredAt: this.clock.now(),
-        changes: toChanges(before, after),
-      }),
-    );
-    return application;
+    const result = await this.repository.updateWithAudit(application, new Date(expectedUpdatedAt), {
+      action: AuditAction.Updated,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
+    return updatedOrThrow(result, id);
   }
 }
 
@@ -134,51 +124,37 @@ export class DeactivateGroupApplicationUseCase {
     @Inject(GROUP_APPLICATION_REPOSITORY)
     private readonly repository: GroupApplicationRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
-  async execute(id: string, actor: AuthenticatedActor): Promise<GroupApplication> {
+  async execute(
+    id: string,
+    expectedUpdatedAt: string,
+    actor: AuthenticatedActor,
+  ): Promise<GroupApplication> {
     const application = await this.repository.findById(assertUuid(id, 'applicationId'));
     if (!application) throw new NotFoundError('GroupApplication', id);
-    const before = application.toSnapshot();
-    application.deactivate(this.clock.now());
-    await this.repository.save(application);
-    const after = application.toSnapshot();
-    await this.audit.record(
-      createAuditEntry({
-        resourceType: 'group_application',
-        resourceId: after.id,
-        action: AuditAction.Deleted,
-        actorId: actor.id,
-        source: 'api',
-        correlationId: getCorrelationId() ?? newUuid(),
-        occurredAt: this.clock.now(),
-        changes: { active: { before: before.active, after: after.active } },
-      }),
-    );
-    return application;
+    const occurredAt = this.clock.now();
+    application.deactivate(occurredAt);
+    const result = await this.repository.updateWithAudit(application, new Date(expectedUpdatedAt), {
+      action: AuditAction.Deleted,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
+    return updatedOrThrow(result, id);
   }
 }
 
-function toChanges(
-  before: ReturnType<GroupApplication['toSnapshot']> | undefined,
-  after: ReturnType<GroupApplication['toSnapshot']>,
-): Readonly<Record<string, { before?: unknown; after?: unknown }>> {
-  const fields = [
-    'groupId',
-    'unifiedCode',
-    'vehicleType',
-    'make',
-    'model',
-    'yearFrom',
-    'yearTo',
-    'engine',
-    'notes',
-    'active',
-  ] as const;
-  return Object.fromEntries(
-    fields
-      .filter((field) => before === undefined || before[field] !== after[field])
-      .map((field) => [field, { before: before?.[field], after: after[field] }]),
-  );
+function updatedOrThrow(
+  result: Awaited<ReturnType<GroupApplicationRepositoryPort['updateWithAudit']>>,
+  id: string,
+): GroupApplication {
+  if (result.kind === 'not_found') throw new NotFoundError('GroupApplication', id);
+  if (result.kind === 'version_conflict') {
+    throw new ConflictError('The application was modified by another request', {
+      applicationId: id,
+      actualUpdatedAt: result.actualUpdatedAt.toISOString(),
+    });
+  }
+  return result.value;
 }

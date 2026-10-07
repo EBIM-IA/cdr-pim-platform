@@ -1,3 +1,4 @@
+import type { ApplicationVehicleType } from '@cdr/contracts';
 import { type Uuid, ValidationError, newUuid } from '@cdr/shared';
 
 export type ApplicationSource = 'manual' | 'import';
@@ -6,7 +7,7 @@ export interface GroupApplicationSnapshot {
   readonly id: Uuid;
   readonly groupId: Uuid;
   readonly unifiedCode: string;
-  readonly vehicleType: string | null;
+  readonly vehicleType: ApplicationVehicleType | null;
   readonly make: string | null;
   readonly model: string | null;
   readonly yearFrom: number | null;
@@ -20,10 +21,19 @@ export interface GroupApplicationSnapshot {
   readonly updatedAt: Date;
 }
 
-export type EditableApplicationFields = Pick<
-  GroupApplicationSnapshot,
-  'vehicleType' | 'make' | 'model' | 'yearFrom' | 'yearTo' | 'engine' | 'notes'
->;
+export interface EditableApplicationFields {
+  readonly vehicleType: string | null;
+  readonly make: string | null;
+  readonly model: string | null;
+  readonly yearFrom: number | null;
+  readonly yearTo: number | null;
+  readonly engine: string | null;
+  readonly notes: string | null;
+}
+
+type NormalizedApplicationFields = Omit<EditableApplicationFields, 'vehicleType'> & {
+  readonly vehicleType: ApplicationVehicleType;
+};
 
 export class GroupApplication {
   private constructor(private state: GroupApplicationSnapshot) {}
@@ -48,7 +58,7 @@ export class GroupApplication {
     return new GroupApplication({
       id: input.id ?? newUuid(),
       groupId: input.groupId,
-      unifiedCode: input.unifiedCode.trim().toUpperCase(),
+      unifiedCode: requiredText(input.unifiedCode, 'unifiedCode', 120).toUpperCase(),
       ...fields,
       active: true,
       source: input.source ?? 'manual',
@@ -85,26 +95,56 @@ export class GroupApplication {
     this.state = { ...this.state, active: false, updatedAt: now };
   }
 
+  markImported(importBatchId: Uuid, now: Date): void {
+    this.state = { ...this.state, source: 'import', importBatchId, updatedAt: now };
+  }
+
   toSnapshot(): GroupApplicationSnapshot {
     return { ...this.state };
   }
 }
 
-function nullableText(value: string | null | undefined): string | null {
+function nullableText(
+  value: string | null | undefined,
+  field: string,
+  maxLength: number,
+): string | null {
   const result = value?.trim() ?? '';
+  if (result.length > maxLength) {
+    throw new ValidationError(`${field} must contain at most ${maxLength} characters`, {
+      field,
+      maxLength,
+    });
+  }
   return result.length > 0 ? result : null;
 }
 
-function normalizeFields(input: Partial<EditableApplicationFields>): EditableApplicationFields {
+function requiredText(value: string, field: string, maxLength: number): string {
+  const result = nullableText(value, field, maxLength);
+  if (!result) throw new ValidationError(`${field} must not be blank`, { field });
+  return result;
+}
+
+function normalizeFields(input: Partial<EditableApplicationFields>): NormalizedApplicationFields {
   return {
-    vehicleType: nullableText(input.vehicleType),
-    make: nullableText(input.make),
-    model: nullableText(input.model),
+    vehicleType: applicationType(input.vehicleType),
+    make: requiredText(input.make ?? '', 'make', 160),
+    model: requiredText(input.model ?? '', 'model', 200),
     yearFrom: input.yearFrom ?? null,
     yearTo: input.yearTo ?? null,
-    engine: nullableText(input.engine),
-    notes: nullableText(input.notes),
+    engine: nullableText(input.engine, 'engine', 200),
+    notes: nullableText(input.notes, 'notes', 2_000),
   };
+}
+
+function applicationType(value: string | null | undefined): ApplicationVehicleType {
+  const normalized = requiredText(value ?? '', 'vehicleType', 120).toUpperCase();
+  if (normalized !== 'AUTOMOTRIZ' && normalized !== 'INDUSTRIAL') {
+    throw new ValidationError('vehicleType must be AUTOMOTRIZ or INDUSTRIAL', {
+      vehicleType: normalized,
+    });
+  }
+  return normalized as ApplicationVehicleType;
 }
 
 function validateYearRange(yearFrom: number | null, yearTo: number | null): void {

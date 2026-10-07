@@ -4,11 +4,17 @@ import type {
   HomologListQuery,
   UpdateExternalHomologInput,
 } from '@cdr/contracts';
-import { type Clock, NotFoundError, assertUuid, getCorrelationId, newUuid } from '@cdr/shared';
+import {
+  type Clock,
+  ConflictError,
+  NotFoundError,
+  assertUuid,
+  getCorrelationId,
+  newUuid,
+} from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
-import { AuditAction, createAuditEntry } from '../../audit/domain/entities/audit-entry';
-import { AUDIT_PORT, type AuditPort } from '../../audit/domain/ports/audit.port';
+import { AuditAction } from '../../audit/domain/entities/audit-entry';
 import type { AuthenticatedActor } from '../../identity/domain/entities/role';
 import { ExternalHomolog } from '../domain/entities/external-homolog';
 import {
@@ -35,7 +41,6 @@ export class CreateExternalHomologUseCase {
     @Inject(EXTERNAL_HOMOLOG_REPOSITORY)
     private readonly repository: ExternalHomologRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
   async execute(
@@ -44,6 +49,7 @@ export class CreateExternalHomologUseCase {
   ): Promise<ExternalHomolog> {
     const group = await this.repository.findGroupByCode(input.unifiedCode);
     if (!group) throw new NotFoundError('EquivalenceGroup', input.unifiedCode);
+    const occurredAt = this.clock.now();
     const homolog = ExternalHomolog.create(
       {
         groupId: group.id,
@@ -53,22 +59,14 @@ export class CreateExternalHomologUseCase {
         active: input.active,
         approvalStatus: input.approvalStatus,
       },
-      this.clock.now(),
+      occurredAt,
     );
-    await this.repository.save(homolog);
-    const snapshot = homolog.toSnapshot();
-    await this.audit.record(
-      createAuditEntry({
-        resourceType: 'external_homolog',
-        resourceId: snapshot.id,
-        action: AuditAction.Created,
-        actorId: actor.id,
-        source: 'api',
-        correlationId: getCorrelationId() ?? newUuid(),
-        occurredAt: this.clock.now(),
-        changes: toChanges(undefined, snapshot),
-      }),
-    );
+    await this.repository.insertWithAudit(homolog, {
+      action: AuditAction.Created,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
     return homolog;
   }
 }
@@ -79,7 +77,6 @@ export class UpdateExternalHomologUseCase {
     @Inject(EXTERNAL_HOMOLOG_REPOSITORY)
     private readonly repository: ExternalHomologRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Inject(AUDIT_PORT) private readonly audit: AuditPort,
   ) {}
 
   async execute(
@@ -89,43 +86,44 @@ export class UpdateExternalHomologUseCase {
   ): Promise<ExternalHomolog> {
     const homolog = await this.repository.findById(assertUuid(id, 'homologId'));
     if (!homolog) throw new NotFoundError('ExternalHomolog', id);
-    const before = homolog.toSnapshot();
-    homolog.update(input, this.clock.now());
-    await this.repository.save(homolog);
-    const after = homolog.toSnapshot();
-    await this.audit.record(
-      createAuditEntry({
-        resourceType: 'external_homolog',
-        resourceId: after.id,
-        action: AuditAction.Updated,
-        actorId: actor.id,
-        source: 'api',
-        correlationId: getCorrelationId() ?? newUuid(),
-        occurredAt: this.clock.now(),
-        changes: toChanges(before, after),
-      }),
-    );
-    return homolog;
+    const { expectedUpdatedAt, ...fields } = input;
+    const occurredAt = this.clock.now();
+    homolog.update(fields, occurredAt);
+    const result = await this.repository.updateWithAudit(homolog, new Date(expectedUpdatedAt), {
+      action: AuditAction.Updated,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
+    return updatedOrThrow(result, id);
   }
 }
 
-function toChanges(
-  before: ReturnType<ExternalHomolog['toSnapshot']> | undefined,
-  after: ReturnType<ExternalHomolog['toSnapshot']>,
-): Readonly<Record<string, { before?: unknown; after?: unknown }>> {
-  const fields = [
-    'groupId',
-    'unifiedCode',
-    'externalCode',
-    'externalBrand',
-    'active',
-    'approvalStatus',
-  ] as const;
-  return Object.fromEntries(
-    fields
-      .filter((field) => before === undefined || before[field] !== after[field])
-      .map((field) => [field, { before: before?.[field], after: after[field] }]),
-  );
+@Injectable()
+export class DeactivateExternalHomologUseCase {
+  constructor(
+    @Inject(EXTERNAL_HOMOLOG_REPOSITORY)
+    private readonly repository: ExternalHomologRepositoryPort,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+
+  async execute(
+    id: string,
+    expectedUpdatedAt: string,
+    actor: AuthenticatedActor,
+  ): Promise<ExternalHomolog> {
+    const homolog = await this.repository.findById(assertUuid(id, 'homologId'));
+    if (!homolog) throw new NotFoundError('ExternalHomolog', id);
+    const occurredAt = this.clock.now();
+    homolog.deactivate(occurredAt);
+    const result = await this.repository.updateWithAudit(homolog, new Date(expectedUpdatedAt), {
+      action: AuditAction.Deleted,
+      actorId: actor.id,
+      correlationId: getCorrelationId() ?? newUuid(),
+      occurredAt,
+    });
+    return updatedOrThrow(result, id);
+  }
 }
 
 @Injectable()
@@ -138,4 +136,18 @@ export class SearchEligibleHomologsUseCase {
   execute(externalCode: string): Promise<EligibleHomologMatch[]> {
     return this.repository.searchEligible(externalCode);
   }
+}
+
+function updatedOrThrow(
+  result: Awaited<ReturnType<ExternalHomologRepositoryPort['updateWithAudit']>>,
+  id: string,
+): ExternalHomolog {
+  if (result.kind === 'not_found') throw new NotFoundError('ExternalHomolog', id);
+  if (result.kind === 'version_conflict') {
+    throw new ConflictError('The external homolog was modified by another request', {
+      homologId: id,
+      actualUpdatedAt: result.actualUpdatedAt.toISOString(),
+    });
+  }
+  return result.value;
 }

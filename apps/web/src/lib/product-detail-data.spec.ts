@@ -80,6 +80,7 @@ describe('product detail operational data', () => {
     ]);
     expect(attributes[1]).toMatchObject({
       includeInTechnicalSheet: false,
+      canExport: false,
       source: 'manual',
       authority: 'pim',
     });

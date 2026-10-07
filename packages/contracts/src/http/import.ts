@@ -2,17 +2,25 @@ import { z } from 'zod';
 
 import { uuidSchema } from './common';
 
-export const importTargetSchema = z.enum(['category', 'applications', 'homologs']);
+export const importTargetSchema = z.enum(['category', 'applications', 'homologs', 'oem']);
 export type ImportTarget = z.infer<typeof importTargetSchema>;
 
 export const importFormatSchema = z.enum(['csv', 'json']);
 export type ImportFormat = z.infer<typeof importFormatSchema>;
 
-export const importBatchStatusSchema = z.enum(['previewed', 'confirmed', 'failed']);
+export const importBatchStatusSchema = z.enum(['previewed', 'processing', 'confirmed', 'failed']);
 export type ImportBatchStatus = z.infer<typeof importBatchStatusSchema>;
 
 const safeImportRecordSchema = z.record(
-  z.union([z.string().max(20_000), z.number().finite(), z.boolean(), z.null()]),
+  z.union([
+    z.string().max(20_000),
+    z.number().finite(),
+    z.boolean(),
+    z.null(),
+    // Import-specific field limits are reported on each staged row. These wider transport
+    // guards prevent abuse without turning one bad OEM brand into a whole-request failure.
+    z.array(z.string().max(20_000)).max(100),
+  ]),
 );
 
 export const previewImportSchema = z
@@ -20,7 +28,13 @@ export const previewImportSchema = z
     target: importTargetSchema,
     format: importFormatSchema,
     idempotencyKey: z.string().trim().min(8).max(200),
-    categoryCode: z.string().trim().min(1).max(120).optional(),
+    categoryCode: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'categoryCode must be a lowercase category slug')
+      .optional(),
     csv: z.string().max(2_000_000).optional(),
     records: z.array(safeImportRecordSchema).max(10_000).optional(),
   })
@@ -50,6 +64,7 @@ export const importRowSchema = z.object({
   valid: z.boolean(),
   data: safeImportRecordSchema,
   errors: z.array(z.string().min(1).max(1_000)),
+  warnings: z.array(z.string().min(1).max(1_000)),
 });
 export type ImportRowDto = z.infer<typeof importRowSchema>;
 

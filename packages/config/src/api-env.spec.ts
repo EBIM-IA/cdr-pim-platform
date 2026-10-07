@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadApiEnv } from './api-env';
+import { resolveAiCapabilityProviders } from './ai';
 import { EnvironmentValidationError } from './env-error';
 
 const minimal = {
@@ -35,7 +36,17 @@ describe('loadApiEnv', () => {
     expect(env.APP_ENV).toBe('local');
     expect(env.QUEUE_DRIVER).toBe('memory');
     expect(env.AI_PROVIDER).toBe('fake');
+    expect(env.AI_GENERATION_MODEL).toBe('gpt-6-luna');
+    expect(env.AI_EMBEDDING_MODEL).toBe('text-embedding-3-small');
     expect(env.AI_EMBEDDING_DIMENSIONS).toBe(1536);
+    expect(env.AI_DOCUMENT_MAX_BYTES).toBe(5 * 1_024 * 1_024);
+    expect(env.OPENAI_TIMEOUT_MS).toBe(25_000);
+    expect(env.OPENAI_MAX_RETRIES).toBe(0);
+    expect(resolveAiCapabilityProviders(env)).toEqual({
+      embeddings: 'fake',
+      generation: 'fake',
+      documentExtraction: 'fake',
+    });
     expect(env.AUTH_LOCAL_ROLES).toEqual(['ADMIN']);
     expect(env.SWAGGER_ENABLED).toBe(false);
   });
@@ -182,9 +193,47 @@ describe('loadApiEnv', () => {
 
   it('requires an OpenAI key only when OpenAI is actually selected', () => {
     expect(() => loadApiEnv({ ...minimal, AI_PROVIDER: 'openai' })).toThrow(/OPENAI_API_KEY/);
+    expect(() => loadApiEnv({ ...minimal, AI_PROVIDER: 'openai', OPENAI_API_KEY: '   ' })).toThrow(
+      /OPENAI_API_KEY/,
+    );
     expect(
       loadApiEnv({ ...minimal, AI_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-test' }).AI_PROVIDER,
     ).toBe('openai');
+    expect(() => loadApiEnv({ ...minimal, AI_GENERATION_PROVIDER: 'openai' })).toThrow(
+      /OPENAI_API_KEY/,
+    );
+    expect(() => loadApiEnv({ ...minimal, AI_DOCUMENT_EXTRACTION_PROVIDER: 'openai' })).toThrow(
+      /OPENAI_API_KEY/,
+    );
+  });
+
+  it('does not enable generation or document uploads through the legacy embedding opt-in', () => {
+    const env = loadApiEnv({ ...minimal, AI_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-test' });
+    expect(resolveAiCapabilityProviders(env)).toEqual({
+      embeddings: 'openai',
+      generation: 'fake',
+      documentExtraction: 'fake',
+    });
+  });
+
+  it('requires the embedding width implemented by the current database schema', () => {
+    expect(() => loadApiEnv({ ...minimal, AI_EMBEDDING_DIMENSIONS: '3072' })).toThrow(
+      /AI_EMBEDDING_DIMENSIONS.*1536/s,
+    );
+  });
+
+  it('keeps an interactive OpenAI attempt below the BFF deadline', () => {
+    expect(() => loadApiEnv({ ...minimal, OPENAI_TIMEOUT_MS: '45000' })).toThrow(
+      /OPENAI_TIMEOUT_MS/,
+    );
+    expect(() => loadApiEnv({ ...minimal, OPENAI_MAX_RETRIES: '2' })).toThrow(/OPENAI_MAX_RETRIES/);
+    expect(() =>
+      loadApiEnv({ ...minimal, OPENAI_TIMEOUT_MS: '20000', OPENAI_MAX_RETRIES: '1' }),
+    ).toThrow(/OPENAI_TIMEOUT_MS.*35000ms provider budget/s);
+    expect(
+      loadApiEnv({ ...minimal, OPENAI_TIMEOUT_MS: '17000', OPENAI_MAX_RETRIES: '1' })
+        .OPENAI_MAX_RETRIES,
+    ).toBe(1);
   });
 
   it('never includes a secret value in the error message', () => {

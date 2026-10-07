@@ -49,26 +49,33 @@ export function serializeCatalogFilters(
   });
 }
 
-function displayValue(value: CatalogAttributeValue | undefined, column: CatalogGridColumnDto) {
-  if (value === undefined || value === '') return '—';
+function displayValue(
+  value: CatalogAttributeValue | null | undefined,
+  column: CatalogGridColumnDto,
+) {
+  if (value === null || value === undefined || value === '') return '—';
   if (column.dataType === 'boolean') return value === true || value === 'true' ? 'Sí' : 'No';
   return `${String(value)}${column.unit ? ` ${column.unit}` : ''}`;
 }
 
 function draftValue(
-  value: CatalogAttributeValue | undefined,
+  value: CatalogAttributeValue | null | undefined,
   column: CatalogGridColumnDto,
 ): string {
-  if (value !== undefined) return String(value);
+  if (value !== null && value !== undefined) return String(value);
   if (column.dataType === 'boolean') return 'false';
   if (column.dataType === 'enum' && column.required) return column.allowedValues[0] ?? '';
   return '';
 }
 
-function valueFromDraft(draft: string, column: CatalogGridColumnDto): CatalogAttributeValue {
+function valueFromDraft(draft: string, column: CatalogGridColumnDto): CatalogAttributeValue | null {
+  if (!draft.trim() || draft.trim() === '-') {
+    if (column.required) throw new Error(`${column.label} es obligatorio.`);
+    return null;
+  }
   if (column.dataType === 'number' || column.dataType === 'measurement') {
     const value = Number(draft);
-    if (draft.trim() === '' || !Number.isFinite(value)) {
+    if (!Number.isFinite(value)) {
       throw new Error('Ingresa un número válido.');
     }
     return value;

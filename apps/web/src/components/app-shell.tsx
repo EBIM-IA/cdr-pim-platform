@@ -213,6 +213,8 @@ const uxStates = [
   ['Conflicto', 'Advierte sobre concurrencia o fuentes antes de sobrescribir.'],
 ] as const;
 
+const SIDEBAR_PREFERENCE_KEY = 'cdr:pim:sidebar';
+
 function Sidebar({
   open,
   collapsed,
@@ -285,26 +287,23 @@ function Sidebar({
             href="/"
             onClick={onClose}
             aria-label="CDR PIM, ir al inicio"
-            className={cn('flex items-center justify-center gap-2', collapsed && 'lg:gap-0')}
+            className="flex items-center justify-center"
           >
             <Image
-              src="/brand/cdr-isotipo.svg"
-              alt=""
-              width={76}
-              height={66}
+              src="/brand/cdr-logo-white.png"
+              alt="Casa del Rulimán"
+              width={520}
+              height={158}
               priority
-              className={cn('h-auto w-[76px]', collapsed && 'lg:w-[44px]')}
+              className={cn('h-auto w-[174px]', collapsed && 'lg:hidden')}
             />
-            <span
-              className={cn(
-                'max-w-[92px] text-[15px] font-black italic leading-[0.82] tracking-[-0.055em] text-white',
-                collapsed && 'lg:hidden',
-              )}
-            >
-              CASA
-              <br />
-              DEL RULIMÁN
-            </span>
+            <Image
+              src="/brand/cdr-isotipo-white.png"
+              alt="Casa del Rulimán"
+              width={188}
+              height={188}
+              className={cn('hidden h-auto w-[44px]', collapsed && 'lg:block')}
+            />
           </Link>
           <Button
             ref={closeButton}
@@ -479,7 +478,7 @@ function FooterPager({
           className="h-7 px-2.5 text-[11px]"
           onClick={onOpenIndex}
         >
-          Mapa 34/34
+          Mapa · 34 rutas
         </Button>
         <Button
           type="button"
@@ -511,6 +510,16 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
   const menuButton = useRef<HTMLButtonElement>(null);
   const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_PREFERENCE_KEY);
+      if (saved === 'collapsed') setSidebarCollapsed(true);
+      if (saved === 'expanded') setSidebarCollapsed(false);
+    } catch {
+      // Storage can be unavailable in hardened/private browser modes; navigation still works.
+    }
+  }, []);
+
   const closeMenu = () => {
     setMenuOpen(false);
     requestAnimationFrame(() => menuButton.current?.focus());
@@ -518,7 +527,15 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
 
   const toggleNavigation = () => {
     if (window.matchMedia('(min-width: 1024px)').matches) {
-      setSidebarCollapsed((value) => !value);
+      setSidebarCollapsed((value) => {
+        const next = !value;
+        try {
+          window.localStorage.setItem(SIDEBAR_PREFERENCE_KEY, next ? 'collapsed' : 'expanded');
+        } catch {
+          // Preference persistence is optional and never blocks navigation.
+        }
+        return next;
+      });
       return;
     }
     setMenuOpen(true);
@@ -575,7 +592,9 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                 onClick={toggleNavigation}
                 aria-expanded={menuOpen || !sidebarCollapsed}
                 aria-controls={navigationId}
-                aria-label="Abrir menú principal"
+                aria-label={
+                  sidebarCollapsed ? 'Expandir menú principal' : 'Contraer menú principal'
+                }
               >
                 <Menu className="size-5" />
               </Button>
@@ -607,15 +626,15 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                         <div className="mb-4 flex items-start justify-between gap-4">
                           <div>
                             <strong className="text-sm text-cdr-ink">
-                              Mapa funcional · 34 pantallas
+                              Mapa de pantallas · 34 rutas
                             </strong>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Inicio de sesión más 33 pantallas autenticadas del diseño de
-                              referencia.
+                              Inicio de sesión más 33 rutas autenticadas. Cada pantalla identifica
+                              sus capacidades operativas y sus límites actuales.
                             </p>
                           </div>
                           <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-primary">
-                            34/34
+                            34 rutas
                           </span>
                         </div>
                         <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] text-muted-foreground">

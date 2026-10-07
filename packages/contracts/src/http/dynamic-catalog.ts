@@ -80,7 +80,8 @@ export const catalogCategoryListSchema = z.array(catalogCategorySummarySchema);
 export type CatalogCategorySummaryDto = z.infer<typeof catalogCategorySummarySchema>;
 
 export const catalogGridCellSchema = z.object({
-  value: catalogAttributeValueSchema,
+  // Cleared values remain visible as versioned tombstones for optimistic concurrency.
+  value: catalogAttributeValueSchema.nullable(),
   version: z.number().int().min(0),
   source: attributeValueSourceSchema,
   updatedAt: z.string().datetime(),
@@ -105,12 +106,70 @@ export type ProductAttributeSheetDto = z.infer<typeof productAttributeSheetSchem
 export const catalogGridResultSchema = paginatedSchema(catalogGridProductSchema);
 export type CatalogGridResultDto = z.infer<typeof catalogGridResultSchema>;
 
+/**
+ * Spreadsheet view of the complete catalog. Unlike the category grid, its columns are the
+ * role-filtered union of the active templates represented by the query. Applicability lives on
+ * each cell so an absent value is never confused with an attribute that does not belong to the
+ * product's template.
+ */
+export const catalogWorkbookColumnSchema = catalogGridColumnSchema.extend({
+  applicableTemplateIds: z.array(uuidSchema).min(1),
+});
+export type CatalogWorkbookColumnDto = z.infer<typeof catalogWorkbookColumnSchema>;
+
+export const catalogWorkbookCellSchema = z.discriminatedUnion('applicable', [
+  catalogGridCellSchema.extend({
+    applicable: z.literal(true),
+    required: z.boolean(),
+    permissions: z.object({ edit: z.boolean(), export: z.boolean() }),
+  }),
+  z.object({ applicable: z.literal(false) }),
+]);
+export type CatalogWorkbookCellDto = z.infer<typeof catalogWorkbookCellSchema>;
+
+export const catalogWorkbookProductSchema = z.object({
+  id: uuidSchema,
+  sku: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  brand: z.string().nullable(),
+  status: z.string(),
+  updatedAt: z.string().datetime(),
+  category: z.object({ id: uuidSchema, name: z.string() }),
+  template: z.object({ id: uuidSchema, name: z.string(), version: z.number().int().positive() }),
+  providerCode: z.string().nullable(),
+  unifiedCode: z.string().nullable(),
+  applicationTypes: z.array(z.string()),
+  completeness: z.number().int().min(0).max(100),
+  attributes: z.record(catalogWorkbookCellSchema),
+});
+export type CatalogWorkbookProductDto = z.infer<typeof catalogWorkbookProductSchema>;
+
+export const catalogWorkbookResultSchema = z.object({
+  columns: z.array(catalogWorkbookColumnSchema),
+  facets: z.object({
+    brands: z.array(z.string()),
+    applicationTypes: z.array(z.string()),
+    statuses: z.array(z.enum(['draft', 'in_review', 'published', 'archived'])),
+  }),
+  items: z.array(catalogWorkbookProductSchema),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  total: z.number().int().min(0),
+});
+export type CatalogWorkbookResultDto = z.infer<typeof catalogWorkbookResultSchema>;
+
 export const attributeFilterOperatorSchema = z.enum(['eq', 'contains', 'gt', 'gte', 'lt', 'lte']);
 export type AttributeFilterOperator = z.infer<typeof attributeFilterOperatorSchema>;
 
 const filterQuerySchema = z.preprocess(
   (value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]),
   z.array(z.string().min(3).max(500)).max(25),
+);
+
+const workbookColumnFilterQuerySchema = z.preprocess(
+  (value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]),
+  z.array(z.string().min(3).max(4_000)).max(25),
 );
 
 export const catalogGridQuerySchema = paginationQuerySchema.extend({
@@ -120,11 +179,26 @@ export const catalogGridQuerySchema = paginationQuerySchema.extend({
 });
 export type CatalogGridQuery = z.infer<typeof catalogGridQuerySchema>;
 
+export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
+  categoryId: uuidSchema.optional(),
+  q: z.string().trim().min(1).max(300).optional(),
+  brand: z.string().trim().min(1).max(120).optional(),
+  status: z.enum(['draft', 'in_review', 'published', 'archived']).optional(),
+  applicationType: z.enum(['AUTOMOTRIZ', 'INDUSTRIAL']).optional(),
+  completeness: z.enum(['complete', 'attention', 'critical']).optional(),
+  filter: filterQuerySchema.default([]),
+  /** Repeated JSON wire values: `{ "key": string, "values": string[] }`. */
+  columnFilter: workbookColumnFilterQuerySchema.optional(),
+  /** JSON wire value: `{ "key": string, "direction": "asc" | "desc" }`. */
+  sort: z.string().min(3).max(500).optional(),
+});
+export type CatalogWorkbookQuery = z.infer<typeof catalogWorkbookQuerySchema>;
+
 export const catalogSchemaQuerySchema = z.object({ categoryId: uuidSchema });
 export type CatalogSchemaQuery = z.infer<typeof catalogSchemaQuerySchema>;
 
 export const updateProductAttributeSchema = z.object({
-  value: catalogAttributeValueSchema,
+  value: catalogAttributeValueSchema.nullable(),
   expectedVersion: z.number().int().min(0),
 });
 export type UpdateProductAttributeInput = z.infer<typeof updateProductAttributeSchema>;
@@ -132,13 +206,55 @@ export type UpdateProductAttributeInput = z.infer<typeof updateProductAttributeS
 export const updatedProductAttributeSchema = z.object({
   productId: uuidSchema,
   attributeKey: z.string(),
-  value: catalogAttributeValueSchema,
-  version: z.number().int().positive(),
+  value: catalogAttributeValueSchema.nullable(),
+  version: z.number().int().min(0),
   source: attributeValueSourceSchema,
   updatedAt: z.string().datetime(),
   replicatedProductIds: z.array(uuidSchema),
 });
 export type UpdatedProductAttributeDto = z.infer<typeof updatedProductAttributeSchema>;
+
+export const updateProductAttributesBatchSchema = z
+  .object({
+    updates: z
+      .array(
+        z.object({
+          attributeKey: z.string().trim().min(1).max(100),
+          value: catalogAttributeValueSchema.nullable(),
+          expectedVersion: z.number().int().min(0),
+        }),
+      )
+      .min(1)
+      .max(100),
+  })
+  .superRefine((input, context) => {
+    const seen = new Set<string>();
+    input.updates.forEach((update, index) => {
+      if (seen.has(update.attributeKey)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['updates', index, 'attributeKey'],
+          message: 'Each attribute may be updated only once per batch',
+        });
+      }
+      seen.add(update.attributeKey);
+    });
+  });
+export type UpdateProductAttributesBatchInput = z.infer<typeof updateProductAttributesBatchSchema>;
+
+export const updatedProductAttributesBatchSchema = z.object({
+  productId: uuidSchema,
+  attributes: z.array(updatedProductAttributeSchema).min(1).max(100),
+});
+export type UpdatedProductAttributesBatchDto = z.infer<typeof updatedProductAttributesBatchSchema>;
+
+export const categorySourcePrioritySchema = z.object({
+  tecdoc: z.number().int().positive().optional(),
+  fabricante: z.number().int().positive().optional(),
+  archivo: z.number().int().positive().optional(),
+  manual: z.number().int().positive().optional(),
+});
+export type CategorySourcePriorityDto = z.infer<typeof categorySourcePrioritySchema>;
 
 export const adminCatalogCategorySchema = z.object({
   id: uuidSchema,
@@ -146,6 +262,8 @@ export const adminCatalogCategorySchema = z.object({
   slug: z.string(),
   name: z.string(),
   path: z.string(),
+  application: z.string().nullable(),
+  sourcePriority: categorySourcePrioritySchema,
   position: z.number().int().min(0),
   active: z.boolean(),
   updatedAt: z.string().datetime(),

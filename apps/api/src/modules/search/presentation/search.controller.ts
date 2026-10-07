@@ -9,9 +9,10 @@ import {
 
 import { openApiSchema } from '../../../shared/http/openapi';
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
+import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { RateLimit } from '../../../shared/http/rate-limit';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { Capability } from '../../identity/domain/entities/role';
+import { type AuthenticatedActor, Capability } from '../../identity/domain/entities/role';
 import { IndexProductUseCase } from '../application/index-product.use-case';
 import { SemanticSearchUseCase } from '../application/semantic-search.use-case';
 
@@ -30,8 +31,9 @@ export class SearchController {
   @ApiOkResponse({ schema: openApiSchema(semanticSearchResponseSchema) })
   async search(
     @Query(new ZodValidationPipe(semanticSearchQuerySchema)) query: SemanticSearchQuery,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<SemanticSearchResponse> {
-    const result = await this.semanticSearch.execute(query.q, query.limit);
+    const result = await this.semanticSearch.execute(query.q, query.limit, actor.roles);
     return {
       query: query.q,
       model: result.model,

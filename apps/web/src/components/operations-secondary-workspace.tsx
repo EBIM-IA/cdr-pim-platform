@@ -1,6 +1,11 @@
 'use client';
 
 import type {
+  CodeAffixDto,
+  CodeAffixKind,
+  CodeAffixSource,
+  CodeAffixStatus,
+  ParsedProductCodeDto,
   WorkspaceAction,
   WorkspaceColumn,
   WorkspaceDto,
@@ -13,21 +18,26 @@ import {
   ArrowRight,
   BarChart3,
   Boxes,
+  Check,
   CheckCircle2,
   Database,
   FileArchive,
   ImageIcon,
   KeyRound,
   LockKeyhole,
+  Pencil,
+  Plus,
   RefreshCw,
   Search,
   ServerCog,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
   Users,
+  X,
   type LucideIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -41,6 +51,14 @@ import {
   isCompactWorkspaceStatus,
 } from '@/lib/workspace-view';
 import { cn } from '@/lib/utils';
+import {
+  createCodeAffix,
+  deactivateCodeAffix,
+  listCodeAffixes,
+  parseCode,
+  updateCodeAffix,
+  validateCodeAffix,
+} from '@/lib/code-affix-api';
 
 export type OperationsWorkspaceSlug = Extract<
   WorkspaceSlug,
@@ -346,7 +364,8 @@ function PublicationSurface({
           ))}
         </div>
         <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
-          El estado PIM de una fila no prueba por sí solo su elegibilidad para un canal.
+          La elegibilidad base comprueba los obligatorios activos. Publicar en un canal todavía
+          requiere su política adicional y un adaptador operativo.
         </div>
       </Card>
       <div className="min-w-0">
@@ -576,6 +595,7 @@ function SearchReportSurface({
 }
 
 const settingsCatalogs = [
+  'Prefijos y sufijos',
   'Unidades de medida',
   'Materiales',
   'Sellos',
@@ -585,6 +605,52 @@ const settingsCatalogs = [
   'Sinónimos',
 ] as const;
 
+type SettingsCatalog = (typeof settingsCatalogs)[number];
+
+interface CodeAffixFormState {
+  kind: CodeAffixKind;
+  token: string;
+  meaning: string;
+  attribute: string;
+  impliedValue: string;
+  brand: string;
+  family: string;
+  source: CodeAffixSource;
+  confidence: string;
+  evidence: string;
+  boreRule: 'none' | 'iso_15';
+  priority: string;
+}
+
+const emptyAffixForm = (): CodeAffixFormState => ({
+  kind: 'suffix',
+  token: '',
+  meaning: '',
+  attribute: '',
+  impliedValue: '',
+  brand: '',
+  family: '',
+  source: 'manual',
+  confidence: '',
+  evidence: '',
+  boreRule: 'none',
+  priority: '0',
+});
+
+const kindLabels: Record<CodeAffixKind, string> = {
+  prefix: 'Prefijo',
+  series: 'Serie',
+  suffix: 'Sufijo',
+  pattern: 'Patrón',
+};
+
+const statusLabels: Record<CodeAffixStatus, string> = {
+  draft: 'Borrador',
+  pending_validation: 'Por validar',
+  validated: 'Validado',
+  rejected: 'Rechazado',
+};
+
 function SettingsSurface({
   workspace,
   definition,
@@ -592,48 +658,605 @@ function SettingsSurface({
   workspace: WorkspaceDto;
   definition: ViewDefinition;
 }) {
+  const [catalog, setCatalog] = useState<SettingsCatalog>('Prefijos y sufijos');
+  const [rules, setRules] = useState<CodeAffixDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const [kind, setKind] = useState<CodeAffixKind | ''>('');
+  const [status, setStatus] = useState<CodeAffixStatus | ''>('');
+  const [refresh, setRefresh] = useState(0);
+  const [editing, setEditing] = useState<CodeAffixDto | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<CodeAffixFormState>(emptyAffixForm);
+  const [saving, setSaving] = useState(false);
+  const [parseInput, setParseInput] = useState('');
+  const [parseBrand, setParseBrand] = useState('');
+  const [parseFamily, setParseFamily] = useState('');
+  const [parsed, setParsed] = useState<ParsedProductCodeDto | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const canManage = workspace.rows.some(
+    (row) =>
+      row.values.kind === 'Rol' &&
+      ['ADMINISTRADOR', 'ADMIN'].includes(String(row.values.grant ?? '').toUpperCase()),
+  );
+
+  useEffect(() => {
+    if (catalog !== 'Prefijos y sufijos') return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    void listCodeAffixes(
+      {
+        includeInactive: false,
+        ...(appliedQuery ? { q: appliedQuery } : {}),
+        ...(kind ? { kind } : {}),
+        ...(status ? { status } : {}),
+      },
+      controller.signal,
+    )
+      .then(setRules)
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted)
+          setError(reason instanceof Error ? reason.message : 'No fue posible cargar el catálogo.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [appliedQuery, catalog, kind, refresh, status]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setCreating(true);
+    setForm(emptyAffixForm());
+  };
+  const openEdit = (rule: CodeAffixDto) => {
+    setCreating(false);
+    setEditing(rule);
+    setForm({
+      kind: rule.kind,
+      token: rule.token,
+      meaning: rule.meaning,
+      attribute: rule.attribute ?? '',
+      impliedValue: rule.impliedValue ?? '',
+      brand: rule.brand ?? '',
+      family: rule.family ?? '',
+      source: rule.source,
+      confidence: rule.confidence === null ? '' : String(rule.confidence),
+      evidence: rule.evidence ?? '',
+      boreRule: rule.boreRule,
+      priority: String(rule.priority),
+    });
+  };
+  const closeEditor = () => {
+    setCreating(false);
+    setEditing(null);
+  };
+  const mutateForm = <K extends keyof CodeAffixFormState>(key: K, value: CodeAffixFormState[K]) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    const payload = {
+      kind: form.kind,
+      token: form.token,
+      meaning: form.meaning,
+      attribute: form.attribute.trim() || null,
+      impliedValue: form.impliedValue.trim() || null,
+      brand: form.brand.trim() || null,
+      family: form.family.trim() || null,
+      source: form.source,
+      confidence: form.confidence.trim() ? Number(form.confidence) : null,
+      evidence: form.evidence.trim() || null,
+      boreRule: form.boreRule,
+      priority: Number(form.priority),
+    };
+    try {
+      if (editing) {
+        await updateCodeAffix(editing.id, { ...payload, expectedUpdatedAt: editing.updatedAt });
+      } else {
+        await createCodeAffix(payload);
+      }
+      closeEditor();
+      setRefresh((value) => value + 1);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible guardar la regla.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const decide = async (rule: CodeAffixDto, decision: 'validated' | 'rejected') => {
+    setError('');
+    try {
+      await validateCodeAffix(rule.id, {
+        decision,
+        expectedUpdatedAt: rule.updatedAt,
+      });
+      setRefresh((value) => value + 1);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible registrar la decisión.');
+    }
+  };
+
+  const deactivate = async (rule: CodeAffixDto) => {
+    setError('');
+    try {
+      await deactivateCodeAffix(rule.id);
+      setRefresh((value) => value + 1);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible desactivar la regla.');
+    }
+  };
+
+  const runParser = async () => {
+    if (!parseInput.trim()) return;
+    setParsing(true);
+    setError('');
+    try {
+      setParsed(
+        await parseCode({
+          code: parseInput,
+          ...(parseBrand.trim() ? { brand: parseBrand.trim() } : {}),
+          ...(parseFamily.trim() ? { family: parseFamily.trim() } : {}),
+        }),
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible interpretar el código.');
+    } finally {
+      setParsing(false);
+    }
+  };
+
   return (
     <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
       <Card className="p-5">
         <h3 className="text-base font-semibold text-cdr-ink">Catálogos</h3>
-        <div className="mt-3">
-          {settingsCatalogs.map((catalog, index) => (
-            <div
-              key={catalog}
+        <div className="mt-3 space-y-1">
+          {settingsCatalogs.map((item) => (
+            <button
+              type="button"
+              key={item}
+              onClick={() => setCatalog(item)}
               className={cn(
-                'flex items-center justify-between gap-3 border-b px-2 py-3 text-sm last:border-0',
-                index === 0 && 'rounded-md bg-orange-50 text-orange-700',
+                'flex w-full items-center justify-between gap-3 rounded-md px-3 py-3 text-left text-sm',
+                item === catalog
+                  ? 'bg-orange-50 text-orange-700'
+                  : 'text-slate-700 hover:bg-slate-50',
               )}
             >
               <span>
-                <strong className="block">{catalog}</strong>
-                <small className="text-muted-foreground">Sin endpoint publicado</small>
+                <strong className="block">{item}</strong>
+                <small className="text-muted-foreground">
+                  {item === 'Prefijos y sufijos'
+                    ? `${rules.length} reglas persistidas`
+                    : 'Pendiente'}
+                </small>
               </span>
               <SlidersHorizontal className="size-4 shrink-0" aria-hidden="true" />
-            </div>
+            </button>
           ))}
         </div>
       </Card>
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-cdr-ink">Unidades de medida</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              La estructura aprobada se conserva, pero los registros deben provenir de la API.
-            </p>
+      {catalog !== 'Prefijos y sufijos' ? (
+        <Card className="p-5">
+          <h3 className="text-base font-semibold text-cdr-ink">{catalog}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Este catálogo todavía no tiene un contrato de mantenimiento aprobado.
+          </p>
+          <div className="mt-4">
+            <EmptyCapability definition={definition} />
           </div>
-          <Button type="button" disabled>
-            Agregar parámetro
-          </Button>
+        </Card>
+      ) : (
+        <div className="min-w-0 space-y-4">
+          <Card className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-cdr-ink">Prefijos y sufijos</h3>
+                <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                  Reglas persistidas y trazables. Una regla solo participa en la lectura después de
+                  ser validada con evidencia; no se cargan sugerencias IA como hechos.
+                </p>
+              </div>
+              <Button type="button" onClick={openCreate} disabled={!canManage}>
+                <Plus className="size-4" aria-hidden="true" /> Agregar regla
+              </Button>
+            </div>
+            {!canManage ? (
+              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                Solo ADMINISTRADOR puede crear, editar, validar o desactivar reglas.
+              </p>
+            ) : null}
+            {error ? (
+              <p
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
+          </Card>
+
+          <Card className="p-5">
+            <h3 className="text-sm font-semibold text-cdr-ink">Probar la lectura de un código</h3>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Input
+                aria-label="Código de producto a interpretar"
+                value={parseInput}
+                onChange={(event) => setParseInput(event.target.value)}
+                placeholder="Ej. 6205-2RS-C3"
+                className="min-w-64 flex-1 font-mono"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void runParser()}
+                disabled={parsing || !parseInput.trim()}
+              >
+                {parsing ? 'Interpretando…' : 'Interpretar'}
+              </Button>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <Input
+                aria-label="Marca para interpretar el código"
+                value={parseBrand}
+                onChange={(event) => setParseBrand(event.target.value)}
+                placeholder="Marca (opcional, limita reglas específicas)"
+              />
+              <Input
+                aria-label="Familia para interpretar el código"
+                value={parseFamily}
+                onChange={(event) => setParseFamily(event.target.value)}
+                placeholder="Familia (opcional, limita reglas específicas)"
+              />
+            </div>
+            {parsed ? (
+              <div className="mt-4 space-y-2" aria-live="polite">
+                <p className="text-xs text-muted-foreground">
+                  Código normalizado: <code>{parsed.normalizedCode}</code>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {parsed.segments.map((segment, index) => (
+                    <span
+                      key={`${segment.kind}-${index}`}
+                      className={cn(
+                        'rounded-lg border px-3 py-2 text-xs',
+                        segment.ruleId
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+                          : 'border-dashed bg-slate-50 text-slate-700',
+                      )}
+                    >
+                      <strong className="font-mono">{segment.text}</strong>
+                      <span className="ml-2">{segment.meaning ?? 'Sin regla validada'}</span>
+                      {segment.boreMillimeters !== null ? (
+                        <small className="ml-2 font-semibold">
+                          {segment.boreMillimeters} mm · ISO 15
+                        </small>
+                      ) : null}
+                      {segment.evidence ? (
+                        <small className="mt-1 block opacity-70">{segment.evidence}</small>
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </Card>
+
+          {(creating || editing) && canManage ? (
+            <Card className="p-5">
+              <form onSubmit={(event) => void submit(event)} className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-semibold text-cdr-ink">
+                    {editing ? `Editar ${editing.token}` : 'Nueva regla'}
+                  </h3>
+                  <Button type="button" variant="ghost" size="sm" onClick={closeEditor}>
+                    Cancelar
+                  </Button>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <label className="text-xs text-muted-foreground">
+                    Tipo
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border bg-white px-3 text-sm"
+                      value={form.kind}
+                      onChange={(event) => mutateForm('kind', event.target.value as CodeAffixKind)}
+                    >
+                      {Object.entries(kindLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Código o patrón
+                    <Input
+                      required
+                      className="mt-1 font-mono"
+                      value={form.token}
+                      onChange={(event) => mutateForm('token', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Fuente
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border bg-white px-3 text-sm"
+                      value={form.source}
+                      onChange={(event) =>
+                        mutateForm('source', event.target.value as CodeAffixSource)
+                      }
+                    >
+                      {['manual', 'manufacturer', 'standard', 'import', 'ai_suggestion'].map(
+                        (value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label className="text-xs text-muted-foreground md:col-span-2 xl:col-span-3">
+                    Significado
+                    <Input
+                      required
+                      className="mt-1"
+                      value={form.meaning}
+                      onChange={(event) => mutateForm('meaning', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Atributo
+                    <Input
+                      className="mt-1"
+                      value={form.attribute}
+                      onChange={(event) => mutateForm('attribute', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Valor implícito
+                    <Input
+                      className="mt-1"
+                      value={form.impliedValue}
+                      onChange={(event) => mutateForm('impliedValue', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Familia
+                    <Input
+                      className="mt-1"
+                      value={form.family}
+                      onChange={(event) => mutateForm('family', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Marca
+                    <Input
+                      className="mt-1"
+                      value={form.brand}
+                      onChange={(event) => mutateForm('brand', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Confianza (0–1)
+                    <Input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.001"
+                      className="mt-1"
+                      value={form.confidence}
+                      onChange={(event) => mutateForm('confidence', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Prioridad
+                    <Input
+                      type="number"
+                      min="0"
+                      max="1000"
+                      className="mt-1"
+                      value={form.priority}
+                      onChange={(event) => mutateForm('priority', event.target.value)}
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    Regla de agujero
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border bg-white px-3 text-sm"
+                      value={form.boreRule}
+                      onChange={(event) =>
+                        mutateForm('boreRule', event.target.value as 'none' | 'iso_15')
+                      }
+                    >
+                      <option value="none">No aplica</option>
+                      <option value="iso_15" disabled={form.kind !== 'series'}>
+                        ISO 15 (solo serie)
+                      </option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-muted-foreground md:col-span-2 xl:col-span-3">
+                    Evidencia
+                    <textarea
+                      required
+                      className="mt-1 min-h-20 w-full rounded-md border bg-white px-3 py-2 text-sm"
+                      value={form.evidence}
+                      onChange={(event) => mutateForm('evidence', event.target.value)}
+                      placeholder="Norma, catálogo o referencia verificable"
+                    />
+                  </label>
+                </div>
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={saving}>
+                    {saving ? 'Guardando…' : 'Guardar regla'}
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          ) : null}
+
+          <Card className="overflow-hidden">
+            <div className="flex flex-wrap gap-2 border-b bg-slate-50/70 p-4">
+              <Input
+                aria-label="Buscar reglas"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Código, significado, marca o familia"
+                className="min-w-64 flex-1 bg-white"
+              />
+              <select
+                aria-label="Filtrar por tipo"
+                className="h-10 rounded-md border bg-white px-3 text-sm"
+                value={kind}
+                onChange={(event) => setKind(event.target.value as CodeAffixKind | '')}
+              >
+                <option value="">Todos los tipos</option>
+                {Object.entries(kindLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Filtrar por estado"
+                className="h-10 rounded-md border bg-white px-3 text-sm"
+                value={status}
+                onChange={(event) => setStatus(event.target.value as CodeAffixStatus | '')}
+              >
+                <option value="">Todos los estados</option>
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <Button type="button" variant="outline" onClick={() => setAppliedQuery(query.trim())}>
+                Buscar
+              </Button>
+            </div>
+            {loading ? (
+              <p className="p-8 text-center text-sm text-muted-foreground" role="status">
+                Cargando reglas…
+              </p>
+            ) : rules.length === 0 ? (
+              <div className="p-8 text-center" role="status">
+                <strong>No hay reglas persistidas</strong>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Agrega una regla con evidencia; no se precargan sugerencias como verdad.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-left text-sm">
+                  <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3">Código</th>
+                      <th className="px-4 py-3">Tipo</th>
+                      <th className="px-4 py-3">Significado</th>
+                      <th className="px-4 py-3">Fuente</th>
+                      <th className="px-4 py-3">Estado</th>
+                      <th className="px-4 py-3">
+                        <span className="sr-only">Acciones</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {rules.map((rule) => (
+                      <tr key={rule.id} className="hover:bg-orange-50/40">
+                        <td className="px-4 py-3 font-mono font-semibold">{rule.token}</td>
+                        <td className="px-4 py-3">{kindLabels[rule.kind]}</td>
+                        <td className="max-w-md px-4 py-3">
+                          <span className="block">{rule.meaning}</span>
+                          <small className="text-muted-foreground">
+                            {rule.evidence ?? 'Sin evidencia'}
+                          </small>
+                        </td>
+                        <td className="px-4 py-3">
+                          {rule.source}
+                          {rule.confidence !== null ? (
+                            <small className="block text-muted-foreground">
+                              {Math.round(rule.confidence * 100)} %
+                            </small>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            tone={
+                              rule.status === 'validated'
+                                ? 'success'
+                                : rule.status === 'rejected'
+                                  ? 'danger'
+                                  : 'warning'
+                            }
+                          >
+                            {statusLabels[rule.status]}
+                          </StatusBadge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={!canManage}
+                              aria-label={`Editar ${rule.token}`}
+                              onClick={() => openEdit(rule)}
+                            >
+                              <Pencil className="size-3.5" aria-hidden="true" />
+                            </Button>
+                            {rule.status !== 'validated' ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                disabled={!canManage || !rule.evidence}
+                                aria-label={`Validar ${rule.token}`}
+                                onClick={() => void decide(rule, 'validated')}
+                              >
+                                <Check className="size-3.5" aria-hidden="true" />
+                              </Button>
+                            ) : null}
+                            {rule.status !== 'rejected' ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                disabled={!canManage}
+                                aria-label={`Rechazar ${rule.token}`}
+                                onClick={() => void decide(rule, 'rejected')}
+                              >
+                                <X className="size-3.5" aria-hidden="true" />
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={!canManage}
+                              aria-label={`Desactivar ${rule.token}`}
+                              onClick={() => void deactivate(rule)}
+                            >
+                              <Trash2 className="size-3.5" aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+              {rules.length} reglas visibles · datos persistidos por la API
+            </div>
+          </Card>
         </div>
-        <div className="mt-4 space-y-4">
-          <BlockedBanner
-            workspace={workspace}
-            fallback="No existen endpoints de lectura o mantenimiento de catálogos maestros."
-          />
-          <EmptyCapability definition={definition} />
-        </div>
-      </Card>
+      )}
     </div>
   );
 }

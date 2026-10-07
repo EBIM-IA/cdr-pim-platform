@@ -1,4 +1,9 @@
-import { groupApplicationSchema, updateGroupApplicationSchema, uuidSchema } from '@cdr/contracts';
+import {
+  deactivateGroupApplicationQuerySchema,
+  groupApplicationSchema,
+  updateGroupApplicationSchema,
+  uuidSchema,
+} from '@cdr/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { securePrivateResponse } from '@/lib/http-security';
@@ -33,10 +38,18 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       NextResponse.json({ message: 'La aplicación indicada no es válida.' }, { status: 400 }),
     );
   }
+  const query = deactivateGroupApplicationQuerySchema.safeParse(
+    Object.fromEntries(request.nextUrl.searchParams.entries()),
+  );
+  if (!query.success) {
+    return securePrivateResponse(
+      NextResponse.json({ message: 'La versión de la aplicación no es válida.' }, { status: 400 }),
+    );
+  }
   return proxyPrivateApi({
     request,
     method: 'DELETE',
-    path: `/applications/${encodeURIComponent(id.data)}`,
+    path: `/applications/${encodeURIComponent(id.data)}?expectedUpdatedAt=${encodeURIComponent(query.data.expectedUpdatedAt)}`,
     outputSchema: groupApplicationSchema,
   });
 }
