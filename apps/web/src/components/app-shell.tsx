@@ -44,44 +44,44 @@ interface NavigationItem {
 const pageSequence = [
   { reference: 4, href: '/', label: 'Dashboard' },
   { reference: 5, href: '/products', label: 'Productos' },
-  { reference: 6, href: '/products', label: 'Detalle de producto' },
-  { reference: 7, href: '/products', label: 'Editar enriquecimiento' },
-  { reference: 8, href: '/categories', label: 'Categorías y líneas' },
-  { reference: 9, href: '/templates', label: 'Plantilla dinámica' },
+  { reference: 6, href: '/products', label: 'Detalle de Producto' },
+  { reference: 7, href: '/products', label: 'Editar Enriquecimiento' },
+  { reference: 8, href: '/categories', label: 'Categorías y Líneas' },
+  { reference: 9, href: '/templates', label: 'Plantilla Dinámica' },
   { reference: 10, href: '/applications', label: 'Aplicaciones' },
-  { reference: 11, href: '/equivalences', label: 'Código unificador y equivalencias' },
+  { reference: 11, href: '/equivalences', label: 'Código Unificador y Homólogos' },
   {
     reference: 12,
     href: '/equivalences?view=homologs',
-    label: 'Identificadores y homólogos',
+    label: 'Identificadores y Homólogos',
   },
-  { reference: 13, href: '/documents', label: 'Imágenes y documentos' },
+  { reference: 13, href: '/documents', label: 'Imágenes y Documentos' },
   { reference: 14, href: '/imports', label: 'Importaciones' },
-  { reference: 15, href: '/imports?view=new', label: 'Nueva importación' },
-  { reference: 16, href: '/imports?view=result', label: 'Resultado de importación' },
-  { reference: 17, href: '/quality?view=search', label: 'Búsqueda inteligente' },
-  { reference: 18, href: '/quality?view=extraction', label: 'Revisión de extracción IA' },
-  { reference: 19, href: '/quality?view=commercial', label: 'Descripción comercial con IA' },
-  { reference: 20, href: '/quality?view=quality', label: 'Calidad del catálogo' },
-  { reference: 21, href: '/quality?view=duplicates', label: 'Posibles duplicados' },
-  { reference: 22, href: '/quality?view=review', label: 'Bandeja de revisión y aprobación' },
-  { reference: 23, href: '/quality?view=sources', label: 'Prioridad de fuentes' },
-  { reference: 24, href: '/quality?view=conflict', label: 'Resolver conflicto de fuentes' },
-  { reference: 25, href: '/publication?view=channels', label: 'Publicación por canal' },
+  { reference: 15, href: '/imports?view=new', label: 'Nueva Importación' },
+  { reference: 16, href: '/imports?view=result', label: 'Resultado de Importación' },
+  { reference: 17, href: '/quality?view=search', label: 'Búsqueda Inteligente' },
+  { reference: 18, href: '/quality?view=extraction', label: 'Revisión de Extracción IA' },
+  { reference: 19, href: '/quality?view=commercial', label: 'Descripción Comercial con IA' },
+  { reference: 20, href: '/quality?view=quality', label: 'Calidad del Catálogo' },
+  { reference: 21, href: '/quality?view=duplicates', label: 'Posibles Duplicados' },
+  { reference: 22, href: '/quality?view=review', label: 'Bandeja de Revisión y Aprobación' },
+  { reference: 23, href: '/quality?view=sources', label: 'Prioridad de Fuentes' },
+  { reference: 24, href: '/quality?view=conflict', label: 'Resolver Conflicto de Fuentes' },
+  { reference: 25, href: '/publication?view=channels', label: 'Publicación por Canal' },
   { reference: 26, href: '/publication?view=prestashop', label: 'Canal PrestaShop' },
-  { reference: 27, href: '/publication?view=images', label: 'Migración de imágenes PrestaShop' },
-  { reference: 28, href: '/integrations?view=sources', label: 'Fuentes externas' },
-  { reference: 29, href: '/integrations?view=monitor', label: 'Monitor de integraciones' },
-  { reference: 30, href: '/integrations?view=batches', label: 'Detalle de lote Sismetic / AX' },
+  { reference: 27, href: '/publication?view=images', label: 'Migración de Imágenes PrestaShop' },
+  { reference: 28, href: '/integrations?view=sources', label: 'Fuentes Externas' },
+  { reference: 29, href: '/integrations?view=monitor', label: 'Monitor de Integraciones' },
+  { reference: 30, href: '/integrations?view=batches', label: 'Detalle de Lote Sismetic / AX' },
   { reference: 31, href: '/administration?view=users', label: 'Usuarios' },
-  { reference: 32, href: '/administration?view=roles', label: 'Roles y permisos' },
-  { reference: 33, href: '/administration?view=audit', label: 'Auditoría y trazabilidad' },
+  { reference: 32, href: '/administration?view=roles', label: 'Roles y Permisos' },
+  { reference: 33, href: '/administration?view=audit', label: 'Auditoría y Trazabilidad' },
   { reference: 34, href: '/reports?view=reports', label: 'Reportes' },
-  { reference: 35, href: '/reports?view=searches', label: 'Reporte de búsquedas' },
+  { reference: 35, href: '/reports?view=searches', label: 'Reporte de Búsquedas' },
   {
     reference: 36,
     href: '/administration?view=settings',
-    label: 'Catálogos de configuración',
+    label: 'Catálogos de Configuración',
   },
 ] as const;
 
@@ -107,7 +107,7 @@ const navigation: NavigationItem[] = [
     capability: 'menu:applications:view',
   },
   {
-    label: 'Equivalencias',
+    label: 'Código Unificador y Homólogos',
     href: '/equivalences',
     icon: Link2,
     capability: 'menu:equivalences:view',
@@ -157,47 +157,47 @@ const screenIndex = [
     links: [
       ['Dashboard', '/', 'menu:home:view'],
       ['Productos', '/products', 'menu:products:view'],
-      ['Detalle de producto', '/products', 'menu:products:view'],
-      ['Editar enriquecimiento', '/products', 'menu:products:view'],
-      ['Categorías y líneas', '/categories', 'menu:categories:view'],
-      ['Plantilla dinámica', '/templates', 'menu:templates:view'],
+      ['Detalle de Producto', '/products', 'menu:products:view'],
+      ['Editar Enriquecimiento', '/products', 'menu:products:view'],
+      ['Categorías y Líneas', '/categories', 'menu:categories:view'],
+      ['Plantilla Dinámica', '/templates', 'menu:templates:view'],
       ['Aplicaciones', '/applications', 'menu:applications:view'],
-      ['Código unificador', '/equivalences', 'menu:equivalences:view'],
-      ['Identificadores y homólogos', '/equivalences?view=homologs', 'menu:equivalences:view'],
-      ['Imágenes y documentos', '/documents', 'menu:documents:view'],
+      ['Código Unificador y Homólogos', '/equivalences', 'menu:equivalences:view'],
+      ['Identificadores y Homólogos', '/equivalences?view=homologs', 'menu:equivalences:view'],
+      ['Imágenes y Documentos', '/documents', 'menu:documents:view'],
     ],
   },
   {
     label: 'IA y calidad',
     links: [
-      ['Búsqueda inteligente', '/quality?view=search', 'menu:ai-quality:view'],
+      ['Búsqueda Inteligente', '/quality?view=search', 'menu:ai-quality:view'],
       ['Extracción IA', '/quality?view=extraction', 'menu:ai-quality:view'],
-      ['Descripción comercial', '/quality?view=commercial', 'menu:ai-quality:view'],
-      ['Calidad del catálogo', '/quality?view=quality', 'menu:ai-quality:view'],
-      ['Posibles duplicados', '/quality?view=duplicates', 'menu:ai-quality:view'],
-      ['Bandeja de revisión', '/quality?view=review', 'menu:ai-quality:view'],
-      ['Prioridad de fuentes', '/quality?view=sources', 'menu:ai-quality:view'],
-      ['Resolver conflicto', '/quality?view=conflict', 'menu:ai-quality:view'],
+      ['Descripción Comercial', '/quality?view=commercial', 'menu:ai-quality:view'],
+      ['Calidad del Catálogo', '/quality?view=quality', 'menu:ai-quality:view'],
+      ['Posibles Duplicados', '/quality?view=duplicates', 'menu:ai-quality:view'],
+      ['Bandeja de Revisión', '/quality?view=review', 'menu:ai-quality:view'],
+      ['Prioridad de Fuentes', '/quality?view=sources', 'menu:ai-quality:view'],
+      ['Resolver Conflicto', '/quality?view=conflict', 'menu:ai-quality:view'],
     ],
   },
   {
     label: 'Operación y gobierno',
     links: [
       ['Importaciones', '/imports', 'menu:imports:view'],
-      ['Nueva importación', '/imports?view=new', 'menu:imports:view'],
-      ['Resultado de importación', '/imports?view=result', 'menu:imports:view'],
-      ['Publicación por canal', '/publication?view=channels', 'menu:publication:view'],
+      ['Nueva Importación', '/imports?view=new', 'menu:imports:view'],
+      ['Resultado de Importación', '/imports?view=result', 'menu:imports:view'],
+      ['Publicación por Canal', '/publication?view=channels', 'menu:publication:view'],
       ['Canal PrestaShop', '/publication?view=prestashop', 'menu:publication:view'],
-      ['Migración de imágenes', '/publication?view=images', 'menu:publication:view'],
-      ['Fuentes externas', '/integrations?view=sources', 'menu:integrations:view'],
-      ['Monitor de integraciones', '/integrations?view=monitor', 'menu:integrations:view'],
+      ['Migración de Imágenes', '/publication?view=images', 'menu:publication:view'],
+      ['Fuentes Externas', '/integrations?view=sources', 'menu:integrations:view'],
+      ['Monitor de Integraciones', '/integrations?view=monitor', 'menu:integrations:view'],
       ['Lotes Sismetic / AX', '/integrations?view=batches', 'menu:integrations:view'],
       ['Usuarios', '/administration?view=users', 'menu:administration:view'],
-      ['Roles y permisos', '/administration?view=roles', 'menu:administration:view'],
+      ['Roles y Permisos', '/administration?view=roles', 'menu:administration:view'],
       ['Auditoría', '/administration?view=audit', 'menu:administration:view'],
-      ['Reportes operativos', '/reports?view=reports', 'menu:reports:view'],
-      ['Reporte de búsquedas', '/reports?view=searches', 'menu:reports:view'],
-      ['Catálogos de configuración', '/administration?view=settings', 'menu:administration:view'],
+      ['Reportes Operativos', '/reports?view=reports', 'menu:reports:view'],
+      ['Reporte de Búsquedas', '/reports?view=searches', 'menu:reports:view'],
+      ['Catálogos de Configuración', '/administration?view=settings', 'menu:administration:view'],
     ],
   },
 ] as const;
@@ -272,15 +272,15 @@ function Sidebar({
         aria-hidden={!open && !desktop}
         inert={!open && !desktop}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-[min(86vw,260px)] flex-col overflow-y-auto bg-cdr-orange px-3 pb-5 pt-4 text-white shadow-sidebar transition-[transform,width] lg:sticky lg:top-0 lg:z-20 lg:h-dvh lg:translate-x-0',
-          collapsed ? 'lg:w-[65px] lg:px-2' : 'lg:w-[222px]',
+          'fixed inset-y-0 left-0 z-50 flex w-[min(86vw,260px)] flex-col overflow-y-auto bg-cdr-orange px-3 pb-4 pt-3 text-white shadow-sidebar transition-[transform,width] lg:sticky lg:top-0 lg:z-20 lg:h-dvh lg:translate-x-0',
+          collapsed ? 'lg:w-16 lg:px-2' : 'lg:w-[220px]',
           open ? 'translate-x-0' : '-translate-x-full',
         )}
       >
         <div
           className={cn(
-            'mb-3 flex min-h-[108px] items-center justify-between px-3 lg:justify-center',
-            collapsed && 'lg:min-h-[58px] lg:px-0',
+            'mb-2 flex min-h-[94px] items-center justify-between px-3 lg:justify-center',
+            collapsed && 'lg:min-h-14 lg:px-0',
           )}
         >
           <Link
@@ -295,7 +295,7 @@ function Sidebar({
               width={520}
               height={158}
               priority
-              className={cn('h-auto w-[174px]', collapsed && 'lg:hidden')}
+              className={cn('h-auto w-[160px]', collapsed && 'lg:hidden')}
             />
             <Image
               src="/brand/cdr-isotipo-white.png"
@@ -318,7 +318,7 @@ function Sidebar({
           </Button>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1" aria-label="Módulos del PIM">
+        <nav className="flex flex-1 flex-col gap-0.5" aria-label="Módulos del PIM">
           {navigation
             .filter((item) => capabilities.includes(item.capability))
             .map((item) => {
@@ -343,7 +343,7 @@ function Sidebar({
                   onClick={onClose}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'flex h-[42px] items-center gap-3 rounded-full px-3.5 text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
+                    'flex min-h-10 items-center gap-2.5 rounded-full px-3 py-2 text-[12.5px] font-bold leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
                     collapsed && 'lg:justify-center lg:px-0',
                     active ? 'bg-white/25 ring-1 ring-inset ring-white/25' : 'hover:bg-white/15',
                   )}
@@ -354,7 +354,7 @@ function Sidebar({
                 <span
                   key={item.label}
                   aria-disabled="true"
-                  className="flex h-[42px] items-center gap-3 rounded-full px-3.5 text-[13px] font-bold text-white/55"
+                  className="flex min-h-10 items-center gap-2.5 rounded-full px-3 py-2 text-[12.5px] font-bold leading-tight text-white/55"
                 >
                   {content}
                 </span>
@@ -458,8 +458,8 @@ function FooterPager({
   return (
     <footer
       className={cn(
-        'fixed bottom-0 left-0 right-0 z-30 flex h-12 items-center justify-between gap-4 border-t border-border bg-white/95 px-4 backdrop-blur transition-[left] sm:px-6 lg:px-[35px]',
-        collapsed ? 'lg:left-[65px]' : 'lg:left-[222px]',
+        'fixed bottom-0 left-0 right-0 z-30 flex h-10 items-center justify-between gap-4 border-t border-border bg-white/95 px-4 backdrop-blur transition-[left] sm:px-6 lg:px-[35px]',
+        collapsed ? 'lg:left-16' : 'lg:left-[220px]',
       )}
     >
       <small className="hidden truncate text-[10px] text-muted-foreground sm:block">
@@ -581,7 +581,7 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
           capabilities={actor.capabilities}
         />
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-30 flex h-[73px] items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
+          <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <Button
                 ref={menuButton}
@@ -601,7 +601,7 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
               <div className="relative">
                 <Button
                   type="button"
-                  className="h-10 rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
+                  className="h-9 rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
                   onClick={() => {
                     if (screenIndexOpen && screenIndexMode === 'map') {
                       setScreenIndexOpen(false);
@@ -619,7 +619,7 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                 {screenIndexOpen ? (
                   <div
                     id="screen-index"
-                    className="absolute left-0 top-12 z-50 max-h-[min(76vh,720px)] w-[min(88vw,760px)] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-5"
+                    className="absolute left-0 top-11 z-50 max-h-[min(76vh,720px)] w-[min(88vw,760px)] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-5"
                   >
                     {screenIndexMode === 'map' ? (
                       <>
@@ -751,7 +751,7 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
           <main
             id="main-content"
             tabIndex={-1}
-            className="min-h-[calc(100dvh-121px)] bg-white px-4 pb-[95px] pt-6 outline-none sm:px-6 sm:pt-8 lg:px-[35px] lg:pt-[34px]"
+            className="min-h-[calc(100dvh-104px)] bg-white px-4 pb-20 pt-5 outline-none sm:px-6 lg:px-[35px]"
           >
             {children}
           </main>

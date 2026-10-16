@@ -11,12 +11,12 @@ export function PageHeader({
   eyebrow?: string;
 }) {
   return (
-    <header className="mb-[27px] flex flex-col items-start justify-between gap-4 md:flex-row md:gap-6">
+    <header className="mb-4 flex flex-col items-start justify-between gap-3 md:flex-row md:gap-5">
       <div className="min-w-0">
-        <h1 className="break-words text-[27px] font-semibold leading-tight tracking-[-0.035em] text-cdr-ink">
+        <h1 className="break-words text-[26px] font-semibold leading-tight tracking-[-0.035em] text-cdr-ink">
           {title}
         </h1>
-        <p className="mt-1 max-w-4xl text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-0.5 max-w-4xl text-xs leading-relaxed text-muted-foreground">
           {description}
         </p>
       </div>

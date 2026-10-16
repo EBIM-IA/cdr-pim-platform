@@ -29,6 +29,7 @@ import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProductsData } from '@/components/use-products-data';
@@ -563,9 +564,15 @@ export function ProductsCatalog({
               </span>
             </label>
 
-            <Select
+            <SearchableSelect
               label="Línea / categoría"
               value={category}
+              placeholder="Todas las categorías"
+              options={catalogCategories.map((item) => ({
+                value: item.id,
+                label: item.name,
+                keywords: [item.path, item.templateName],
+              }))}
               disabled={view === 'catalog' || catalogCategories.length === 0}
               title={
                 view === 'catalog'
@@ -574,80 +581,59 @@ export function ProductsCatalog({
                     ? 'No hay categorías visibles para tu rol.'
                     : undefined
               }
-              onChange={(event) => setCategory(event.target.value)}
-            >
-              <option value="">Todas las categorías</option>
-              {catalogCategories.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </Select>
-            <Select
+              onValueChange={setCategory}
+            />
+            <SearchableSelect
               label="Marca"
               value={brand}
-              onChange={(event) => changeBrand(event.target.value)}
-            >
-              <option value="">Todas las marcas</option>
-              {brands.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </Select>
-            <Select
+              placeholder="Todas las marcas"
+              options={brands.map((item) => ({ value: item, label: item }))}
+              onValueChange={changeBrand}
+            />
+            <SearchableSelect
               label="Aplicación"
               value={application}
+              placeholder={
+                applicationOptions.length === 0
+                  ? 'Sin aplicaciones activas'
+                  : 'Todas las aplicaciones'
+              }
+              options={applicationOptions.map((item) => ({ value: item, label: item }))}
               disabled={applicationOptions.length === 0}
               title={
                 applicationOptions.length === 0
                   ? 'No hay aplicaciones activas para el alcance seleccionado.'
                   : undefined
               }
-              onChange={(event) => setApplication(event.target.value)}
-            >
-              <option value="">
-                {applicationOptions.length === 0
-                  ? 'Sin aplicaciones activas'
-                  : 'Todas las aplicaciones'}
-              </option>
-              {applicationOptions.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </Select>
-            <Select
+              onValueChange={setApplication}
+            />
+            <SearchableSelect
               label="Estado"
               value={status}
-              onChange={(event) => changeStatus(event.target.value as ProductStatus | '')}
-            >
-              <option value="">Todos los estados</option>
-              {statuses.map((item) => (
-                <option key={item} value={item}>
-                  {statusLabel(item)}
-                </option>
-              ))}
-            </Select>
-            <Select
+              placeholder="Todos los estados"
+              options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
+              onValueChange={(value) => changeStatus(value as ProductStatus | '')}
+            />
+            <SearchableSelect
               label="Completitud"
               value={completeness}
+              placeholder={
+                view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
+              }
+              options={[
+                { value: 'complete', label: '90–100%' },
+                { value: 'attention', label: '70–89%' },
+                { value: 'critical', label: 'Menos de 70%' },
+                ...(view === 'catalog' ? [{ value: 'unavailable', label: 'Sin indicador' }] : []),
+              ]}
               disabled={view === 'catalog' && !hasCompletenessData}
               title={
                 view === 'table' || hasCompletenessData
                   ? undefined
                   : 'El backend todavía no publica completitud en el listado general.'
               }
-              onChange={(event) => setCompleteness(event.target.value as CompletenessFilter)}
-            >
-              <option value="">
-                {view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'}
-              </option>
-              <option value="complete">90–100%</option>
-              <option value="attention">70–89%</option>
-              <option value="critical">Menos de 70%</option>
-              {view === 'catalog' ? <option value="unavailable">Sin indicador</option> : null}
-            </Select>
+              onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
+            />
             <Select
               label="Origen del dato"
               value=""

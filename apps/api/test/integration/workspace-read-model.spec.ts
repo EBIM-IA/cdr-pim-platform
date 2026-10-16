@@ -147,16 +147,26 @@ describe('PostgresWorkspaceReadModel', () => {
     expect(quality.rows[0]?.values.findings).toContain('Diámetro interior');
     expect(quality.rows[0]?.values.findings).toContain('Ficha técnica (FT)');
     expect(publication.totalRows).toBe(1);
+    expect(publication.operationalStatus).toBe('partial');
     expect(publication.rows[0]?.values).toMatchObject({
+      category: 'Rodamientos',
+      template: 'Rodamiento',
       eligibility: 'No publicable',
       missing: expect.stringContaining('Diámetro interior'),
     });
+    expect(publication.actions).toContainEqual(
+      expect.objectContaining({
+        id: 'configure-publication-fields',
+        availability: 'blocked',
+      }),
+    );
     expect(reports.metrics).toContainEqual({
       key: 'products',
       label: 'Productos',
       value: 1,
       format: 'integer',
     });
+    expect(reports.operationalStatus).toBe('partial');
     expect(reports.metrics).toEqual(
       expect.arrayContaining([
         {
@@ -176,6 +186,12 @@ describe('PostgresWorkspaceReadModel', () => {
     expect(reports.rows).toContainEqual(
       expect.objectContaining({
         values: { section: 'Categoría', indicator: 'Rodamientos', value: 1 },
+      }),
+    );
+    expect(reports.actions).toContainEqual(
+      expect.objectContaining({
+        id: 'create-client-report-format',
+        availability: 'blocked',
       }),
     );
     expect(templates.operationalStatus).toBe('operational');

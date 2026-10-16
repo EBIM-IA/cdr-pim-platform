@@ -18,6 +18,8 @@ import {
   PRODUCT_ASSET_MAX_BYTES,
   PRODUCT_ASSET_ZIP_MAX_BYTES,
   type DeleteProductAssetResultDto,
+  type ProductAssetBatchDto,
+  type ProductAssetBatchQuery,
   type ProductAssetBulkMode,
   type ProductAssetBulkResultDto,
   type ProductAssetDto,
@@ -25,6 +27,7 @@ import {
   type ProductAssetSelector,
   type ProductAssetUploadMetadata,
   productAssetBulkModeSchema,
+  productAssetBatchQuerySchema,
   productAssetSelectorSchema,
   productAssetUploadMetadataSchema,
 } from '@cdr/contracts';
@@ -39,6 +42,7 @@ import { Capability, type AuthenticatedActor } from '../../identity/domain/entit
 import {
   DeleteProductAssetUseCase,
   DownloadProductAssetUseCase,
+  ListProductAssetBatchUseCase,
   ListProductAssetsUseCase,
   ProcessProductAssetArchiveUseCase,
   UploadProductAssetUseCase,
@@ -59,11 +63,23 @@ const bulkBodySchema = z.object({ mode: productAssetBulkModeSchema });
 export class ProductAssetsController {
   constructor(
     private readonly listAssets: ListProductAssetsUseCase,
+    private readonly listAssetBatch: ListProductAssetBatchUseCase,
     private readonly uploadAsset: UploadProductAssetUseCase,
     private readonly downloadAsset: DownloadProductAssetUseCase,
     private readonly deleteAsset: DeleteProductAssetUseCase,
     private readonly processArchive: ProcessProductAssetArchiveUseCase,
   ) {}
+
+  @Get('batch')
+  @ApiOperation({ summary: 'List active product assets for up to 100 products in one query' })
+  async batchList(
+    @Query(new ZodValidationPipe(productAssetBatchQuerySchema)) query: ProductAssetBatchQuery,
+  ): Promise<ProductAssetBatchDto> {
+    return (await this.listAssetBatch.execute(query)).map((item) => ({
+      productId: item.productId,
+      assets: item.assets.map(toProductAssetDto),
+    }));
+  }
 
   @Get()
   @ApiOperation({ summary: 'List active images and documents for a product or SKU' })

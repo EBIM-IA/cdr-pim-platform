@@ -170,7 +170,7 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[860px] text-left text-sm">
-        <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-wide text-muted-foreground">
+        <thead className="border-b bg-slate-50 text-[11px] tracking-wide text-muted-foreground">
           <tr>
             <th className="px-4 py-3">Fila</th>
             <th className="px-4 py-3">Identificador</th>
@@ -589,7 +589,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[1040px] text-left text-sm">
-                    <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <thead className="border-b bg-slate-50 text-[11px] tracking-wide text-muted-foreground">
                       <tr>
                         <th className="px-4 py-3">Lote</th>
                         {history.workspace.columns.map((column) => (
@@ -792,7 +792,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[650px] text-left text-sm">
-                        <thead className="border-b bg-slate-50 text-[11px] uppercase text-muted-foreground">
+                        <thead className="border-b bg-slate-50 text-[11px] text-muted-foreground">
                           <tr>
                             <th className="px-4 py-3">Columna del archivo</th>
                             <th className="px-4 py-3">Atributo destino</th>

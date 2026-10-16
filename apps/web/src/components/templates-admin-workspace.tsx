@@ -627,7 +627,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
               <legend className="mb-2 text-sm font-semibold">Permisos por rol</legend>
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full min-w-[600px] text-sm">
-                  <thead className="border-b bg-slate-50 text-left text-xs uppercase text-muted-foreground">
+                  <thead className="border-b bg-slate-50 text-left text-xs text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3">Rol</th>
                       {(Object.keys(permissionLabels) as Permission[]).map((permission) => (
@@ -718,7 +718,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1200px] text-left text-sm">
               <caption className="sr-only">Atributos y permisos de {template.name}</caption>
-              <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b bg-slate-50 text-xs tracking-wide text-muted-foreground">
                 <tr>
                   <th scope="col" className="px-4 py-3">
                     Atributo

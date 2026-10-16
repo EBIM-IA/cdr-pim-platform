@@ -12,6 +12,7 @@ export interface AssetSlot {
 
 export interface ProductAssetRepositoryPort {
   listByProductId(productId: Uuid): Promise<ProductAsset[]>;
+  listByProductIds(productIds: readonly Uuid[]): Promise<ProductAsset[]>;
   findById(id: Uuid): Promise<ProductAsset | null>;
   findActiveSlot(slot: AssetSlot): Promise<ProductAsset | null>;
   nextPhotoPosition(productId: Uuid): Promise<number>;

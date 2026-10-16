@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConflictError, type Uuid } from '@cdr/shared';
-import { and, asc, desc, eq, isNull, max } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
@@ -25,6 +25,24 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
       .innerJoin(products, eq(productAssets.productId, products.id))
       .where(and(eq(productAssets.productId, productId), isNull(productAssets.deletedAt)))
       .orderBy(asc(productAssets.kind), asc(productAssets.typeCode), asc(productAssets.position));
+    return rows.map((row) => this.toDomain(row.asset, row.sku));
+  }
+
+  async listByProductIds(productIds: readonly Uuid[]): Promise<ProductAsset[]> {
+    if (productIds.length === 0) return [];
+    const rows = await this.database
+      .select({ asset: productAssets, sku: products.sku })
+      .from(productAssets)
+      .innerJoin(products, eq(productAssets.productId, products.id))
+      .where(
+        and(inArray(productAssets.productId, [...productIds]), isNull(productAssets.deletedAt)),
+      )
+      .orderBy(
+        asc(productAssets.productId),
+        asc(productAssets.kind),
+        asc(productAssets.typeCode),
+        asc(productAssets.position),
+      );
     return rows.map((row) => this.toDomain(row.asset, row.sku));
   }
 

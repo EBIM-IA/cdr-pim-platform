@@ -553,7 +553,7 @@ export function CatalogWorkbookTable({
             Tabla dinámica del catálogo con atributos de las plantillas activas
           </caption>
           <thead className="sticky top-0 z-10 border-b bg-white text-[11px] text-muted-foreground">
-            <tr className="border-b text-[10px] font-extrabold uppercase tracking-[0.06em] text-orange-700">
+            <tr className="border-b text-[10px] font-extrabold tracking-[0.06em] text-orange-700">
               <th colSpan={4} className="bg-orange-50 px-3 py-2.5">
                 Identificación
               </th>

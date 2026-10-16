@@ -5,6 +5,7 @@ import {
   EXCEL_NOT_APPLICABLE,
   ExcelTableFilterBar,
   ExcelTableHeader,
+  matchesAxFilterExpression,
   type ExcelTableCell,
   type ExcelTableColumn,
   useExcelTableRows,
@@ -91,6 +92,47 @@ function openFilter(label: string) {
 }
 
 describe('ExcelTableHeader', () => {
+  it('supports the AX compact expression syntax', () => {
+    expect(matchesAxFilterExpression('Rodamientos rígidos', '*rigidos*')).toBe(true);
+    expect(matchesAxFilterExpression('6202-2RS', '6202*')).toBe(true);
+    expect(matchesAxFilterExpression('6202-2RS', '*2RS')).toBe(true);
+    expect(matchesAxFilterExpression('FAG', 'SKF|FAG')).toBe(true);
+    expect(matchesAxFilterExpression('FAG', '!SKF')).toBe(true);
+    expect(matchesAxFilterExpression('2026', '2024..2027')).toBe(true);
+    expect(matchesAxFilterExpression('90', '>=80')).toBe(true);
+    expect(matchesAxFilterExpression('(Vacías)', '""')).toBe(true);
+  });
+
+  it('filters directly from the field displayed below each heading', () => {
+    render(<Harness />);
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filtro de columna Marca' }), {
+      target: { value: 'FAG' },
+    });
+
+    expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByRole('status')).toHaveTextContent('2 de 4 filas visibles');
+  });
+
+  it('re-evaluates an AX expression when another column restores available values', () => {
+    render(<Harness />);
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filtro de columna Marca' }), {
+      target: { value: 'FAG|SKF' },
+    });
+    expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(3);
+
+    let dialog = openFilter('Estado');
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Seleccionar todo/u }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^Inactivo/u }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Aplicar' }));
+    expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(1);
+
+    dialog = openFilter('Estado');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Borrar filtro' }));
+    expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(3);
+  });
+
   it('lists searchable values with counts, blanks and not-applicable values', () => {
     render(<Harness />);
 

@@ -34,6 +34,32 @@ export type ProductAssetDto = z.infer<typeof productAssetSchema>;
 export const productAssetListSchema = z.array(productAssetSchema);
 export type ProductAssetListDto = z.infer<typeof productAssetListSchema>;
 
+const productAssetBatchIdsSchema = z.preprocess(
+  (value) =>
+    typeof value === 'string'
+      ? value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean)
+      : value,
+  z.array(uuidSchema).min(1).max(100),
+);
+
+/** A bounded batch keeps the documents matrix at one asset query per catalog page. */
+export const productAssetBatchQuerySchema = z.object({
+  productIds: productAssetBatchIdsSchema.transform((ids) => [...new Set(ids)]),
+});
+export type ProductAssetBatchQuery = z.infer<typeof productAssetBatchQuerySchema>;
+
+export const productAssetBatchItemSchema = z.object({
+  productId: uuidSchema,
+  assets: productAssetListSchema,
+});
+export type ProductAssetBatchItemDto = z.infer<typeof productAssetBatchItemSchema>;
+
+export const productAssetBatchSchema = z.array(productAssetBatchItemSchema).max(100);
+export type ProductAssetBatchDto = z.infer<typeof productAssetBatchSchema>;
+
 export const productAssetSelectorSchema = z
   .object({
     productId: uuidSchema.optional(),

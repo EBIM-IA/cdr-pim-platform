@@ -3,9 +3,9 @@
 import type { GroupApplicationDto, UpdateGroupApplicationInput } from '@cdr/contracts';
 import {
   CarFront,
+  Check,
   Download,
   Layers3,
-  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   ExcelTableFilterBar,
@@ -135,19 +135,6 @@ const editableApplicationColumns: readonly EditableApplicationColumn[] = [
   'notes',
 ];
 
-function fromApplication(value: GroupApplicationDto): ApplicationForm {
-  return {
-    unifiedCode: value.unifiedCode,
-    vehicleType: value.vehicleType ?? '',
-    make: value.make ?? '',
-    model: value.model ?? '',
-    yearFrom: value.yearFrom?.toString() ?? '',
-    yearTo: value.yearTo?.toString() ?? '',
-    engine: value.engine ?? '',
-    notes: value.notes ?? '',
-  };
-}
-
 function year(value: string): number | undefined {
   return value.trim() ? Number(value) : undefined;
 }
@@ -200,12 +187,13 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [makeFilter, setMakeFilter] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<EditingApplicationCell | null>(null);
   const [cellSaving, setCellSaving] = useState(false);
   const [form, setForm] = useState<ApplicationForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [view, setView] = useState<'context' | 'all'>('context');
   const [selectedCode, setSelectedCode] = useState('');
 
@@ -305,13 +293,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   const closeForm = () => {
     setForm(emptyForm);
-    setEditingId(null);
-    setEditingUpdatedAt(null);
     setShowForm(false);
   };
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const submit = async () => {
     setSaving(true);
     setError(null);
     try {
@@ -327,16 +312,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         engine: form.engine,
         notes: form.notes,
       };
-      if (editingId) {
-        if (!editingUpdatedAt) throw new Error('La versión de la aplicación no está disponible.');
-        await updateApplication(editingId, { expectedUpdatedAt: editingUpdatedAt, ...fields });
-        setNotice('Aplicación actualizada y auditada correctamente.');
-      } else {
-        await createApplication({ unifiedCode: form.unifiedCode, ...fields });
-        setNotice('Aplicación creada para todo el código unificador.');
-      }
+      const created = await createApplication({ unifiedCode: form.unifiedCode, ...fields });
+      setItems((current) => [created, ...current]);
+      setNotice('Aplicación creada para todo el código unificador.');
       closeForm();
-      await load();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No fue posible guardar.');
     } finally {
@@ -346,16 +325,19 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   const saveCell = async (item: GroupApplicationDto) => {
     if (!editingCell || editingCell.applicationId !== item.id) return;
+    const current = editingCell;
+    const previous = applicationCellValue(item, current.column);
+    setEditingCell(null);
+    if (current.draft.trim() === previous) return;
     setCellSaving(true);
     setError(null);
     try {
-      await updateApplication(
+      const updated = await updateApplication(
         item.id,
-        applicationCellUpdate(editingCell.column, editingCell.draft, item.updatedAt),
+        applicationCellUpdate(current.column, current.draft, item.updatedAt),
       );
       setNotice('Celda actualizada y registrada en Auditoría.');
-      setEditingCell(null);
-      await load();
+      setItems((rows) => rows.map((row) => (row.id === item.id ? updated : row)));
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : 'No fue posible guardar la celda.',
@@ -365,23 +347,61 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     }
   };
 
-  const setActive = async (item: GroupApplicationDto, active: boolean) => {
+  const toggleSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const deactivateSelected = async () => {
+    const selected = items.filter((item) => selectedIds.has(item.id) && item.active);
+    if (selected.length === 0) return;
+    setDeleting(true);
     setError(null);
-    try {
-      if (active) {
-        await updateApplication(item.id, { expectedUpdatedAt: item.updatedAt, active: true });
-      } else {
-        await deactivateApplication(item.id, item.updatedAt);
-      }
-      setNotice(
-        active ? 'Aplicación reactivada.' : 'Aplicación desactivada sin perder su historial.',
-      );
-      await load();
-    } catch (requestError) {
+    const results = await Promise.allSettled(
+      selected.map((item) => deactivateApplication(item.id, item.updatedAt)),
+    );
+    const succeeded = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    setItems((rows) =>
+      includeInactive
+        ? rows.map((row) => succeeded.find((item) => item.id === row.id) ?? row)
+        : rows.filter((row) => !succeeded.some((item) => item.id === row.id)),
+    );
+    setSelectedIds(new Set());
+    setNotice(`${succeeded.length} de ${selected.length} aplicaciones fueron desactivadas.`);
+    if (succeeded.length !== selected.length) {
       setError(
-        requestError instanceof Error ? requestError.message : 'No fue posible cambiar el estado.',
+        'Algunas filas cambiaron en el servidor y no se desactivaron. Actualiza y vuelve a seleccionarlas.',
       );
     }
+    setDeleting(false);
+  };
+
+  const reactivateSelected = async () => {
+    const selected = items.filter((item) => selectedIds.has(item.id) && !item.active);
+    if (selected.length === 0) return;
+    setRestoring(true);
+    setError(null);
+    const results = await Promise.allSettled(
+      selected.map((item) =>
+        updateApplication(item.id, { expectedUpdatedAt: item.updatedAt, active: true }),
+      ),
+    );
+    const succeeded = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    setItems((rows) => rows.map((row) => succeeded.find((item) => item.id === row.id) ?? row));
+    setSelectedIds(new Set());
+    setNotice(`${succeeded.length} de ${selected.length} aplicaciones fueron reactivadas.`);
+    if (succeeded.length !== selected.length) {
+      setError('Algunas filas cambiaron en el servidor y no se reactivaron. Actualiza la vista.');
+    }
+    setRestoring(false);
   };
 
   return (
@@ -390,62 +410,98 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         eyebrow="Compatibilidad"
         title="Aplicaciones"
         description="Aplicaciones automotrices e industriales compartidas por los SKU de un mismo código unificador."
-        actions={
-          <>
-            <Button variant="outline" onClick={downloadTemplate}>
-              <Download aria-hidden="true" className="size-4" /> Plantilla CSV
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/imports">
-                <Upload aria-hidden="true" className="size-4" /> Carga masiva
-              </Link>
-            </Button>
-            <TableExportButtons
-              filename={
-                view === 'context'
-                  ? `aplicaciones-${effectiveCode || 'sin-codigo'}`
-                  : 'aplicaciones-filtradas'
-              }
-              sheetName="Aplicaciones"
-              headers={[
-                'Código unificador',
-                'Tipo de vehículo',
-                'Marca',
-                'Modelo',
-                'Año desde',
-                'Año hasta',
-                'Motor',
-                'Notas',
-                'Origen',
-                'Estado',
-              ]}
-              rows={exportRows}
-              disabled={loading}
-            />
-            {canWrite ? (
-              <Button
-                onClick={() => {
-                  closeForm();
-                  setForm({ ...emptyForm, unifiedCode: effectiveCode });
-                  setShowForm(true);
-                }}
-              >
-                <Plus aria-hidden="true" className="size-4" /> Nueva aplicación
-              </Button>
-            ) : null}
-          </>
-        }
       />
       <ScreenGuide
         objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
         actions={[
           'Busca por código, marca, modelo, motor o notas.',
-          'Edita una celda en la tabla o abre el formulario completo si tu rol permite escritura.',
-          'Desactiva registros sin eliminar su trazabilidad y vuelve a activarlos cuando corresponda.',
+          'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
+          'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
         ]}
         dataSource="Los registros se leen y escriben en el API de aplicaciones. Cada cambio genera auditoría en el backend."
         limitation="El código unificador debe existir previamente; una aplicación no puede asociarse a un código desconocido."
       />
+
+      <div
+        className="sticky top-0 z-20 -mx-1 mb-5 flex flex-wrap items-center gap-2 border-y bg-cdr-canvas/95 px-1 py-2 backdrop-blur"
+        aria-label="Acciones generales de aplicaciones"
+      >
+        <Button type="button" size="sm" variant="outline" onClick={load} disabled={loading}>
+          <RefreshCw aria-hidden="true" className={loading ? 'size-4 animate-spin' : 'size-4'} />
+          Actualizar
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>
+          <Download aria-hidden="true" className="size-4" /> Plantilla CSV
+        </Button>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/imports">
+            <Upload aria-hidden="true" className="size-4" /> Importar
+          </Link>
+        </Button>
+        <TableExportButtons
+          filename={
+            view === 'context'
+              ? `aplicaciones-${effectiveCode || 'sin-codigo'}`
+              : 'aplicaciones-filtradas'
+          }
+          sheetName="Aplicaciones"
+          headers={[
+            'Código unificador',
+            'Tipo de vehículo',
+            'Marca',
+            'Modelo',
+            'Año desde',
+            'Año hasta',
+            'Motor',
+            'Notas',
+            'Origen',
+            'Estado',
+          ]}
+          rows={exportRows}
+          disabled={loading}
+        />
+        {canWrite ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              disabled={showForm}
+              onClick={() => {
+                closeForm();
+                setForm({ ...emptyForm, unifiedCode: effectiveCode });
+                setShowForm(true);
+              }}
+            >
+              <Plus aria-hidden="true" className="size-4" /> Agregar fila
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void deactivateSelected()}
+              disabled={deleting || selectedIds.size === 0}
+            >
+              <Trash2 aria-hidden="true" className="size-4" />
+              {deleting ? 'Eliminando…' : `Eliminar selección (${selectedIds.size})`}
+            </Button>
+            {includeInactive ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void reactivateSelected()}
+                disabled={restoring || selectedIds.size === 0}
+              >
+                <RotateCcw aria-hidden="true" className="size-4" />
+                {restoring ? 'Reactivando…' : 'Reactivar selección'}
+              </Button>
+            ) : null}
+          </>
+        ) : null}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {selectedIds.size} seleccionados
+        </span>
+      </div>
 
       <nav className="mb-5 grid gap-3 sm:grid-cols-2" aria-label="Vistas de aplicaciones">
         <button
@@ -550,113 +606,6 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         </div>
       ) : null}
 
-      {showForm ? (
-        <Card className="mb-5 p-5">
-          <form onSubmit={submit}>
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {editingId ? 'Editar aplicación' : 'Nueva aplicación'}
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Tipo, marca y modelo son obligatorios; motor, años y notas son opcionales.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={closeForm}
-                aria-label="Cerrar formulario"
-              >
-                <X aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Código unificador
-                <Input
-                  required
-                  value={form.unifiedCode}
-                  disabled={Boolean(editingId)}
-                  onChange={(e) => updateField('unifiedCode', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Tipo de aplicación
-                <select
-                  required
-                  className="h-10 rounded-md border bg-white px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-                  value={form.vehicleType}
-                  onChange={(event) =>
-                    updateField('vehicleType', event.target.value as ApplicationForm['vehicleType'])
-                  }
-                >
-                  <option value="">Selecciona un tipo</option>
-                  <option value="AUTOMOTRIZ">Automotriz</option>
-                  <option value="INDUSTRIAL">Industrial</option>
-                </select>
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Marca
-                <Input
-                  required
-                  value={form.make}
-                  onChange={(e) => updateField('make', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Modelo
-                <Input
-                  required
-                  value={form.model}
-                  onChange={(e) => updateField('model', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Año desde
-                <Input
-                  type="number"
-                  min={1886}
-                  max={2200}
-                  value={form.yearFrom}
-                  onChange={(e) => updateField('yearFrom', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Año hasta
-                <Input
-                  type="number"
-                  min={1886}
-                  max={2200}
-                  value={form.yearTo}
-                  onChange={(e) => updateField('yearTo', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Motor
-                <Input
-                  value={form.engine}
-                  onChange={(e) => updateField('engine', e.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Notas
-                <Input value={form.notes} onChange={(e) => updateField('notes', e.target.value)} />
-              </label>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={closeForm}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Guardando…' : 'Guardar'}
-              </Button>
-            </div>
-          </form>
-        </Card>
-      ) : null}
-
       <Card className="mb-5 p-4 sm:p-5">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_220px_220px_auto_auto] xl:items-end">
           <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
@@ -715,7 +664,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
       {loading ? (
         <Skeleton className="h-80 rounded-xl" />
-      ) : tableRows.length === 0 ? (
+      ) : tableRows.length === 0 && !showForm ? (
         <StatePanel
           variant="empty"
           title="Sin aplicaciones"
@@ -746,6 +695,23 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             <table className="w-full min-w-[1750px] text-left text-sm">
               <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                 <tr>
+                  <th className="w-12 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleccionar todas las aplicaciones visibles"
+                      checked={
+                        applicationTable.visibleRows.length > 0 &&
+                        applicationTable.visibleRows.every((item) => selectedIds.has(item.id))
+                      }
+                      onChange={(event) =>
+                        setSelectedIds(
+                          event.target.checked
+                            ? new Set(applicationTable.visibleRows.map((item) => item.id))
+                            : new Set(),
+                        )
+                      }
+                    />
+                  </th>
                   {applicationTableColumns.map((column) => (
                     <ExcelTableHeader
                       key={column.key}
@@ -764,19 +730,36 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       onSort={(direction) => applicationTable.setSort(column.key, direction)}
                     />
                   ))}
-                  <th className="px-4 py-3 text-right">Acciones</th>
+                  <th className="px-4 py-3">Guardado</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
+                {showForm ? (
+                  <NewApplicationRow
+                    form={form}
+                    saving={saving}
+                    onField={updateField}
+                    onSave={() => void submit()}
+                    onCancel={closeForm}
+                  />
+                ) : null}
                 {applicationTable.visibleRows.map((item) => (
                   <tr key={item.id} className="hover:bg-orange-50/40">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleccionar aplicación ${item.make} ${item.model}`}
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelection(item.id)}
+                      />
+                    </td>
                     <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
                     {editableApplicationColumns.map((column) => (
                       <InlineApplicationCell
                         key={column}
                         item={item}
                         column={column}
-                        canWrite={canWrite}
+                        canWrite={canWrite && item.active}
                         editing={
                           editingCell?.applicationId === item.id && editingCell.column === column
                             ? editingCell
@@ -806,53 +789,16 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       </StatusBadge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        {canWrite ? (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setEditingId(item.id);
-                                setEditingUpdatedAt(item.updatedAt);
-                                setForm(fromApplication(item));
-                                setShowForm(true);
-                              }}
-                            >
-                              <Pencil aria-hidden="true" className="size-4" />
-                              Editar
-                            </Button>
-                            {item.active ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void setActive(item, false)}
-                              >
-                                <Trash2 aria-hidden="true" className="size-4" />
-                                Desactivar
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void setActive(item, true)}
-                              >
-                                <RotateCcw aria-hidden="true" className="size-4" />
-                                Reactivar
-                              </Button>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Solo lectura</span>
-                        )}
-                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {cellSaving ? 'Guardando…' : 'Al día'}
+                      </span>
                     </td>
                   </tr>
                 ))}
                 {applicationTable.visibleRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-4 py-10 text-center text-sm text-muted-foreground"
                     >
                       Ninguna fila cumple los filtros de columna combinados.
@@ -865,6 +811,121 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         </Card>
       )}
     </>
+  );
+}
+
+function NewApplicationRow({
+  form,
+  saving,
+  onField,
+  onSave,
+  onCancel,
+}: {
+  form: ApplicationForm;
+  saving: boolean;
+  onField: <Key extends keyof ApplicationForm>(field: Key, value: ApplicationForm[Key]) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <tr className="bg-orange-50/50">
+      <td className="px-4 py-2" />
+      <td className="px-2 py-2">
+        <Input
+          autoFocus
+          aria-label="Nuevo código unificador de aplicación"
+          value={form.unifiedCode}
+          onChange={(event) => onField('unifiedCode', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <select
+          aria-label="Nuevo tipo de aplicación"
+          value={form.vehicleType}
+          onChange={(event) =>
+            onField('vehicleType', event.target.value as ApplicationForm['vehicleType'])
+          }
+          className="h-10 min-w-36 rounded-md border bg-white px-2 text-sm"
+        >
+          <option value="">Selecciona</option>
+          <option value="AUTOMOTRIZ">Automotriz</option>
+          <option value="INDUSTRIAL">Industrial</option>
+        </select>
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nueva marca de aplicación"
+          value={form.make}
+          onChange={(event) => onField('make', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo modelo de aplicación"
+          value={form.model}
+          onChange={(event) => onField('model', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo año desde"
+          type="number"
+          min={1886}
+          max={2200}
+          value={form.yearFrom}
+          onChange={(event) => onField('yearFrom', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo año hasta"
+          type="number"
+          min={1886}
+          max={2200}
+          value={form.yearTo}
+          onChange={(event) => onField('yearTo', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo motor"
+          value={form.engine}
+          onChange={(event) => onField('engine', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevas notas"
+          value={form.notes}
+          onChange={(event) => onField('notes', event.target.value)}
+        />
+      </td>
+      <td className="px-4 py-2">Manual</td>
+      <td className="px-4 py-2">Activo</td>
+      <td className="px-2 py-2">
+        <div className="flex gap-1">
+          <Button
+            type="button"
+            size="icon"
+            aria-label="Guardar nueva aplicación"
+            onClick={onSave}
+            disabled={saving}
+          >
+            <Check className="size-4" aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Cancelar nueva aplicación"
+            onClick={onCancel}
+            disabled={saving}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -895,7 +956,7 @@ function InlineApplicationCell({
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      onSave();
+      (event.currentTarget as HTMLElement).blur();
     }
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -934,6 +995,7 @@ function InlineApplicationCell({
             value={editing.draft}
             disabled={saving}
             onChange={(event) => onDraft(event.target.value)}
+            onBlur={onSave}
             onKeyDown={onKeyDown}
             aria-label={`Editar ${label}`}
             className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
@@ -950,17 +1012,13 @@ function InlineApplicationCell({
             min={column === 'yearFrom' || column === 'yearTo' ? 1886 : undefined}
             max={column === 'yearFrom' || column === 'yearTo' ? 2200 : undefined}
             onChange={(event) => onDraft(event.target.value)}
+            onBlur={onSave}
             onKeyDown={onKeyDown}
             aria-label={`Editar ${label}`}
             className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
           />
         )}
-        <Button type="button" size="sm" disabled={saving} onClick={onSave}>
-          {saving ? 'Guardando…' : 'Guardar'}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
-          Cancelar
-        </Button>
+        {saving ? <span className="text-xs text-muted-foreground">Guardando…</span> : null}
       </div>
     </td>
   );

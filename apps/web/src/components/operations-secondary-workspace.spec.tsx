@@ -10,8 +10,13 @@ const codeAffixApi = vi.hoisted(() => ({
   updateCodeAffix: vi.fn(),
   validateCodeAffix: vi.fn(),
 }));
+const tabularExport = vi.hoisted(() => ({
+  downloadCsv: vi.fn(),
+  downloadXlsx: vi.fn(),
+}));
 
 vi.mock('@/lib/code-affix-api', () => codeAffixApi);
+vi.mock('@/lib/tabular-export', () => tabularExport);
 
 import {
   OperationsSecondaryWorkspace,
@@ -36,9 +41,23 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
       ],
       columns: [
         { key: 'sku', label: 'SKU', type: 'text' },
+        { key: 'category', label: 'Categoría', type: 'text' },
+        { key: 'template', label: 'Plantilla', type: 'text' },
         { key: 'status', label: 'Estado PIM', type: 'status' },
+        { key: 'eligibility', label: 'Elegibilidad base', type: 'status' },
       ],
-      rows: [{ id: 'p-1', values: { sku: 'SKU-REAL-1', status: 'in_review' } }],
+      rows: [
+        {
+          id: 'p-1',
+          values: {
+            sku: 'SKU-REAL-1',
+            category: 'Rodamientos',
+            template: 'Rodamiento Rígido de Bolas',
+            status: 'in_review',
+            eligibility: 'No publicable',
+          },
+        },
+      ],
       totalRows: 1,
       notices: [
         {
@@ -61,6 +80,12 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
           label: 'Publicar en canal',
           availability: 'blocked',
           reason: 'No existe una regla de elegibilidad aprobada.',
+        },
+        {
+          id: 'configure-publication-fields',
+          label: 'Configurar campos por categoría',
+          availability: 'blocked',
+          reason: 'Falta el contrato para persistir la selección por categoría.',
         },
       ],
     };
@@ -160,7 +185,7 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
 
   return {
     slug: 'reports',
-    operationalStatus: 'operational',
+    operationalStatus: 'partial',
     generatedAt: '2026-10-05T12:00:00.000Z',
     metrics: [{ key: 'products', label: 'Productos', value: 7, format: 'integer' }],
     columns: [
@@ -173,10 +198,21 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
         id: 'status:draft',
         values: { section: 'Estado', indicator: 'draft', value: 2 },
       },
+      {
+        id: 'brand:fag',
+        values: { section: 'Marca', indicator: 'FAG', value: 1 },
+      },
     ],
-    totalRows: 1,
+    totalRows: 2,
     notices: [],
-    actions: [],
+    actions: [
+      {
+        id: 'create-client-report-format',
+        label: 'Nuevo formato desde plantilla del cliente',
+        availability: 'blocked',
+        reason: 'Aún no se recibieron los Excel definitivos.',
+      },
+    ],
   };
 }
 
@@ -191,9 +227,54 @@ describe('OperationsSecondaryWorkspace', () => {
     renderView('publication', 'channels');
 
     expect(screen.getByText('Borradores')).toBeVisible();
-    expect(screen.getByText('SKU-REAL-1')).toBeVisible();
+    expect(screen.getAllByText('SKU-REAL-1').length).toBeGreaterThan(0);
     expect(screen.getByText('No existe una regla de elegibilidad aprobada.')).toBeVisible();
+    expect(screen.getAllByText('Rodamientos').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Configurar Campos' })).toBeDisabled();
+    expect(
+      screen.getByText('Falta el contrato para persistir la selección por categoría.'),
+    ).toBeVisible();
     expect(screen.queryByText('45.280')).not.toBeInTheDocument();
+  });
+
+  it('no mantiene una vista previa cuando la búsqueda no tiene candidatos', () => {
+    renderView('publication', 'channels');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /Buscar candidatos/u }), {
+      target: { value: 'SKU-QUE-NO-EXISTE' },
+    });
+
+    expect(screen.getByText('No hay candidatos que coincidan con la búsqueda.')).toBeVisible();
+    expect(screen.getByText('Sin SKU seleccionado')).toBeVisible();
+  });
+
+  it('muestra reportes en tabla lineal y exporta solo las filas filtradas', () => {
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    renderView('reports', 'reports');
+
+    expect(screen.getByRole('heading', { name: 'Reporte Operativo del PIM' })).toBeVisible();
+    expect(screen.getByText('draft')).toBeVisible();
+    expect(screen.getByText('FAG')).toBeVisible();
+    expect(screen.getByRole('button', { name: /Nuevo Formato desde Plantilla/ })).toBeDisabled();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filtrar por sección' }), {
+      target: { value: 'Marca' },
+    });
+    expect(screen.queryByText('draft')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Excel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir / Guardar PDF' }));
+
+    expect(tabularExport.downloadCsv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: ['Sección', 'Indicador', 'Cantidad'],
+        rows: [['Marca', 'FAG', 1]],
+      }),
+      'reporte-cdr',
+    );
+    expect(tabularExport.downloadXlsx).toHaveBeenCalledOnce();
+    expect(print).toHaveBeenCalledOnce();
+    expect(document.querySelector('#cdr-report-print-area')).toBeInTheDocument();
   });
 
   it('mantiene la consulta de imágenes deshabilitada sin contrato', () => {

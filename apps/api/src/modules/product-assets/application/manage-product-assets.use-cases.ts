@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  type ProductAssetBatchQuery,
   PRODUCT_ASSET_ZIP_MAX_FILES,
   type ProductAssetBulkMode,
   type ProductAssetSelector,
@@ -8,6 +9,7 @@ import {
 import {
   type Clock,
   NotFoundError,
+  type Uuid,
   ValidationError,
   assertUuid,
   getCorrelationId,
@@ -90,6 +92,34 @@ export class ListProductAssetsUseCase {
   async execute(selector: ProductAssetSelector): Promise<ProductAsset[]> {
     const product = await resolveProduct(selector, this.products);
     return this.assets.listByProductId(product.id);
+  }
+}
+
+export interface ProductAssetBatch {
+  readonly productId: Uuid;
+  readonly assets: ProductAsset[];
+}
+
+@Injectable()
+export class ListProductAssetBatchUseCase {
+  constructor(
+    @Inject(PRODUCT_ASSET_REPOSITORY)
+    private readonly assets: ProductAssetRepositoryPort,
+  ) {}
+
+  async execute(query: ProductAssetBatchQuery): Promise<ProductAssetBatch[]> {
+    const assets = await this.assets.listByProductIds(query.productIds.map((id) => assertUuid(id)));
+    const byProduct = new Map<string, ProductAsset[]>();
+    for (const asset of assets) {
+      const productId = asset.toSnapshot().productId;
+      const current = byProduct.get(productId) ?? [];
+      current.push(asset);
+      byProduct.set(productId, current);
+    }
+    return query.productIds.map((productId) => ({
+      productId: assertUuid(productId),
+      assets: byProduct.get(productId) ?? [],
+    }));
   }
 }
 

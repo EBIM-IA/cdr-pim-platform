@@ -980,7 +980,7 @@ function DuplicatesWorkspace({ workspace }: { workspace: WorkspaceDto }) {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-xs">
-            <thead className="border-b bg-slate-50 uppercase tracking-wide text-muted-foreground">
+            <thead className="border-b bg-slate-50 tracking-wide text-muted-foreground">
               <tr>
                 {[
                   'SKU A',
@@ -1053,7 +1053,7 @@ function ReviewWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-xs">
-              <thead className="border-b bg-slate-50 uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b bg-slate-50 tracking-wide text-muted-foreground">
                 <tr>
                   {['Solicitud', 'SKU', 'Solicitante', 'Prioridad', 'Estado', 'Acción'].map(
                     (heading) => (
@@ -1301,7 +1301,7 @@ function SourcesWorkspace({
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-left text-xs">
-                <thead className="border-b bg-slate-50 uppercase tracking-wide text-muted-foreground">
+                <thead className="border-b bg-slate-50 tracking-wide text-muted-foreground">
                   <tr>
                     {['Categoría', 'Aplicación', 'Fabricante', 'Archivo', 'TecDoc', 'Manual'].map(
                       (heading) => (

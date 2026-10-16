@@ -1,11 +1,18 @@
 'use client';
 
-import type { GroupOemCodeDto, OemApprovalStatus, OemSearchResultDto } from '@cdr/contracts';
-import { Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import type {
+  GroupOemCodeDto,
+  OemApprovalStatus,
+  OemSearchResultDto,
+  UpdateGroupOemCodeInput,
+} from '@cdr/contracts';
+import { Check, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload, X } from 'lucide-react';
+import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
+import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,14 +26,22 @@ import {
   updateOemCode,
 } from '@/lib/operational-api';
 
-interface OemForm {
+type EditableOemColumn = 'oemCode' | 'brands' | 'approvalStatus';
+
+interface OemDraft {
   unifiedCode: string;
   oemCode: string;
   brands: string;
   approvalStatus: OemApprovalStatus;
 }
 
-const emptyForm: OemForm = {
+interface EditingOemCell {
+  id: string;
+  column: EditableOemColumn;
+  draft: string;
+}
+
+const emptyDraft: OemDraft = {
   unifiedCode: '',
   oemCode: '',
   brands: '',
@@ -38,6 +53,36 @@ const labels: Record<OemApprovalStatus, string> = {
   approved: 'Aprobado',
   rejected: 'Rechazado',
 };
+
+function splitBrands(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((brand) => brand.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function oemUpdate(
+  row: GroupOemCodeDto,
+  column: EditableOemColumn,
+  draft: string,
+): UpdateGroupOemCodeInput {
+  const value = draft.trim();
+  if (!value) throw new Error('El valor no puede quedar vacío.');
+  if (column === 'brands') {
+    return { expectedUpdatedAt: row.updatedAt, brands: splitBrands(value) };
+  }
+  if (column === 'approvalStatus') {
+    if (value !== 'pending' && value !== 'approved' && value !== 'rejected') {
+      throw new Error('El estado de aprobación no es válido.');
+    }
+    return { expectedUpdatedAt: row.updatedAt, approvalStatus: value };
+  }
+  return { expectedUpdatedAt: row.updatedAt, oemCode: value };
+}
 
 export function OemCodesWorkspace({
   canWrite,
@@ -52,10 +97,14 @@ export function OemCodesWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<OemForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [newRow, setNewRow] = useState(false);
+  const [newDraft, setNewDraft] = useState<OemDraft>(emptyDraft);
+  const [editingCell, setEditingCell] = useState<EditingOemCell | null>(null);
+  const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [savingNew, setSavingNew] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [eligibleQuery, setEligibleQuery] = useState('');
   const [eligibleResults, setEligibleResults] = useState<OemSearchResultDto[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -79,52 +128,112 @@ export function OemCodesWorkspace({
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('es');
     if (!normalized) return items;
-    return items.filter((item) =>
-      [item.unifiedCode, item.oemCode, ...item.brands, item.approvalStatus].some((value) =>
+    return items.filter((row) =>
+      [row.unifiedCode, row.oemCode, ...row.brands, row.approvalStatus].some((value) =>
         value.toLocaleLowerCase('es').includes(normalized),
       ),
     );
   }, [items, query]);
 
-  const closeForm = () => {
-    setForm(emptyForm);
-    setEditingId(null);
-    setShowForm(false);
+  const toggleSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const brands = form.brands
-      .split(',')
-      .map((brand) => brand.trim())
-      .filter(Boolean);
-    setSaving(true);
+  const createInline = async () => {
+    setSavingNew(true);
     setError(null);
     try {
-      if (editingId) {
-        const current = items.find((item) => item.id === editingId);
-        if (!current)
-          throw new Error('El código OEM cambió; actualiza la lista e inténtalo de nuevo.');
-        await updateOemCode(editingId, {
-          expectedUpdatedAt: current.updatedAt,
-          oemCode: form.oemCode,
-          brands,
-          approvalStatus: form.approvalStatus,
-        });
-        setNotice('Código OEM actualizado.');
-      } else {
-        await createOemCode({ ...form, brands, active: true });
-        setNotice('Código OEM creado para el grupo automotriz.');
-      }
-      closeForm();
-      await load();
+      const created = await createOemCode({
+        unifiedCode: newDraft.unifiedCode,
+        oemCode: newDraft.oemCode,
+        brands: splitBrands(newDraft.brands),
+        approvalStatus: newDraft.approvalStatus,
+        active: true,
+      });
+      setItems((rows) => [created, ...rows]);
+      setNewDraft(emptyDraft);
+      setNewRow(false);
+      setNotice('Código OEM creado.');
+      onCountChange?.(items.length + 1);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No fue posible crear OEM.');
+    } finally {
+      setSavingNew(false);
+    }
+  };
+
+  const saveCell = async (row: GroupOemCodeDto) => {
+    if (!editingCell || editingCell.id !== row.id) return;
+    const current = editingCell;
+    const previous =
+      current.column === 'brands' ? row.brands.join(', ') : String(row[current.column]);
+    setEditingCell(null);
+    if (current.draft.trim() === previous) return;
+    const key = `${row.id}:${current.column}`;
+    setSavingCell(key);
+    setError(null);
+    try {
+      const updated = await updateOemCode(row.id, oemUpdate(row, current.column, current.draft));
+      setItems((rows) => rows.map((item) => (item.id === row.id ? updated : item)));
+      setNotice('Cambio OEM guardado y auditado.');
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : 'No fue posible guardar OEM.',
       );
     } finally {
-      setSaving(false);
+      setSavingCell(null);
     }
+  };
+
+  const deactivateSelected = async () => {
+    const selected = items.filter((row) => selectedIds.has(row.id) && row.active);
+    if (selected.length === 0) return;
+    setDeleting(true);
+    setError(null);
+    const results = await Promise.allSettled(
+      selected.map((row) => deactivateOemCode(row.id, row.updatedAt)),
+    );
+    const succeeded = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    setItems((rows) =>
+      includeInactive
+        ? rows.map((row) => succeeded.find((item) => item.id === row.id) ?? row)
+        : rows.filter((row) => !succeeded.some((item) => item.id === row.id)),
+    );
+    setSelectedIds(new Set());
+    setNotice(`${succeeded.length} de ${selected.length} códigos OEM fueron desactivados.`);
+    if (succeeded.length !== selected.length) {
+      setError('Algunas filas cambiaron en el servidor y no se desactivaron. Actualiza la vista.');
+    }
+    setDeleting(false);
+  };
+
+  const reactivateSelected = async () => {
+    const selected = items.filter((row) => selectedIds.has(row.id) && !row.active);
+    if (selected.length === 0) return;
+    setRestoring(true);
+    setError(null);
+    const results = await Promise.allSettled(
+      selected.map((row) =>
+        updateOemCode(row.id, { expectedUpdatedAt: row.updatedAt, active: true }),
+      ),
+    );
+    const succeeded = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    setItems((rows) => rows.map((row) => succeeded.find((item) => item.id === row.id) ?? row));
+    setSelectedIds(new Set());
+    setNotice(`${succeeded.length} de ${selected.length} códigos OEM fueron reactivados.`);
+    if (succeeded.length !== selected.length) {
+      setError('Algunas filas cambiaron en el servidor y no se reactivaron. Actualiza la vista.');
+    }
+    setRestoring(false);
   };
 
   const runEligibleSearch = async (event: FormEvent) => {
@@ -141,38 +250,71 @@ export function OemCodesWorkspace({
     }
   };
 
-  const edit = (item: GroupOemCodeDto) => {
-    setEditingId(item.id);
-    setForm({
-      unifiedCode: item.unifiedCode,
-      oemCode: item.oemCode,
-      brands: item.brands.join(', '),
-      approvalStatus: item.approvalStatus,
-    });
-    setShowForm(true);
-  };
-
-  const setActive = async (item: GroupOemCodeDto, active: boolean) => {
-    setError(null);
-    try {
-      if (active) {
-        await updateOemCode(item.id, { active: true, expectedUpdatedAt: item.updatedAt });
-      } else {
-        await deactivateOemCode(item.id, item.updatedAt);
-      }
-      setNotice(active ? 'Código OEM reactivado.' : 'Código OEM desactivado.');
-      await load();
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'No fue posible cambiar el estado OEM.',
-      );
-    }
-  };
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      <div className="sticky top-[7.25rem] z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-white p-2 shadow-sm">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void load()}
+          disabled={loading}
+        >
+          <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} aria-hidden="true" />
+          Actualizar
+        </Button>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/imports">
+            <Upload className="size-4" aria-hidden="true" /> Importar
+          </Link>
+        </Button>
+        <TableExportButtons
+          filename="codigos-oem-filtrados"
+          sheetName="OEM"
+          headers={['Código unificador', 'Código OEM', 'Marcas', 'Aprobación', 'Estado']}
+          rows={filtered.map((row) => [
+            row.unifiedCode,
+            row.oemCode,
+            row.brands.join(', '),
+            labels[row.approvalStatus],
+            row.active ? 'Activo' : 'Inactivo',
+          ])}
+          disabled={loading}
+        />
+        {canWrite ? (
+          <>
+            <Button type="button" size="sm" onClick={() => setNewRow(true)} disabled={newRow}>
+              <Plus className="size-4" aria-hidden="true" /> Agregar fila
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void deactivateSelected()}
+              disabled={deleting || selectedIds.size === 0}
+            >
+              <Trash2 className="size-4" aria-hidden="true" />
+              {deleting ? 'Eliminando…' : `Eliminar selección (${selectedIds.size})`}
+            </Button>
+            {includeInactive ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void reactivateSelected()}
+                disabled={restoring || selectedIds.size === 0}
+              >
+                <RotateCcw className="size-4" aria-hidden="true" />
+                {restoring ? 'Reactivando…' : 'Reactivar selección'}
+              </Button>
+            ) : null}
+          </>
+        ) : null}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {selectedIds.size} seleccionados
+        </span>
+      </div>
+
       {notice ? (
         <div
           className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
@@ -190,171 +332,53 @@ export function OemCodesWorkspace({
         </div>
       ) : null}
 
-      <Card className="p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">Búsqueda OEM elegible</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Solo devuelve relaciones activas y aprobadas de grupos automotrices.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => void load()} disabled={loading}>
-              <RefreshCw
-                className={loading ? 'size-4 animate-spin' : 'size-4'}
-                aria-hidden="true"
-              />
-              Actualizar
-            </Button>
-            {canWrite ? (
-              <Button
-                onClick={() => {
-                  closeForm();
-                  setShowForm(true);
-                }}
-              >
-                <Plus className="size-4" aria-hidden="true" />
-                Nuevo OEM
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={runEligibleSearch}>
-          <Input
-            value={eligibleQuery}
-            onChange={(event) => setEligibleQuery(event.target.value)}
-            placeholder="Código OEM exacto o marca"
-            aria-label="Código OEM o marca"
-          />
-          <Button type="submit" disabled={searching || !eligibleQuery.trim()}>
-            <Search className="size-4" aria-hidden="true" />
-            {searching ? 'Buscando…' : 'Buscar'}
-          </Button>
-        </form>
-        {eligibleResults ? (
-          <div className="mt-4 space-y-2">
-            {eligibleResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No hay coincidencias OEM activas y aprobadas.
-              </p>
-            ) : (
-              eligibleResults.map((result) => (
-                <div key={result.oem.id} className="rounded-lg border bg-slate-50 p-3 text-sm">
-                  <strong>{result.oem.oemCode}</strong>
-                  <span className="ml-2 text-muted-foreground">
-                    {result.oem.brands.join(', ')} → {result.oem.unifiedCode}
-                  </span>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    SKU:{' '}
-                    {result.products.map((product) => product.sku).join(', ') || 'sin productos'}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-        ) : null}
-      </Card>
-
-      {showForm ? (
-        <Card className="p-5">
-          <form onSubmit={submit}>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-semibold">
-                {editingId ? 'Editar código OEM' : 'Nuevo código OEM'}
-              </h2>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                onClick={closeForm}
-                aria-label="Cerrar"
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Código unificador
-                <Input
-                  required
-                  disabled={Boolean(editingId)}
-                  value={form.unifiedCode}
-                  onChange={(event) =>
-                    setForm((value) => ({ ...value, unifiedCode: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Código OEM
-                <Input
-                  required
-                  value={form.oemCode}
-                  onChange={(event) =>
-                    setForm((value) => ({ ...value, oemCode: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Marcas (separadas por coma)
-                <Input
-                  required
-                  value={form.brands}
-                  onChange={(event) =>
-                    setForm((value) => ({ ...value, brands: event.target.value }))
-                  }
-                />
-              </label>
-              <Select
-                label="Aprobación"
-                value={form.approvalStatus}
-                onChange={(event) =>
-                  setForm((value) => ({
-                    ...value,
-                    approvalStatus: event.target.value as OemApprovalStatus,
-                  }))
-                }
-              >
-                <option value="pending">Pendiente</option>
-                <option value="approved">Aprobado</option>
-                <option value="rejected">Rechazado</option>
-              </Select>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={closeForm}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Guardando…' : 'Guardar'}
-              </Button>
-            </div>
-          </form>
-        </Card>
-      ) : null}
-
       <Card className="p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-          <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-            Buscar en la tabla
+        <div className="grid gap-3 lg:grid-cols-2">
+          <label className="relative block">
+            <span className="sr-only">Buscar en OEM</span>
+            <Search
+              className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
             <Input
+              className="pl-9"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Código OEM, unificador, marca o estado"
             />
           </label>
-          <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(event) => setIncludeInactive(event.target.checked)}
+          <form className="flex gap-2" onSubmit={runEligibleSearch}>
+            <Input
+              value={eligibleQuery}
+              onChange={(event) => setEligibleQuery(event.target.value)}
+              placeholder="Validar OEM activo/aprobado"
+              aria-label="Código OEM o marca elegible"
             />
-            Mostrar inactivos
-          </label>
+            <Button type="submit" variant="outline" disabled={searching || !eligibleQuery.trim()}>
+              {searching ? 'Buscando…' : 'Validar'}
+            </Button>
+          </form>
         </div>
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeInactive}
+            onChange={(event) => setIncludeInactive(event.target.checked)}
+          />{' '}
+          Mostrar inactivos
+        </label>
+        {eligibleResults ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {eligibleResults.length === 0
+              ? 'No existe una relación OEM activa y aprobada.'
+              : `${eligibleResults.length} relación(es) elegible(s).`}
+          </p>
+        ) : null}
       </Card>
 
       {loading ? (
         <Skeleton className="h-72 rounded-xl" />
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && !newRow ? (
         <StatePanel
           variant="empty"
           title="Sin códigos OEM"
@@ -363,73 +387,152 @@ export function OemCodesWorkspace({
       ) : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[960px] text-left text-sm">
               <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                 <tr>
+                  <th className="w-12 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleccionar todos los OEM visibles"
+                      checked={
+                        filtered.length > 0 && filtered.every((row) => selectedIds.has(row.id))
+                      }
+                      onChange={(event) =>
+                        setSelectedIds(
+                          event.target.checked ? new Set(filtered.map((row) => row.id)) : new Set(),
+                        )
+                      }
+                    />
+                  </th>
                   <th className="px-4 py-3">Código unificador</th>
                   <th className="px-4 py-3">Código OEM</th>
                   <th className="px-4 py-3">Marcas</th>
                   <th className="px-4 py-3">Aprobación</th>
                   <th className="px-4 py-3">Estado</th>
-                  <th className="px-4 py-3 text-right">Acciones</th>
+                  <th className="px-4 py-3">Guardado</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
-                    <td className="px-4 py-3 font-mono">{item.oemCode}</td>
-                    <td className="px-4 py-3">{item.brands.join(', ')}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge
-                        tone={
-                          item.approvalStatus === 'approved'
-                            ? 'success'
-                            : item.approvalStatus === 'rejected'
-                              ? 'danger'
-                              : 'warning'
+                {newRow ? (
+                  <tr className="bg-orange-50/50">
+                    <td className="px-4 py-2" />
+                    <td className="px-2 py-2">
+                      <Input
+                        autoFocus
+                        aria-label="Nuevo código unificador OEM"
+                        value={newDraft.unifiedCode}
+                        onChange={(event) =>
+                          setNewDraft((draft) => ({ ...draft, unifiedCode: event.target.value }))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        aria-label="Nuevo código OEM"
+                        value={newDraft.oemCode}
+                        onChange={(event) =>
+                          setNewDraft((draft) => ({ ...draft, oemCode: event.target.value }))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        aria-label="Nuevas marcas OEM"
+                        value={newDraft.brands}
+                        onChange={(event) =>
+                          setNewDraft((draft) => ({ ...draft, brands: event.target.value }))
+                        }
+                        placeholder="Separadas por coma"
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Select
+                        label=""
+                        value={newDraft.approvalStatus}
+                        onChange={(event) =>
+                          setNewDraft((draft) => ({
+                            ...draft,
+                            approvalStatus: event.target.value as OemApprovalStatus,
+                          }))
                         }
                       >
-                        {labels[item.approvalStatus]}
-                      </StatusBadge>
+                        <option value="pending">Pendiente</option>
+                        <option value="approved">Aprobado</option>
+                        <option value="rejected">Rechazado</option>
+                      </Select>
                     </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge tone={item.active ? 'success' : 'neutral'}>
-                        {item.active ? 'Activo' : 'Inactivo'}
-                      </StatusBadge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        {canWrite ? (
-                          <>
-                            <Button size="sm" variant="ghost" onClick={() => edit(item)}>
-                              <Pencil className="size-4" />
-                              Editar
-                            </Button>
-                            {item.active ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void setActive(item, false)}
-                              >
-                                <Trash2 className="size-4" />
-                                Desactivar
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void setActive(item, true)}
-                              >
-                                <RotateCcw className="size-4" />
-                                Reactivar
-                              </Button>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Solo lectura</span>
-                        )}
+                    <td className="px-4 py-2">Activo</td>
+                    <td className="px-2 py-2">
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          aria-label="Guardar nuevo OEM"
+                          disabled={savingNew}
+                          onClick={() => void createInline()}
+                        >
+                          <Check className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Cancelar nuevo OEM"
+                          disabled={savingNew}
+                          onClick={() => {
+                            setNewRow(false);
+                            setNewDraft(emptyDraft);
+                          }}
+                        >
+                          <X className="size-4" />
+                        </Button>
                       </div>
+                    </td>
+                  </tr>
+                ) : null}
+                {filtered.map((row) => (
+                  <tr key={row.id} className="hover:bg-orange-50/40">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleccionar OEM ${row.oemCode}`}
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => toggleSelection(row.id)}
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-semibold">{row.unifiedCode}</td>
+                    {(['oemCode', 'brands', 'approvalStatus'] as const).map((column) => (
+                      <EditableOemCell
+                        key={column}
+                        row={row}
+                        column={column}
+                        canWrite={canWrite && row.active}
+                        editing={
+                          editingCell?.id === row.id && editingCell.column === column
+                            ? editingCell
+                            : null
+                        }
+                        saving={savingCell === `${row.id}:${column}`}
+                        onStart={() =>
+                          setEditingCell({
+                            id: row.id,
+                            column,
+                            draft:
+                              column === 'brands' ? row.brands.join(', ') : String(row[column]),
+                          })
+                        }
+                        onDraft={(draft) => setEditingCell({ id: row.id, column, draft })}
+                        onSave={() => void saveCell(row)}
+                        onCancel={() => setEditingCell(null)}
+                      />
+                    ))}
+                    <td className="px-4 py-3">
+                      <StatusBadge tone={row.active ? 'success' : 'neutral'}>
+                        {row.active ? 'Activo' : 'Inactivo'}
+                      </StatusBadge>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {savingCell?.startsWith(`${row.id}:`) ? 'Guardando…' : 'Al día'}
                     </td>
                   </tr>
                 ))}
@@ -439,5 +542,88 @@ export function OemCodesWorkspace({
         </Card>
       )}
     </div>
+  );
+}
+
+function EditableOemCell({
+  row,
+  column,
+  canWrite,
+  editing,
+  saving,
+  onStart,
+  onDraft,
+  onSave,
+  onCancel,
+}: {
+  row: GroupOemCodeDto;
+  column: EditableOemColumn;
+  canWrite: boolean;
+  editing: EditingOemCell | null;
+  saving: boolean;
+  onStart: () => void;
+  onDraft: (draft: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const label = column === 'oemCode' ? 'Código OEM' : column === 'brands' ? 'Marcas' : 'Aprobación';
+  const display =
+    column === 'brands'
+      ? row.brands.join(', ')
+      : column === 'approvalStatus'
+        ? labels[row.approvalStatus]
+        : row.oemCode;
+  if (!editing)
+    return (
+      <td className="px-3 py-2">
+        <button
+          type="button"
+          disabled={!canWrite || saving}
+          aria-label={`Editar ${label} de ${row.oemCode}`}
+          className="min-h-9 w-full rounded px-2 text-left hover:bg-white hover:ring-1 hover:ring-orange-200 disabled:cursor-default"
+          onClick={onStart}
+        >
+          {display}
+        </button>
+      </td>
+    );
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.currentTarget.blur();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+    }
+  };
+  return (
+    <td className="px-2 py-2">
+      {column === 'approvalStatus' ? (
+        <select
+          autoFocus
+          aria-label={`Editar ${label}`}
+          value={editing.draft}
+          onChange={(event) => onDraft(event.target.value)}
+          onBlur={onSave}
+          onKeyDown={onKeyDown}
+          className="h-9 w-full rounded-md border bg-white px-2 text-sm"
+        >
+          <option value="pending">Pendiente</option>
+          <option value="approved">Aprobado</option>
+          <option value="rejected">Rechazado</option>
+        </select>
+      ) : (
+        <input
+          autoFocus
+          aria-label={`Editar ${label}`}
+          value={editing.draft}
+          onChange={(event) => onDraft(event.target.value)}
+          onBlur={onSave}
+          onKeyDown={onKeyDown}
+          className="h-9 w-full min-w-36 rounded-md border bg-white px-2 text-sm"
+        />
+      )}
+    </td>
   );
 }

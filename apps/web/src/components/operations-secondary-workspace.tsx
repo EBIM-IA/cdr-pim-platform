@@ -21,12 +21,15 @@ import {
   Check,
   CheckCircle2,
   Database,
+  Download,
   FileArchive,
+  FileSpreadsheet,
   ImageIcon,
   KeyRound,
   LockKeyhole,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   ServerCog,
@@ -50,6 +53,7 @@ import {
   formatWorkspaceMetric,
   isCompactWorkspaceStatus,
 } from '@/lib/workspace-view';
+import { downloadCsv, downloadXlsx, type TabularData } from '@/lib/tabular-export';
 import { cn } from '@/lib/utils';
 import {
   createCodeAffix,
@@ -106,9 +110,9 @@ interface ViewDefinition {
 const viewDefinitions: Record<OperationsSecondaryView, ViewDefinition> = {
   channels: {
     slug: 'publication',
-    title: 'Publicación por canal',
+    title: 'Publicación por Canal',
     description:
-      'Candidatos persistidos y condiciones conocidas antes de exponer productos a un canal.',
+      'Candidatos persistidos, agrupados por categoría y plantilla, antes de exponer productos a un canal.',
     icon: CheckCircle2,
     emptyTitle: 'No hay candidatos de publicación',
     emptyDescription: 'El backend no devolvió productos en estado de revisión para este corte.',
@@ -200,7 +204,7 @@ const viewDefinitions: Record<OperationsSecondaryView, ViewDefinition> = {
   reports: {
     slug: 'reports',
     title: 'Reportes',
-    description: 'Agregados vivos calculados sobre el catálogo persistido.',
+    description: 'Agregados vivos del catálogo en una tabla filtrable y exportable.',
     icon: BarChart3,
     emptyTitle: 'No hay agregados disponibles',
     emptyDescription: 'El backend no publicó indicadores para este corte.',
@@ -313,8 +317,18 @@ function blockedActions(workspace: WorkspaceDto) {
   );
 }
 
-function BlockedBanner({ workspace, fallback }: { workspace: WorkspaceDto; fallback: string }) {
+function BlockedBanner({
+  workspace,
+  fallback,
+  actionId,
+}: {
+  workspace: WorkspaceDto;
+  fallback: string;
+  actionId?: string;
+}) {
   const blocked = blockedActions(workspace);
+  const action =
+    (actionId ? blocked.find((candidate) => candidate.id === actionId) : undefined) ?? blocked[0];
   return (
     <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
       <span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-100">
@@ -322,10 +336,10 @@ function BlockedBanner({ workspace, fallback }: { workspace: WorkspaceDto; fallb
       </span>
       <div>
         <strong className="block text-sm">
-          {blocked[0]?.label ?? 'Capacidad pendiente de contrato'}
+          {action?.label ?? 'Capacidad pendiente de contrato'}
         </strong>
         <p className="mt-1 text-xs leading-relaxed text-amber-900/75">
-          {blocked[0]?.reason ?? fallback}
+          {action?.reason ?? fallback}
         </p>
       </div>
     </div>
@@ -339,38 +353,249 @@ function PublicationSurface({
   workspace: WorkspaceDto;
   definition: ViewDefinition;
 }) {
+  const groups = useMemo(() => {
+    const grouped = new Map<string, { category: string; template: string; rows: WorkspaceRow[] }>();
+    workspace.rows.forEach((row) => {
+      const category = String(row.values.category ?? 'Sin categoría asignada');
+      const template = String(row.values.template ?? 'Sin plantilla activa');
+      const key = `${category}\u0000${template}`;
+      const current = grouped.get(key);
+      if (current) current.rows.push(row);
+      else grouped.set(key, { category, template, rows: [row] });
+    });
+    return [...grouped.entries()].map(([key, value]) => ({ key, ...value }));
+  }, [workspace.rows]);
+  const [groupKey, setGroupKey] = useState('');
+  const activeGroup = groups.find((group) => group.key === groupKey) ?? groups[0];
+  const activeRows = activeGroup?.rows;
+  const [query, setQuery] = useState('');
+  const candidates = useMemo(
+    () => filterWorkspaceRows(activeRows ?? [], workspace.columns, query),
+    [activeRows, query, workspace.columns],
+  );
+  const [selectedRowId, setSelectedRowId] = useState('');
+  const selected = candidates.find((row) => row.id === selectedRowId) ?? candidates[0];
+
+  useEffect(() => {
+    if (!candidates.some((row) => row.id === selectedRowId)) {
+      setSelectedRowId(candidates[0]?.id ?? '');
+    }
+  }, [candidates, selectedRowId]);
+
+  if (!activeGroup) return <EmptyCapability definition={definition} />;
+
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.7fr)_minmax(0,1.8fr)]">
-      <Card className="p-5">
-        <h3 className="text-base font-semibold text-cdr-ink">Canales</h3>
-        <div className="mt-3 space-y-3">
-          {workspace.actions.map((action) => (
-            <div
-              key={action.id}
-              className="flex items-start justify-between gap-3 border-b py-3 last:border-0"
-            >
-              <span className="min-w-0">
-                <strong className="block text-sm text-cdr-ink">{action.label}</strong>
-                <small className="mt-1 block break-words leading-relaxed text-muted-foreground">
-                  {action.availability === 'blocked'
-                    ? action.reason
-                    : `${action.method} ${action.endpoint}`}
-                </small>
-              </span>
-              <StatusBadge tone={action.availability === 'supported' ? 'success' : 'warning'}>
-                {action.availability === 'supported' ? 'Disponible' : 'Pendiente'}
-              </StatusBadge>
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.7fr)]">
+        <Card className="overflow-hidden">
+          <div className="border-b bg-slate-50/70 px-4 py-3">
+            <h3 className="text-sm font-semibold text-cdr-ink">Categorías y Plantillas</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              La futura selección de campos aplicará a todos los SKU de la categoría, no a un
+              producto individual.
+            </p>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-2">
+            {groups.map((group) => {
+              const current = group.key === activeGroup.key;
+              const publishable = group.rows.filter(
+                (row) => String(row.values.eligibility) === 'Publicable',
+              ).length;
+              return (
+                <button
+                  key={group.key}
+                  type="button"
+                  aria-pressed={current}
+                  onClick={() => {
+                    setGroupKey(group.key);
+                    setQuery('');
+                  }}
+                  className={cn(
+                    'mb-1 flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-xs transition last:mb-0',
+                    current
+                      ? 'border-orange-300 bg-orange-50 text-cdr-ink'
+                      : 'border-transparent hover:border-slate-200 hover:bg-slate-50',
+                  )}
+                >
+                  <span className="min-w-0">
+                    <strong className="block break-words">{group.category}</strong>
+                    <small className="mt-0.5 block break-words text-muted-foreground">
+                      {group.template}
+                    </small>
+                  </span>
+                  <span className="shrink-0 text-right text-[11px] text-muted-foreground">
+                    {group.rows.length} SKU
+                    <br />
+                    {publishable} elegibles
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-cdr-ink">
+                Configuración de Campos por Categoría
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {activeGroup.category} · {activeGroup.template}
+              </p>
             </div>
-          ))}
+            <Button type="button" size="sm" disabled title="Contrato de configuración pendiente">
+              <SlidersHorizontal className="size-4" aria-hidden="true" /> Configurar Campos
+            </Button>
+          </div>
+          <div className="mt-4">
+            <BlockedBanner
+              workspace={workspace}
+              actionId="configure-publication-fields"
+              fallback="Faltan el contrato del canal y el modelo de persistencia para versionar la selección por categoría."
+            />
+          </div>
+          <div className="mt-4 overflow-x-auto rounded-lg border">
+            <table className="w-full min-w-[520px] text-left text-xs">
+              <thead className="border-b bg-slate-50 text-[11px] text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2.5">Campo Disponible en la Proyección</th>
+                  <th className="px-3 py-2.5">Origen</th>
+                  <th className="px-3 py-2.5">Política del Canal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {workspace.columns.map((column) => (
+                  <tr key={column.key}>
+                    <td className="px-3 py-2 font-medium text-cdr-ink">{column.label}</td>
+                    <td className="px-3 py-2 text-slate-600">Proyección autenticada del PIM</td>
+                    <td className="px-3 py-2">
+                      <StatusBadge tone="warning">Por definir</StatusBadge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="overflow-hidden">
+        <div className="flex flex-col gap-3 border-b bg-slate-50/70 p-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-cdr-ink">
+              Candidatos y Vista Previa por SKU
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Valores reales disponibles en PIM; no representan un payload aprobado ni una
+              publicación ejecutada.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 md:min-w-[560px]">
+            <label className="relative block">
+              <span className="sr-only">Buscar candidatos</span>
+              <Search
+                className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar SKU, producto o estado…"
+                className="bg-white pl-9"
+              />
+            </label>
+            <label>
+              <span className="sr-only">SKU para vista previa</span>
+              <select
+                aria-label="SKU para vista previa"
+                value={selected?.id ?? ''}
+                onChange={(event) => setSelectedRowId(event.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-cdr-ink"
+              >
+                {activeGroup.rows.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {String(row.values.sku ?? row.id)} · {String(row.values.brand ?? 'Sin marca')}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
-          La elegibilidad base comprueba los obligatorios activos. Publicar en un canal todavía
-          requiere su política adicional y un adaptador operativo.
+        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
+          <div className="min-w-0 overflow-x-auto border-b lg:border-b-0 lg:border-r">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="border-b bg-slate-50 text-[11px] text-muted-foreground">
+                <tr>
+                  {workspace.columns.map((column) => (
+                    <th key={column.key} className="px-3 py-2.5">
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {candidates.map((row) => (
+                  <tr
+                    key={row.id}
+                    className={cn(
+                      'hover:bg-orange-50/40',
+                      selected?.id === row.id && 'bg-orange-50',
+                    )}
+                  >
+                    {workspace.columns.map((column) => (
+                      <WorkspaceCell key={column.key} row={row} column={column} />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {candidates.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">
+                No hay candidatos que coincidan con la búsqueda.
+              </p>
+            ) : null}
+          </div>
+          <aside className="p-4" aria-label="Vista previa del SKU">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-cdr-ink">
+                {String(selected?.values.sku ?? 'Sin SKU seleccionado')}
+              </h4>
+              {selected ? (
+                <StatusBadge
+                  tone={
+                    String(selected.values.eligibility) === 'Publicable' ? 'success' : 'warning'
+                  }
+                >
+                  {String(selected.values.eligibility ?? 'Sin evaluación')}
+                </StatusBadge>
+              ) : null}
+            </div>
+            <dl className="mt-3 divide-y rounded-lg border">
+              {selected
+                ? workspace.columns.map((column) => (
+                    <div key={column.key} className="grid gap-0.5 px-3 py-2">
+                      <dt className="text-[11px] font-medium text-muted-foreground">
+                        {column.label}
+                      </dt>
+                      <dd className="break-words text-xs text-slate-700">
+                        {formatWorkspaceCell(selected.values[column.key], column)}
+                      </dd>
+                    </div>
+                  ))
+                : null}
+            </dl>
+          </aside>
+        </div>
+        <div className="border-t bg-amber-50 px-4 py-3">
+          <BlockedBanner
+            workspace={workspace}
+            actionId="publish"
+            fallback="La publicación requiere una regla aprobada y un adaptador operativo."
+          />
         </div>
       </Card>
-      <div className="min-w-0">
-        <RowTable workspace={workspace} definition={definition} />
-      </div>
     </div>
   );
 }
@@ -1486,38 +1711,197 @@ function ConnectorCards({ workspace }: { workspace: WorkspaceDto }) {
 }
 
 function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
-  const sections = useMemo(() => {
-    const grouped = new Map<string, WorkspaceRow[]>();
-    workspace.rows.forEach((row) => {
-      const section = String(row.values.section ?? 'Otros');
-      grouped.set(section, [...(grouped.get(section) ?? []), row]);
-    });
-    return [...grouped.entries()];
-  }, [workspace.rows]);
+  const [query, setQuery] = useState('');
+  const [section, setSection] = useState('');
+  const sections = useMemo(
+    () => [...new Set(workspace.rows.map((row) => String(row.values.section ?? 'Otros')))],
+    [workspace.rows],
+  );
+  const rows = useMemo(() => {
+    const searched = filterWorkspaceRows(workspace.rows, workspace.columns, query);
+    return section
+      ? searched.filter((row) => String(row.values.section ?? 'Otros') === section)
+      : searched;
+  }, [query, section, workspace.columns, workspace.rows]);
+  const exportData = useMemo<TabularData>(
+    () => ({
+      headers: workspace.columns.map((column) => column.label),
+      rows: rows.map((row) =>
+        workspace.columns.map((column) => {
+          const value = row.values[column.key];
+          return value === null ? '' : value;
+        }),
+      ),
+      sheetName: 'Reporte PIM',
+    }),
+    [rows, workspace.columns],
+  );
+  const reportFormatAction = blockedActions(workspace).find(
+    (action) => action.id === 'create-client-report-format',
+  );
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {sections.map(([section, rows]) => (
-        <Card key={section} className="flex min-h-52 flex-col p-5">
-          <span className="grid size-10 place-items-center rounded-full bg-orange-100 text-primary">
-            <BarChart3 className="size-5" aria-hidden="true" />
-          </span>
-          <h3 className="mt-3 font-semibold text-cdr-ink">{section}</h3>
-          <div className="mt-3 flex-1 space-y-2">
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                className="flex items-center justify-between gap-4 border-b py-2 last:border-0"
-              >
-                <span className="min-w-0 break-words text-sm text-slate-700">
-                  {String(row.values.indicator ?? row.id)}
-                </span>
-                <strong className="shrink-0 text-cdr-ink">{String(row.values.value ?? '—')}</strong>
-              </div>
-            ))}
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-cdr-ink">Reporte Operativo del PIM</h3>
+            <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              Vista lineal de los agregados reales publicados por el backend. La búsqueda, el filtro
+              y las exportaciones se aplican exactamente a las filas visibles.
+            </p>
           </div>
-        </Card>
-      ))}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled
+              title={reportFormatAction?.reason ?? 'Formato definitivo pendiente'}
+            >
+              <FileSpreadsheet className="size-4" aria-hidden="true" /> Nuevo Formato desde
+              Plantilla
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={rows.length === 0}
+              onClick={() => downloadCsv(exportData, 'reporte-cdr')}
+            >
+              <Download className="size-4" aria-hidden="true" /> CSV
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={rows.length === 0}
+              onClick={() => downloadXlsx(exportData, 'reporte-cdr')}
+            >
+              <FileSpreadsheet className="size-4" aria-hidden="true" /> Excel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={rows.length === 0}
+              onClick={() => window.print()}
+            >
+              <Printer className="size-4" aria-hidden="true" /> Imprimir / Guardar PDF
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.35fr)]">
+          <label className="relative block">
+            <span className="sr-only">Buscar en el reporte</span>
+            <Search
+              className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar sección, indicador o valor…"
+              className="bg-white pl-9"
+            />
+          </label>
+          <label>
+            <span className="sr-only">Filtrar por sección</span>
+            <select
+              aria-label="Filtrar por sección"
+              value={section}
+              onChange={(event) => setSection(event.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-cdr-ink"
+            >
+              <option value="">Todas las secciones</option>
+              {sections.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+          La opción PDF abre la impresión del navegador; el usuario decide si imprime o guarda como
+          PDF. No se presenta como un formato definitivo del cliente.
+        </p>
+      </Card>
+
+      <Card id="cdr-report-print-area" className="overflow-hidden">
+        {rows.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="border-b bg-slate-50 text-[11px] text-muted-foreground">
+                <tr>
+                  {workspace.columns.map((column) => (
+                    <th key={column.key} scope="col" className="px-4 py-2.5">
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((row) => (
+                  <tr key={row.id} className="hover:bg-orange-50/40">
+                    {workspace.columns.map((column) => (
+                      <WorkspaceCell key={column.key} row={row} column={column} />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-6 text-center text-sm text-muted-foreground">
+            No hay filas que coincidan con los filtros actuales.
+          </div>
+        )}
+        <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+          {rows.length} de {workspace.totalRows} filas · actualizado{' '}
+          {formatWorkspaceDateTime(workspace.generatedAt)}
+        </div>
+      </Card>
+
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: landscape;
+            margin: 10mm;
+          }
+          body * {
+            visibility: hidden !important;
+          }
+          #cdr-report-print-area,
+          #cdr-report-print-area * {
+            visibility: visible !important;
+          }
+          #cdr-report-print-area {
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 100% !important;
+            border: 0 !important;
+            box-shadow: none !important;
+          }
+          #cdr-report-print-area .overflow-x-auto {
+            overflow: visible !important;
+          }
+          #cdr-report-print-area table {
+            min-width: 0 !important;
+            width: 100% !important;
+            font-size: 9pt !important;
+          }
+          #cdr-report-print-area tr {
+            break-inside: avoid;
+          }
+        }
+      `}</style>
+
+      <BlockedBanner
+        workspace={workspace}
+        actionId="create-client-report-format"
+        fallback="Faltan los Excel definitivos del cliente y el contrato para guardar formatos."
+      />
     </div>
   );
 }
@@ -1553,7 +1937,7 @@ export function OperationsSecondaryWorkspace({
   }
 
   const showRows = workspace.rows.length > 0;
-  const showMetrics = ['channels', 'prestashop', 'monitor', 'data'].includes(view);
+  const showMetrics = ['channels', 'prestashop', 'monitor', 'reports', 'data'].includes(view);
 
   return (
     <div className="space-y-5">

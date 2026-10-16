@@ -7,19 +7,29 @@ import { EquivalencesWorkspace } from '@/components/equivalences-workspace';
 
 const mocks = vi.hoisted(() => ({
   listApplications: vi.fn(),
+  createApplication: vi.fn(),
   updateApplication: vi.fn(),
+  deactivateApplication: vi.fn(),
   listHomologs: vi.fn(),
+  createHomolog: vi.fn(),
+  updateHomolog: vi.fn(),
+  deactivateHomolog: vi.fn(),
 }));
 
 vi.mock('@/lib/operational-api', () => ({
   listApplications: mocks.listApplications,
-  createApplication: vi.fn(),
+  createApplication: mocks.createApplication,
   updateApplication: mocks.updateApplication,
-  deactivateApplication: vi.fn(),
+  deactivateApplication: mocks.deactivateApplication,
   listHomologs: mocks.listHomologs,
-  createHomolog: vi.fn(),
-  updateHomolog: vi.fn(),
-  deactivateHomolog: vi.fn(),
+  createHomolog: mocks.createHomolog,
+  updateHomolog: mocks.updateHomolog,
+  deactivateHomolog: mocks.deactivateHomolog,
+  listOemCodes: vi.fn().mockResolvedValue([]),
+  createOemCode: vi.fn(),
+  updateOemCode: vi.fn(),
+  deactivateOemCode: vi.fn(),
+  searchEligibleOemCodes: vi.fn(),
   searchEligibleHomologs: vi.fn(),
 }));
 
@@ -106,6 +116,12 @@ afterEach(cleanup);
 beforeEach(() => {
   mocks.listApplications.mockResolvedValue([application, secondApplication]);
   mocks.updateApplication.mockResolvedValue(application);
+  mocks.createApplication.mockResolvedValue({
+    ...application,
+    id: 'app-3',
+    model: 'Yaris',
+  });
+  mocks.deactivateApplication.mockResolvedValue({ ...application, active: false });
   mocks.listHomologs.mockResolvedValue([
     {
       id: 'hom-1',
@@ -121,6 +137,32 @@ beforeEach(() => {
       updatedAt: '2026-10-05T12:00:00.000Z',
     },
   ]);
+  mocks.createHomolog.mockResolvedValue({
+    id: 'hom-2',
+    groupId: 'group-1',
+    unifiedCode: 'UNI-6205',
+    externalCode: 'EXT-NEW',
+    externalBrand: 'SKF',
+    approvalStatus: 'pending',
+    active: true,
+    source: 'manual',
+    importBatchId: null,
+    createdAt: '2026-10-05T12:00:00.000Z',
+    updatedAt: '2026-10-05T12:00:00.000Z',
+  });
+  mocks.deactivateHomolog.mockResolvedValue({
+    id: 'hom-1',
+    groupId: 'group-1',
+    unifiedCode: 'UNI-6205',
+    externalCode: 'EXT-6205',
+    externalBrand: 'FAG',
+    approvalStatus: 'approved',
+    active: false,
+    source: 'manual',
+    importBatchId: null,
+    createdAt: '2026-10-05T12:00:00.000Z',
+    updatedAt: '2026-10-05T12:01:00.000Z',
+  });
   window.history.replaceState({}, '', '/');
 });
 
@@ -149,6 +191,47 @@ describe('catálogo secundario aprobado', () => {
         expectedUpdatedAt: application.updatedAt,
         make: 'Lexus',
       }),
+    );
+  });
+
+  it('crea una aplicación como fila inline y desactiva una selección', async () => {
+    render(<ApplicationsWorkspace canWrite />);
+
+    await screen.findAllByText('UNI-6205');
+    fireEvent.click(screen.getByRole('button', { name: /Agregar fila/u }));
+    fireEvent.change(screen.getByLabelText('Nueva marca de aplicación'), {
+      target: { value: 'Toyota' },
+    });
+    fireEvent.change(screen.getByLabelText('Nuevo modelo de aplicación'), {
+      target: { value: 'Yaris' },
+    });
+    fireEvent.change(screen.getByLabelText('Nuevo tipo de aplicación'), {
+      target: { value: 'AUTOMOTRIZ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar nueva aplicación' }));
+
+    await waitFor(() =>
+      expect(mocks.createApplication).toHaveBeenCalledWith({
+        unifiedCode: 'UNI-6205',
+        vehicleType: 'AUTOMOTRIZ',
+        make: 'Toyota',
+        model: 'Yaris',
+        yearFrom: undefined,
+        yearTo: undefined,
+        engine: '',
+        notes: '',
+      }),
+    );
+
+    fireEvent.click(screen.getByLabelText('Seleccionar aplicación Toyota Corolla'));
+    fireEvent.click(screen.getByRole('button', { name: /Eliminar selección \(1\)/u }));
+    await waitFor(() =>
+      expect(mocks.deactivateApplication).toHaveBeenCalledWith('app-1', '2026-10-05T12:00:00.000Z'),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText('Seleccionar aplicación Toyota Corolla'),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -184,15 +267,50 @@ describe('catálogo secundario aprobado', () => {
     expect(screen.queryByText('Rodamiento 6305')).not.toBeInTheDocument();
   });
 
-  it('construye identificadores solo con grupo, membresías y homólogos persistidos', async () => {
+  it('integra el deep link histórico de identificadores sin exponer un cuarto tab', async () => {
+    window.history.replaceState({}, '', '/equivalences?view=identifiers');
     render(<EquivalencesWorkspace canWrite={false} />);
     await waitFor(() => expect(mocks.listHomologs).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: /Identificadores/ }));
+    expect(screen.getByRole('navigation', { name: /Vistas de Código Unificador/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Código Unificador/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Homólogos/u })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^OEM/u })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Identificadores/u })).not.toBeInTheDocument();
+    expect(window.location.search).toBe('');
+  });
 
-    expect(screen.getByText('Identificadores del grupo · UNI-6205')).toBeVisible();
-    expect(screen.getByText('SKU-6205-A')).toBeVisible();
-    expect(screen.getByText('EXT-6205')).toBeVisible();
-    expect(screen.queryByText('EAN simulado')).not.toBeInTheDocument();
+  it('crea un homólogo como fila inline y desactiva la selección de forma lógica', async () => {
+    render(<EquivalencesWorkspace canWrite />);
+    await waitFor(() => expect(mocks.listHomologs).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /Homólogos/u }));
+    fireEvent.click(screen.getByRole('button', { name: /Agregar fila/u }));
+    fireEvent.change(screen.getByLabelText('Nuevo código unificador'), {
+      target: { value: 'UNI-6205' },
+    });
+    fireEvent.change(screen.getByLabelText('Nuevo código externo'), {
+      target: { value: 'EXT-NEW' },
+    });
+    fireEvent.change(screen.getByLabelText('Nueva marca externa'), { target: { value: 'SKF' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar nuevo homólogo' }));
+
+    await waitFor(() =>
+      expect(mocks.createHomolog).toHaveBeenCalledWith({
+        unifiedCode: 'UNI-6205',
+        externalCode: 'EXT-NEW',
+        externalBrand: 'SKF',
+        approvalStatus: 'pending',
+        active: true,
+      }),
+    );
+
+    fireEvent.click(screen.getByLabelText('Seleccionar homólogo EXT-6205'));
+    fireEvent.click(screen.getByRole('button', { name: /Eliminar selección \(1\)/u }));
+    await waitFor(() =>
+      expect(mocks.deactivateHomolog).toHaveBeenCalledWith('hom-1', '2026-10-05T12:00:00.000Z'),
+    );
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Seleccionar homólogo EXT-6205')).not.toBeInTheDocument(),
+    );
   });
 });

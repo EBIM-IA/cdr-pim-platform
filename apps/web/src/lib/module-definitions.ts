@@ -157,7 +157,7 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
   },
   equivalences: {
     slug: 'equivalences',
-    label: 'Equivalencias',
+    label: 'Código Unificador y Homólogos',
     eyebrow: 'Relaciones de producto',
     description:
       'Gestiona homólogos externos y resuelve referencias elegibles hacia SKU vendibles.',
@@ -302,14 +302,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Publicación',
     eyebrow: 'Salida a canales',
     description:
-      'Calcula la elegibilidad base por SKU y separa esa condición del envío a un canal.',
+      'Calcula la elegibilidad base por SKU y organiza la futura selección de campos por categoría y plantilla.',
     objective:
       'Explica qué SKU cumplen todos los obligatorios activos de su plantilla y cuáles deben completarse.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de publicación.',
     limitation:
-      'El override por SKU, condiciones adicionales del canal, ownership y contrato con ICOM siguen pendientes.',
+      'La política de campos por categoría, las condiciones del canal y el contrato con ICOM siguen pendientes; no se publica ni se simula un envío.',
     kind: 'workspace',
     capabilities: [
       {
@@ -377,14 +377,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Reportes',
     eyebrow: 'Seguimiento',
     description:
-      'Agregados globales de productos, marcas, estados y grupos unificadores calculados en PostgreSQL.',
+      'Tabla lineal de agregados globales calculados en PostgreSQL, con filtros y exportación local.',
     objective:
-      'Ofrece una lectura operativa del catálogo distinguiendo las filas cargadas del total informado por el backend.',
+      'Permite filtrar y exportar las filas reales del reporte sin presentar formatos del cliente que todavía no fueron recibidos.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de reportes.',
     limitation:
-      'Los indicadores de calidad dependen de reglas aprobadas; las exportaciones e históricos todavía no están implementados.',
+      'Los Excel definitivos, los filtros de fecha y categoría de cada formato y su persistencia versionada siguen pendientes del cliente y del contrato técnico.',
     kind: 'workspace',
     capabilities: [
       {
@@ -399,8 +399,8 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       },
       {
         title: 'Exportaciones',
-        description: 'Reportes descargables y consultas históricas.',
-        status: 'next',
+        description: 'CSV, Excel e impresión/PDF de las filas visibles de la proyección actual.',
+        status: 'available',
       },
     ],
     dependencies: [

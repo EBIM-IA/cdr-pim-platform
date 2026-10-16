@@ -55,6 +55,79 @@ function normalizeSearch(value: string): string {
     .toLocaleLowerCase('es');
 }
 
+/**
+ * Matches the compact filter syntax used by the AX-style tables in the approved prototype.
+ * The expression is evaluated against the value labels that are already available to the
+ * spreadsheet filter, so the caller keeps a single filtering/export source of truth.
+ *
+ * Supported forms: exact text, `prefix*`, `*suffix`, `*contains*`, `?` as one character,
+ * `!expression`, alternatives separated with `|`, numeric/date/text ranges (`a..b`),
+ * comparisons (`>`, `>=`, `<`, `<=`) and `""` for an empty cell.
+ */
+export function matchesAxFilterExpression(label: string, expression: string): boolean {
+  const raw = expression.trim();
+  if (!raw) return true;
+
+  const alternatives = raw
+    .split('|')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (alternatives.length > 1) {
+    return alternatives.some((alternative) => matchesAxFilterExpression(label, alternative));
+  }
+
+  if (raw.startsWith('!')) {
+    const nested = raw.slice(1).trim();
+    return nested.length > 0 && !matchesAxFilterExpression(label, nested);
+  }
+
+  const normalizedLabel = normalizeSearch(label);
+  if (raw === '""') return label === '(Vacías)';
+
+  const comparison = raw.match(/^(>=|<=|>|<)\s*(.+)$/u);
+  if (comparison) {
+    const [, operator, rightRaw = ''] = comparison;
+    const leftNumber = Number(label.replace(',', '.'));
+    const rightNumber = Number(rightRaw.replace(',', '.'));
+    const numeric = Number.isFinite(leftNumber) && Number.isFinite(rightNumber);
+    const left = numeric ? leftNumber : normalizedLabel;
+    const right = numeric ? rightNumber : normalizeSearch(rightRaw);
+    if (operator === '>') return left > right;
+    if (operator === '>=') return left >= right;
+    if (operator === '<') return left < right;
+    return left <= right;
+  }
+
+  const rangeIndex = raw.indexOf('..');
+  if (rangeIndex > 0 && rangeIndex < raw.length - 2) {
+    const startRaw = raw.slice(0, rangeIndex).trim();
+    const endRaw = raw.slice(rangeIndex + 2).trim();
+    const labelNumber = Number(label.replace(',', '.'));
+    const startNumber = Number(startRaw.replace(',', '.'));
+    const endNumber = Number(endRaw.replace(',', '.'));
+    if ([labelNumber, startNumber, endNumber].every(Number.isFinite)) {
+      const lower = Math.min(startNumber, endNumber);
+      const upper = Math.max(startNumber, endNumber);
+      return labelNumber >= lower && labelNumber <= upper;
+    }
+    const start = normalizeSearch(startRaw);
+    const end = normalizeSearch(endRaw);
+    const lower = excelCollator.compare(start, end) <= 0 ? start : end;
+    const upper = lower === start ? end : start;
+    return (
+      excelCollator.compare(normalizedLabel, lower) >= 0 &&
+      excelCollator.compare(normalizedLabel, upper) <= 0
+    );
+  }
+
+  const normalizedExpression = normalizeSearch(raw);
+  const wildcardPattern = normalizedExpression
+    .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
+    .replace(/\*/gu, '.*')
+    .replace(/\?/gu, '.');
+  return new RegExp(`^${wildcardPattern}$`, 'u').test(normalizedLabel);
+}
+
 export function normalizeExcelTableCell(value: ExcelTableCell): NormalizedCell {
   if (value === EXCEL_NOT_APPLICABLE) {
     return {
@@ -299,14 +372,45 @@ export function ExcelTableHeader<Key extends string>({
 }: ExcelTableHeaderProps<Key>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [expression, setExpression] = useState('');
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const onFilterChangeRef = useRef(onFilterChange);
   const titleId = useId();
   const popoverId = useId();
   const style = usePopoverPosition(open, triggerRef, popoverRef);
   const filtered = Boolean(selectedValues);
+  const optionsIdentity = options
+    .map((option) => `${option.key}\u0000${option.label}`)
+    .join('\u0001');
+
+  useEffect(() => {
+    onFilterChangeRef.current = onFilterChange;
+  }, [onFilterChange]);
+
+  useEffect(() => {
+    if (!filtered) setExpression('');
+  }, [filtered]);
+
+  const applyExpression = (nextExpression: string) => {
+    setExpression(nextExpression);
+    if (!nextExpression.trim()) {
+      onFilterChange(undefined);
+    }
+  };
+
+  useEffect(() => {
+    const trimmed = expression.trim();
+    if (!trimmed) return;
+    const matching = new Set(
+      options
+        .filter((option) => matchesAxFilterExpression(option.label, trimmed))
+        .map((option) => option.key),
+    );
+    onFilterChangeRef.current(matching);
+  }, [expression, optionsIdentity]);
 
   const visibleOptions = useMemo(() => {
     const term = normalizeSearch(query.trim());
@@ -544,6 +648,20 @@ export function ExcelTableHeader<Key extends string>({
           )}
         </button>
       </span>
+      <label className="mt-2 block min-w-28 normal-case tracking-normal">
+        <span className="sr-only">Filtro de columna {label}</span>
+        <Input
+          type="search"
+          value={expression}
+          onChange={(event) => applyExpression(event.target.value)}
+          placeholder="Filtrar…"
+          title={'Sintaxis: texto, texto*, *texto*, !texto, a|b, a..b, >10 o ""'}
+          className={cn(
+            'h-7 min-w-28 rounded border bg-white px-2 text-[11px] font-normal normal-case tracking-normal',
+            filtered && 'border-primary bg-orange-50 text-orange-950',
+          )}
+        />
+      </label>
       {typeof document === 'undefined' || !popover ? null : createPortal(popover, document.body)}
     </th>
   );

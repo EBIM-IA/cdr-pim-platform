@@ -292,7 +292,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1250px] text-left text-sm">
-              <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
+              <thead className="border-b bg-slate-50 text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">SKU / recurso</th>

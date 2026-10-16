@@ -10,6 +10,7 @@ import type {
   ProductAssetRepositoryPort,
 } from '../domain/ports/product-asset-repository.port';
 import {
+  ListProductAssetBatchUseCase,
   ProcessProductAssetArchiveUseCase,
   UploadProductAssetUseCase,
 } from './manage-product-assets.use-cases';
@@ -24,6 +25,20 @@ const product = Product.create({
 const actor: AuthenticatedActor = { id: 'buyer-1', email: 'buyer@example.test', roles: [] };
 
 describe('UploadProductAssetUseCase', () => {
+  it('loads one bounded asset batch and preserves empty product rows', async () => {
+    const repository = repositoryFake();
+    repository.listByProductIds = vi.fn().mockResolvedValue([]);
+    const useCase = new ListProductAssetBatchUseCase(repository);
+    const first = '10000000-0000-4000-8000-000000000009';
+    const second = '10000000-0000-4000-8000-000000000010';
+
+    await expect(useCase.execute({ productIds: [first, second] })).resolves.toEqual([
+      { productId: first, assets: [] },
+      { productId: second, assets: [] },
+    ]);
+    expect(repository.listByProductIds).toHaveBeenCalledTimes(1);
+  });
+
   it('deletes the newly stored object when the metadata+audit transaction fails', async () => {
     const deleted: string[] = [];
     const storage = storageFake(deleted);
@@ -156,6 +171,7 @@ function productRepositoryFake(): ProductRepositoryPort {
 function repositoryFake(): ProductAssetRepositoryPort {
   return {
     listByProductId: async () => [],
+    listByProductIds: async () => [],
     findById: async () => null,
     findActiveSlot: async () => null,
     nextPhotoPosition: async () => 1,

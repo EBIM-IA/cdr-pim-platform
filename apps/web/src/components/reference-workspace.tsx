@@ -4,7 +4,6 @@ import type { WorkspaceDto, WorkspaceMetric, WorkspaceRow } from '@cdr/contracts
 import {
   Activity,
   AlertTriangle,
-  ArrowRight,
   BarChart3,
   Bot,
   Boxes,
@@ -25,7 +24,6 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -217,7 +215,8 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'reports',
       label: 'Reportes',
       title: 'Reportes',
-      description: 'Accesos directos a indicadores vivos calculados por cada módulo.',
+      description:
+        'Tabla lineal de agregados vivos, con filtros y exportación de las filas visibles.',
       icon: BarChart3,
       mode: 'reports',
     },
@@ -275,25 +274,6 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
     },
   ],
 };
-
-const reportCards = [
-  [
-    'Calidad del catálogo',
-    'Obligatorios faltantes y hallazgos deterministas.',
-    '/quality?view=quality',
-    Gauge,
-  ],
-  ['Equivalencias', 'Grupos por código unificador y homólogos aprobados.', '/equivalences', Link2],
-  ['Publicación', 'Estados PIM y preparación para canales.', '/publication', CheckCircle2],
-  ['Integraciones', 'Componentes, conectores y dependencias.', '/integrations', Activity],
-  [
-    'Trazabilidad',
-    'Cambios auditados por actor y entidad.',
-    '/administration?view=audit',
-    ShieldCheck,
-  ],
-  ['Catálogo', 'Productos y filtros sobre datos persistidos.', '/products', Boxes],
-] as const;
 
 function metricValue(metric: WorkspaceMetric): string {
   return formatWorkspaceMetric(metric);
@@ -428,29 +408,6 @@ function ConnectorCards({ rows }: { rows: readonly WorkspaceRow[] }) {
   );
 }
 
-function ReportCards() {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {reportCards.map(([title, description, href, Icon]) => (
-        <Link key={title} href={href} className="group focus-visible:outline-none">
-          <Card className="flex min-h-48 h-full flex-col p-5 transition group-hover:-translate-y-0.5 group-hover:border-orange-200 group-hover:shadow-md group-focus-visible:ring-2 group-focus-visible:ring-cdr-ink">
-            <span className="grid size-10 place-items-center rounded-full bg-orange-100 text-primary">
-              <Icon className="size-5" aria-hidden="true" />
-            </span>
-            <h3 className="mt-4 font-semibold text-cdr-ink">{title}</h3>
-            <p className="mt-1 flex-1 text-sm leading-relaxed text-muted-foreground">
-              {description}
-            </p>
-            <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary">
-              Abrir <ArrowRight className="size-3.5" aria-hidden="true" />
-            </span>
-          </Card>
-        </Link>
-      ))}
-    </div>
-  );
-}
-
 function CapabilityPanel({ workspace, view }: { workspace: WorkspaceDto; view: WorkspaceView }) {
   const blocked = workspace.actions.filter((action) => action.availability === 'blocked');
   const Icon = view.icon;
@@ -516,8 +473,7 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
   const operationsSlug = (
     ['publication', 'integrations', 'reports', 'administration'] as const
   ).find((slug) => slug === definition.slug);
-  const useOperationsSecondary =
-    operationsSlug && !(definition.slug === 'reports' && active.id === 'reports');
+  const useOperationsSecondary = operationsSlug;
   const changeView = (id: string) => {
     setSelected(id);
     const url = new URL(window.location.href);
@@ -635,7 +591,6 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
               <RecordTable workspace={workspace} />
             ) : null}
             {active.mode === 'connectors' ? <ConnectorCards rows={workspace.rows} /> : null}
-            {active.mode === 'reports' ? <ReportCards /> : null}
             {definition.slug === 'administration' && active.id === 'audit' ? (
               <AuditWorkspace embedded />
             ) : definition.slug === 'quality' && active.id === 'search' ? null : active.mode ===

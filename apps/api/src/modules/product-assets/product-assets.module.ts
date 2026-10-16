@@ -4,6 +4,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import {
   DeleteProductAssetUseCase,
   DownloadProductAssetUseCase,
+  ListProductAssetBatchUseCase,
   ListProductAssetsUseCase,
   ProcessProductAssetArchiveUseCase,
   UploadProductAssetUseCase,
@@ -26,6 +27,7 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
     { provide: ASSET_BINARY_STORAGE, useClass: PlatformAssetStorageAdapter },
     { provide: ARCHIVE_READER, useClass: SafeZipReaderAdapter },
     ListProductAssetsUseCase,
+    ListProductAssetBatchUseCase,
     UploadProductAssetUseCase,
     DownloadProductAssetUseCase,
     DeleteProductAssetUseCase,

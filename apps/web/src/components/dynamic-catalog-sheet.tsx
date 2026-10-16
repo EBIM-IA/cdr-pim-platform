@@ -548,7 +548,7 @@ export function DynamicCatalogSheet() {
                   Productos y atributos técnicos configurados por la plantilla{' '}
                   {schema.template.name}
                 </caption>
-                <thead className="sticky top-0 z-10 border-b bg-slate-50 text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
+                <thead className="sticky top-0 z-10 border-b bg-slate-50 text-[11px] tracking-[0.06em] text-muted-foreground">
                   <tr className="align-top">
                     <th scope="col" className="sticky left-0 z-20 min-w-36 bg-slate-50 px-4 py-3">
                       SKU

@@ -4,7 +4,9 @@ import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
 import {
   Check,
   CheckCircle2,
+  ChevronRight,
   Clock3,
+  FolderTree,
   ListChecks,
   Pencil,
   RefreshCw,
@@ -22,6 +24,7 @@ import { MetricCard } from '@/components/metric-card';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
+import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,6 +40,83 @@ import {
 interface CategoryDraft {
   name: string;
   position: string;
+}
+
+export interface CategoryTreeRow {
+  readonly category: AdminCatalogCategoryDto;
+  readonly depth: number;
+  readonly leaf: boolean;
+}
+
+export function orderCategoryTree(
+  categories: readonly AdminCatalogCategoryDto[],
+): CategoryTreeRow[] {
+  const availableIds = new Set(categories.map((category) => category.id));
+  const children = new Map<string | null, AdminCatalogCategoryDto[]>();
+  categories.forEach((category) => {
+    const parentId =
+      category.parentId && availableIds.has(category.parentId) ? category.parentId : null;
+    children.set(parentId, [...(children.get(parentId) ?? []), category]);
+  });
+  children.forEach((rows) =>
+    rows.sort(
+      (left, right) => left.position - right.position || left.name.localeCompare(right.name, 'es'),
+    ),
+  );
+
+  const ordered: CategoryTreeRow[] = [];
+  const visit = (category: AdminCatalogCategoryDto, depth: number) => {
+    const descendants = children.get(category.id) ?? [];
+    ordered.push({ category, depth, leaf: descendants.length === 0 });
+    descendants.forEach((child) => visit(child, depth + 1));
+  };
+  (children.get(null) ?? []).forEach((category) => visit(category, 0));
+  return ordered;
+}
+
+export function filterCategoryTreeRows(
+  categories: readonly AdminCatalogCategoryDto[],
+  treeRows: readonly CategoryTreeRow[],
+  query: string,
+  showInactive: boolean,
+): CategoryTreeRow[] {
+  const normalized = query.trim().toLocaleLowerCase('es');
+  const allowed = new Set(
+    categories.filter((category) => showInactive || category.active).map((category) => category.id),
+  );
+  if (!normalized) return treeRows.filter((row) => allowed.has(row.category.id));
+
+  const matching = new Set(
+    categories
+      .filter((category) => allowed.has(category.id))
+      .filter((category) =>
+        [category.name, category.slug, category.path, category.application ?? ''].some((value) =>
+          value.toLocaleLowerCase('es').includes(normalized),
+        ),
+      )
+      .map((category) => category.id),
+  );
+  const byId = new Map(categories.map((category) => [category.id, category] as const));
+  const visibleIds = new Set(matching);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    categories.forEach((category) => {
+      if (!allowed.has(category.id)) return;
+      if (category.parentId && visibleIds.has(category.parentId) && !visibleIds.has(category.id)) {
+        visibleIds.add(category.id);
+        expanded = true;
+      }
+    });
+  }
+  matching.forEach((id) => {
+    let current = byId.get(id);
+    while (current?.parentId) {
+      if (allowed.has(current.parentId)) visibleIds.add(current.parentId);
+      current = byId.get(current.parentId);
+    }
+  });
+  return treeRows.filter((row) => visibleIds.has(row.category.id));
 }
 
 export function CategoriesAdminWorkspace() {
@@ -80,25 +160,18 @@ export function CategoriesAdminWorkspace() {
 
   useEffect(() => void load(), [load]);
 
-  const visibleCategories = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('es');
-    return categories
-      .filter((category) => showInactive || category.active)
-      .filter(
-        (category) =>
-          !normalized ||
-          [category.name, category.slug, category.path].some((value) =>
-            value.toLocaleLowerCase('es').includes(normalized),
-          ),
-      )
-      .sort((left, right) => left.position - right.position || left.path.localeCompare(right.path));
-  }, [categories, query, showInactive]);
+  const treeRows = useMemo(() => orderCategoryTree(categories), [categories]);
+  const visibleTreeRows = useMemo(
+    () => filterCategoryTreeRows(categories, treeRows, query, showInactive),
+    [categories, query, showInactive, treeRows],
+  );
   const activeTemplates = templates.filter((template) => template.status === 'active');
   const categoriesWithActiveTemplate = new Set(
     activeTemplates.map((template) => template.categoryId),
   );
-  const pendingDefinitionCount = categories.filter(
-    (category) => category.active && !categoriesWithActiveTemplate.has(category.id),
+  const pendingDefinitionCount = treeRows.filter(
+    ({ category, leaf }) =>
+      leaf && category.active && !categoriesWithActiveTemplate.has(category.id),
   ).length;
   const attributeCount = activeTemplates.reduce(
     (total, template) =>
@@ -198,12 +271,15 @@ export function CategoriesAdminWorkspace() {
   return (
     <>
       <PageHeader
-        title="Categorías y líneas"
-        description="Líneas, categorías y vigencias del catálogo."
+        title="Árbol de Categorías"
+        description="Jerarquía del ERP y relación de cada categoría final con su plantilla PIM."
         actions={
           <>
-            <Button disabled title="El contrato de asociación de línea ERP aún no está aprobado">
-              Asociar línea ERP
+            <Button
+              disabled
+              title="La importación requiere el contrato aprobado de sincronización ERP"
+            >
+              Importar árbol
             </Button>
             <Button asChild variant="outline">
               <Link href="/templates">Administrar plantillas</Link>
@@ -212,13 +288,14 @@ export function CategoriesAdminWorkspace() {
         }
       />
       <ScreenGuide
-        objective="Relaciona la línea recibida desde ERP con la plantilla PIM que define qué atributos se enriquecen."
+        objective="Representa los niveles del ERP como un árbol; la plantilla y sus atributos pertenecen a la última categoría de cada rama."
         actions={[
-          'Abre una plantilla o edita el nombre, orden y vigencia de una categoría.',
-          'Revisa las categorías activas, inactivas y pendientes de una plantilla definida.',
+          'Busca una categoría padre para incluir todas sus categorías descendientes.',
+          'Abre la plantilla de una categoría final o edita nombre, orden y vigencia.',
+          'Exporta el árbol vigente para validarlo con el cliente.',
         ]}
         dataSource="Las categorías, plantillas y asignaciones provienen de la API administrativa del catálogo; cada actualización usa control de concurrencia."
-        limitation="Esta pantalla no crea categorías ni modifica la jerarquía porque esos endpoints todavía no forman parte del contrato aprobado."
+        limitation="La importación, creación y reorganización del árbol permanecen bloqueadas hasta recibir los códigos y la sincronización definitiva del ERP."
       />
 
       <section
@@ -259,8 +336,9 @@ export function CategoriesAdminWorkspace() {
       </section>
 
       <div className="mb-[18px] rounded-lg bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
-        La línea llega desde ERP en cada SKU; la plantilla PIM define qué atributos se enriquecen.
-        Son entidades distintas y esta pantalla mantiene su asociación.
+        Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
+        interpreta como una sola categoría, no como un nodo duplicado. La plantilla solo se evalúa
+        en la categoría hoja.
       </div>
 
       {notice ? (
@@ -281,7 +359,7 @@ export function CategoriesAdminWorkspace() {
       ) : null}
 
       <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto_auto] md:items-end">
           <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
             Buscar categorías
             <span className="relative block">
@@ -293,7 +371,7 @@ export function CategoriesAdminWorkspace() {
                 className="pl-9"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Nombre, slug o ruta"
+                placeholder="Categoría padre, hija, aplicación o ruta"
               />
             </span>
           </label>
@@ -305,6 +383,20 @@ export function CategoriesAdminWorkspace() {
             />
             Mostrar inactivas
           </label>
+          <TableExportButtons
+            filename="arbol-categorias"
+            sheetName="Árbol de Categorías"
+            headers={['Nivel', 'Categoría', 'Slug', 'Ruta', 'Aplicación', 'Plantilla', 'Estado']}
+            rows={visibleTreeRows.map(({ category, depth }) => [
+              depth + 1,
+              category.name,
+              category.slug,
+              category.path,
+              category.application,
+              templateFor(category.id)?.name,
+              category.active ? 'Activa' : 'Inactiva',
+            ])}
+          />
         </div>
       </Card>
 
@@ -318,7 +410,7 @@ export function CategoriesAdminWorkspace() {
           actionLabel="Reintentar"
           onAction={load}
         />
-      ) : visibleCategories.length === 0 ? (
+      ) : visibleTreeRows.length === 0 ? (
         <StatePanel
           variant="empty"
           title="Sin categorías"
@@ -327,31 +419,39 @@ export function CategoriesAdminWorkspace() {
       ) : (
         <Card id="category-table" className="overflow-hidden">
           <div className="border-b px-5 py-4">
-            <h2 className="text-[17px] font-semibold">Plantillas y líneas persistidas</h2>
+            <h2 className="text-[17px] font-semibold">Categorías y Plantillas Persistidas</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              {visibleCategories.filter((category) => Boolean(templateFor(category.id))).length}{' '}
-              definidas · {visibleCategories.filter((category) => !templateFor(category.id)).length}{' '}
-              pendientes de definición
+              {
+                visibleTreeRows.filter(
+                  ({ category, leaf }) => leaf && Boolean(templateFor(category.id)),
+                ).length
+              }{' '}
+              categorías finales definidas ·{' '}
+              {
+                visibleTreeRows.filter(({ category, leaf }) => leaf && !templateFor(category.id))
+                  .length
+              }{' '}
+              pendientes
             </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1220px] text-left text-sm">
               <caption className="sr-only">
-                Administración de categorías activas e inactivas
+                Árbol jerárquico de categorías activas e inactivas
               </caption>
-              <thead className="border-b bg-slate-50 text-xs uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b bg-slate-50 text-xs tracking-wide text-muted-foreground">
                 <tr>
                   <th scope="col" className="px-4 py-3">
-                    Plantilla PIM
+                    Categoría
                   </th>
                   <th scope="col" className="px-4 py-3">
-                    Línea recibida del ERP
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Categoría BUSQUEDA
+                    Nivel y ruta
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Aplicación
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Plantilla PIM
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Atributos
@@ -368,10 +468,7 @@ export function CategoriesAdminWorkspace() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {[
-                  ...visibleCategories.filter((category) => Boolean(templateFor(category.id))),
-                  ...visibleCategories.filter((category) => !templateFor(category.id)),
-                ].map((category, index, orderedCategories) => {
+                {[...visibleTreeRows].map(({ category, depth, leaf }) => {
                   const editing = editingId === category.id;
                   const saving = savingId === category.id;
                   const template = templateFor(category.id);
@@ -379,27 +476,7 @@ export function CategoriesAdminWorkspace() {
                     template?.attributes?.filter((attribute) => attribute.active) ?? [];
                   return (
                     <Fragment key={category.id}>
-                      {(index === 0 ||
-                        Boolean(template) !==
-                          Boolean(templateFor(orderedCategories[index - 1]?.id ?? ''))) && (
-                        <tr className="bg-slate-50/80">
-                          <th
-                            colSpan={8}
-                            className="px-4 py-2 text-[10px] uppercase tracking-[0.08em] text-primary"
-                          >
-                            {template
-                              ? 'Plantillas definidas'
-                              : 'Categorías pendientes de definición'}
-                          </th>
-                        </tr>
-                      )}
                       <tr className="hover:bg-orange-50/40">
-                        <td className="px-4 py-3">
-                          <strong className="block">{template?.name ?? 'Sin plantilla'}</strong>
-                          <span className="text-xs text-muted-foreground">
-                            {template ? `Versión ${template.version}` : 'Pendiente de definición'}
-                          </span>
-                        </td>
                         <td className="px-4 py-3">
                           {editing ? (
                             <div className="grid grid-cols-[minmax(180px,1fr)_78px] gap-2">
@@ -427,19 +504,55 @@ export function CategoriesAdminWorkspace() {
                               />
                             </div>
                           ) : (
-                            <>
-                              <strong className="block text-xs">{category.name}</strong>
-                              <span className="font-mono text-[10px] text-muted-foreground">
-                                {category.slug} · orden {category.position}
+                            <div
+                              className="flex items-center gap-2"
+                              style={{ paddingLeft: `${depth * 18}px` }}
+                            >
+                              {depth > 0 ? (
+                                <ChevronRight
+                                  className="size-3.5 shrink-0 text-slate-400"
+                                  aria-hidden="true"
+                                />
+                              ) : (
+                                <FolderTree
+                                  className="size-4 shrink-0 text-primary"
+                                  aria-hidden="true"
+                                />
+                              )}
+                              <span>
+                                <strong className="block text-xs">{category.name}</strong>
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {category.slug} · orden {category.position}
+                                </span>
                               </span>
-                            </>
+                            </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                          {category.path}
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          <strong className="block text-cdr-ink">
+                            Nivel {depth + 1}
+                            {leaf ? ' · Final' : ''}
+                          </strong>
+                          <span className="font-mono text-[10px]">{category.path}</span>
                         </td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">
-                          No modelada en el contrato
+                          {category.application ?? 'Sin aplicación definida'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {leaf ? (
+                            <>
+                              <strong className="block">{template?.name ?? 'Sin plantilla'}</strong>
+                              <span className="text-xs text-muted-foreground">
+                                {template
+                                  ? `Versión ${template.version}`
+                                  : 'Pendiente de definición'}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Solo categoría final
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 font-semibold">{activeAttributes.length}</td>
                         <td className="px-4 py-3 font-semibold">
@@ -448,14 +561,18 @@ export function CategoriesAdminWorkspace() {
                         <td className="px-4 py-3">
                           <StatusBadge
                             tone={
-                              template?.status === 'active' && category.active
+                              (!leaf || template?.status === 'active') && category.active
                                 ? 'success'
                                 : 'warning'
                             }
                           >
-                            {template?.status === 'active' && category.active
-                              ? 'Definida'
-                              : 'Pendiente'}
+                            {!category.active
+                              ? 'Inactiva'
+                              : !leaf
+                                ? 'Estructural'
+                                : template?.status === 'active'
+                                  ? 'Definida'
+                                  : 'Pendiente'}
                           </StatusBadge>
                         </td>
                         <td className="px-4 py-3">

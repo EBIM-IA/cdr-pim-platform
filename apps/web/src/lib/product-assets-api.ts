@@ -1,10 +1,12 @@
 import {
+  type ProductAssetBatchDto,
   type ProductAssetBulkMode,
   type ProductAssetBulkResultDto,
   type ProductAssetDto,
   type ProductAssetSelector,
   type ProductAssetType,
   deleteProductAssetResultSchema,
+  productAssetBatchSchema,
   productAssetBulkResultSchema,
   productAssetListSchema,
   productAssetSchema,
@@ -52,6 +54,19 @@ export async function listProductAssets(
     signal,
   });
   return parseResponse(response, productAssetListSchema);
+}
+
+export async function listProductAssetsBatch(
+  productIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<ProductAssetBatchDto> {
+  const query = new URLSearchParams({ productIds: productIds.join(',') });
+  const response = await authenticatedBffFetch(`/api/operations/assets/batch?${query.toString()}`, {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+    signal,
+  });
+  return parseResponse(response, productAssetBatchSchema);
 }
 
 export async function uploadProductAsset(input: {

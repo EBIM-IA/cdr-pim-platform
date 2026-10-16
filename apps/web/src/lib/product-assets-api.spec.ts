@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  listProductAssetsBatch,
   listProductAssets,
   processProductAssetZip,
   uploadProductAsset,
@@ -37,6 +38,23 @@ describe('product assets BFF client', () => {
     await expect(listProductAssets({ productId: asset.productId })).resolves.toEqual([asset]);
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/operations/assets?productId=${asset.productId}`,
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+
+  it('lists persisted assets for a catalog page in one request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ productId: asset.productId, assets: [asset] }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(listProductAssetsBatch([asset.productId])).resolves.toEqual([
+      { productId: asset.productId, assets: [asset] },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/operations/assets/batch?productIds=${asset.productId}`,
       expect.objectContaining({ cache: 'no-store' }),
     );
   });

@@ -54,6 +54,7 @@ const product: Product = {
   sku: 'D1672',
   name: 'Pastilla de freno D1672',
   brand: 'CDR',
+  providerCode: 'D1672-CARBON',
   category: 'Categoría base',
   application: 'Aplicación base',
   status: 'published',
@@ -195,12 +196,26 @@ beforeEach(() => {
 
 describe('ProductDetailView operational data', () => {
   it('loads the sheet, relations and audit, then renders real tab content', async () => {
-    render(<ProductDetailView productId={product.id} />);
+    const view = render(<ProductDetailView productId={product.id} />);
 
     expect(await screen.findByText('Pastilla cerámica')).toBeInTheDocument();
     expect(screen.getByText('Fuente: Manual')).toBeInTheDocument();
     expect(screen.getByText('Autoridad: PIM')).toBeInTheDocument();
     expect(screen.getByText('Solo detalle')).toBeInTheDocument();
+
+    const persistentContext = view.container.querySelector(
+      '[aria-label="Contexto persistente del producto"]',
+    );
+    expect(persistentContext).not.toBeNull();
+    expect(within(persistentContext as HTMLElement).getByText('D1672-CARBON')).toBeInTheDocument();
+    expect(within(persistentContext as HTMLElement).getByText('CDR')).toBeInTheDocument();
+    expect(persistentContext?.parentElement).toHaveClass('sticky', 'top-16');
+    expect(
+      within(persistentContext?.parentElement as HTMLElement).getByRole('tablist', {
+        name: 'Secciones de la ficha',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Código Unificador y Homólogos' })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(listApplications).toHaveBeenCalledWith(

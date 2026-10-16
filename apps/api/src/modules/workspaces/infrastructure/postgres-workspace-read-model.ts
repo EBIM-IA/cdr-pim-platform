@@ -949,6 +949,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           sku: string;
           name: string;
           brand: string | null;
+          category: string | null;
+          template: string | null;
           status: string;
           required: number;
           completed: number;
@@ -963,6 +965,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
             product.sku,
             product.name,
             product.brand,
+            category.name AS "category",
+            template.name AS "template",
             product.status,
             product.updated_at AS "updatedAt",
             readiness.template_id IS NOT NULL AS "hasTemplate",
@@ -972,6 +976,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           FROM products product
           INNER JOIN catalog_product_readiness readiness
             ON readiness.product_id = product.id
+          LEFT JOIN attribute_templates template
+            ON template.id = readiness.template_id
+          LEFT JOIN catalog_categories category
+            ON category.id = template.category_id
         )
         SELECT * FROM readiness
         WHERE status <> 'archived'
@@ -983,7 +991,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     const eligibilityCounts = eligibility[0] ?? { publishable: 0, total: 0 };
 
     return this.response('publication', {
-      operationalStatus: 'operational',
+      operationalStatus: 'partial',
       metrics: [
         integerMetric('publishable', 'Elegibilidad base', eligibilityCounts.publishable),
         integerMetric('in-review', 'En revisión', summary.inReview),
@@ -994,6 +1002,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         { key: 'sku', label: 'SKU', type: 'text' },
         { key: 'name', label: 'Producto', type: 'text' },
         { key: 'brand', label: 'Marca', type: 'text' },
+        { key: 'category', label: 'Categoría', type: 'text' },
+        { key: 'template', label: 'Plantilla', type: 'text' },
         { key: 'eligibility', label: 'Elegibilidad base', type: 'status' },
         { key: 'missing', label: 'Obligatorios faltantes', type: 'text' },
         { key: 'status', label: 'Estado PIM', type: 'status' },
@@ -1005,6 +1015,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           sku: row.sku,
           name: row.name,
           brand: row.brand,
+          category: row.category ?? 'Sin categoría asignada',
+          template: row.template ?? 'Sin plantilla activa',
           eligibility:
             row.hasTemplate && row.completed === row.required ? 'Publicable' : 'No publicable',
           missing: row.hasTemplate ? row.missingItems || '—' : 'Plantilla activa no asignada',
@@ -1019,6 +1031,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Elegibilidad base calculada automáticamente',
           'Un SKU con plantilla activa es elegible cuando todos sus atributos obligatorios tienen valor y todos sus activos requeridos están subidos. La política de excepción y las condiciones específicas del canal siguen pendientes.',
         ),
+        info(
+          'publication-policy-by-category',
+          'La selección de campos será por categoría y plantilla',
+          'La proyección identifica la categoría y la plantilla de cada SKU. La política de campos publicados no se persiste hasta recibir el contrato del canal y aprobar su modelo de configuración.',
+        ),
       ],
       actions: [
         refreshAction('publication'),
@@ -1026,6 +1043,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'publish',
           'Publicar en canal',
           'No existe una regla de elegibilidad aprobada ni un adaptador de canal operativo.',
+        ),
+        blockedAction(
+          'configure-publication-fields',
+          'Configurar campos por categoría',
+          'Faltan el contrato técnico del canal y el contrato de persistencia para versionar la selección de campos por categoría y plantilla.',
         ),
       ],
     });
@@ -1220,7 +1242,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     ];
 
     return this.response('reports', {
-      operationalStatus: 'operational',
+      operationalStatus: 'partial',
       metrics: [
         integerMetric('products', 'Productos', products.total),
         integerMetric('brands', 'Marcas', products.brands),
@@ -1255,8 +1277,20 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Agregados calculados en PostgreSQL',
           'Los conteos, la completitud y la elegibilidad base se calculan sobre todo el catálogo persistido y sus plantillas activas; no se proyectan desde la página visible.',
         ),
+        warning(
+          'client-report-formats-pending',
+          'Formatos definitivos pendientes del cliente',
+          'La tabla y sus exportaciones usan la proyección actual. Los filtros, columnas y fechas definitivos se habilitarán cuando lleguen los Excel del cliente y exista un contrato de persistencia para sus formatos.',
+        ),
       ],
-      actions: [refreshAction('reports')],
+      actions: [
+        refreshAction('reports'),
+        blockedAction(
+          'create-client-report-format',
+          'Nuevo formato desde plantilla del cliente',
+          'Aún no se recibieron los Excel definitivos ni se aprobó el contrato para guardar y versionar formatos de reporte.',
+        ),
+      ],
     });
   }
 

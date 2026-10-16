@@ -92,10 +92,10 @@ const DETAIL_ASSET_TYPES: ReadonlyArray<{
 ];
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Database }> = [
-  { id: 'technical', label: 'Información técnica', icon: Database },
+  { id: 'technical', label: 'Información Técnica', icon: Database },
   { id: 'applications', label: 'Aplicaciones', icon: PackageCheck },
-  { id: 'equivalences', label: 'Identificadores y homólogos', icon: Link2 },
-  { id: 'documents', label: 'Imágenes y documentos', icon: FileText },
+  { id: 'equivalences', label: 'Código Unificador y Homólogos', icon: Link2 },
+  { id: 'documents', label: 'Imágenes y Documentos', icon: FileText },
   { id: 'sources', label: 'Canal e ID', icon: Database },
   { id: 'history', label: 'Historial', icon: History },
 ];
@@ -295,7 +295,7 @@ function EnrichmentDrawer({
           <section>
             <div className="flex items-center gap-2">
               <LockKeyhole aria-hidden="true" className="size-4 text-slate-500" />
-              <h3 className="text-sm font-bold">Datos base y campos de solo lectura</h3>
+              <h3 className="text-sm font-bold">Datos Base y Campos de Solo Lectura</h3>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
               Los valores gobernados por ERP o sin permiso de edición se corrigen en su sistema de
@@ -321,7 +321,7 @@ function EnrichmentDrawer({
             <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-3">
               <div>
                 <h3 className="text-sm font-bold">
-                  Atributos de la plantilla · {editableColumns.length}
+                  Atributos de la Plantilla · {editableColumns.length}
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Tipo, unidad, obligatoriedad y regla de herencia provienen de la plantilla activa.
@@ -538,7 +538,7 @@ function TechnicalPanel({
     <Card>
       <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <CardTitle>Datos técnicos e identificadores</CardTitle>
+          <CardTitle>Datos Técnicos e Identificadores</CardTitle>
           <CardDescription>
             {sheet
               ? `${attributes.length} atributos visibles de ${sheet.schema.template.name}, versión ${sheet.schema.template.version}.`
@@ -697,7 +697,7 @@ function ApplicationsPanel({
   return (
     <Card className="overflow-hidden">
       <CardHeader>
-        <CardTitle>Aplicaciones compartidas</CardTitle>
+        <CardTitle>Aplicaciones Compartidas</CardTitle>
         <CardDescription>
           Relaciones activas heredadas por todos los SKU del código {unifiedCode}.
         </CardDescription>
@@ -707,7 +707,7 @@ function ApplicationsPanel({
           <thead className="border-y bg-slate-50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Vehículo</th>
-              <th className="px-4 py-3">Marca / modelo</th>
+              <th className="px-4 py-3">Marca / Modelo</th>
               <th className="px-4 py-3">Años</th>
               <th className="px-4 py-3">Motor</th>
               <th className="px-4 py-3">Notas</th>
@@ -785,9 +785,9 @@ function EquivalencesPanel({
         }))
     : [];
   const fallbackIdentifiers = [
-    { key: 'sku', label: 'Código artículo · identidad', value: product.sku },
-    { key: 'provider', label: 'Código de proveedor', value: product.providerCode },
-    { key: 'unifier', label: 'Código unificador', value: unifiedCode },
+    { key: 'sku', label: 'Código de Artículo · Identidad', value: product.sku },
+    { key: 'provider', label: 'Código de Proveedor', value: product.providerCode },
+    { key: 'unifier', label: 'Código Unificador', value: unifiedCode },
   ]
     .filter(({ value }) => value)
     .map((identifier) => ({
@@ -881,7 +881,7 @@ function EquivalencesPanel({
               <thead className="border-y bg-slate-50 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Marca</th>
-                  <th className="px-4 py-3">Código homólogo</th>
+                  <th className="px-4 py-3">Código Homólogo</th>
                   <th className="px-4 py-3">Fuente</th>
                   <th className="px-4 py-3">Estado</th>
                 </tr>
@@ -895,7 +895,7 @@ function EquivalencesPanel({
                       {homolog.source === 'import' ? 'Importación' : 'Manual'}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge tone="success">Activo · aprobado</StatusBadge>
+                      <StatusBadge tone="success">Activo · Aprobado</StatusBadge>
                     </td>
                   </tr>
                 ))}
@@ -951,7 +951,7 @@ function EquivalencesPanel({
                       {oem.source === 'import' ? 'Importación' : 'Manual'}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge tone="success">Activo · aprobado</StatusBadge>
+                      <StatusBadge tone="success">Activo · Aprobado</StatusBadge>
                     </td>
                   </tr>
                 ))}
@@ -1030,7 +1030,7 @@ function DocumentsPanel({ product, canWrite }: { product: Product; canWrite: boo
     <Card>
       <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>Imágenes y documentos · {assets.length}</CardTitle>
+          <CardTitle>Imágenes y Documentos · {assets.length}</CardTitle>
           <CardDescription>
             Archivos persistidos en el storage privado y asociados a {product.sku}.
           </CardDescription>
@@ -1131,7 +1131,7 @@ function SourcesPanel({ product }: { product: Product }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Canal e identificación técnica</CardTitle>
+        <CardTitle>Canal e Identificación Técnica</CardTitle>
         <CardDescription>
           Datos de transporte de la ficha; no representan procedencia de negocio.
         </CardDescription>
@@ -1139,13 +1139,13 @@ function SourcesPanel({ product }: { product: Product }) {
       <CardContent>
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-lg border bg-slate-50 p-4">
-            <dt className="text-xs text-muted-foreground">Canal de consulta</dt>
+            <dt className="text-xs text-muted-foreground">Canal de Consulta</dt>
             <dd className="mt-1 break-words text-sm font-semibold">
               {product.queryChannel ?? 'No informado'}
             </dd>
           </div>
           <div className="rounded-lg border bg-slate-50 p-4">
-            <dt className="text-xs text-muted-foreground">ID técnico</dt>
+            <dt className="text-xs text-muted-foreground">ID Técnico</dt>
             <dd className="mt-1 break-words text-sm font-semibold">
               {product.technicalId ?? 'No informado'}
             </dd>
@@ -1195,7 +1195,7 @@ function HistoryPanel({
   return (
     <Card className="overflow-hidden">
       <CardHeader>
-        <CardTitle>Historial de cambios</CardTitle>
+        <CardTitle>Historial de Cambios</CardTitle>
         <CardDescription>
           {total} cambios de campo asociados a este producto. Se muestran los 100 más recientes.
         </CardDescription>
@@ -1611,18 +1611,6 @@ export function ProductDetailView({
         </span>
       </nav>
 
-      <ScreenGuide
-        objective="Ficha consolidada: mantiene la identidad del SKU y reúne atributos, relaciones heredadas, activos y trazabilidad real."
-        actions={[
-          'Consulta las seis secciones o usa los accesos rápidos del SKU.',
-          'Edita únicamente los atributos PIM permitidos por la plantilla; los datos ERP quedan bloqueados.',
-          'Alterna entre métrico e imperial sin cambiar el valor registrado por la fuente.',
-          'Genera la ficha técnica únicamente con los atributos que la plantilla marcó como publicables.',
-        ]}
-        dataSource="La identidad proviene del catálogo; los atributos, su procedencia, las aplicaciones, los homólogos y el historial se consultan en sus APIs operativas."
-        limitation="Los atributos replicables y las aplicaciones se heredan por código unificador; cada SKU conserva su propia identidad. La búsqueda solo considera homólogos activos y aprobados."
-      />
-
       {saveNotice ? (
         <div
           role="status"
@@ -1642,7 +1630,7 @@ export function ProductDetailView({
 
         <div className="min-w-0 py-1">
           <span className="text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">
-            Código artículo · identidad ERP
+            Código de Artículo · Identidad ERP
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge tone={statusTone(product.status)}>
@@ -1661,14 +1649,28 @@ export function ProductDetailView({
               'El contrato actual no entrega una descripción para este producto.'}
           </p>
 
+          <div className="mt-4">
+            <ScreenGuide
+              objective="Ficha consolidada: mantiene la identidad del SKU y reúne atributos, relaciones heredadas, activos y trazabilidad real."
+              actions={[
+                'Consulta las seis secciones o usa los accesos rápidos del SKU.',
+                'Edita únicamente los atributos PIM permitidos por la plantilla; los datos ERP quedan bloqueados.',
+                'Alterna entre métrico e imperial sin cambiar el valor registrado por la fuente.',
+                'Genera la ficha técnica únicamente con los atributos que la plantilla marcó como publicables.',
+              ]}
+              dataSource="La identidad proviene del catálogo; los atributos, su procedencia, las aplicaciones, los homólogos y el historial se consultan en sus APIs operativas."
+              limitation="Los atributos replicables y las aplicaciones se heredan por código unificador; cada SKU conserva su propia identidad. La búsqueda solo considera homólogos activos y aprobados."
+            />
+          </div>
+
           <dl className="mt-7 grid gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-2">
             {[
               ['Marca', product.brand],
               ['Aplicación', applicationSummary],
-              ['Línea / categoría', categoryName],
+              ['Línea / Categoría', categoryName],
               ['Dimensiones', product.dimensions ?? 'No disponibles en el contrato'],
-              ['Código fabricante', product.providerCode ?? 'No disponible'],
-              ['Código unificador', unifiedCode ?? 'No registrado'],
+              ['Código de Proveedor', product.providerCode ?? 'No disponible'],
+              ['Código Unificador', unifiedCode ?? 'No registrado'],
             ].map(([label, value]) => (
               <div key={label} className="min-w-0">
                 <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -1708,14 +1710,14 @@ export function ProductDetailView({
                 <dd className="mt-1 font-semibold">{statusLabel(product.status)}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Canal de consulta</dt>
+                <dt className="text-xs text-muted-foreground">Canal de Consulta</dt>
                 <dd className="mt-1 break-words font-semibold">
                   {product.queryChannel ?? 'No informado'}
                 </dd>
               </div>
               {product.technicalId ? (
                 <div>
-                  <dt className="text-xs text-muted-foreground">ID técnico</dt>
+                  <dt className="text-xs text-muted-foreground">ID Técnico</dt>
                   <dd className="mt-1 break-words font-semibold">{product.technicalId}</dd>
                 </div>
               ) : null}
@@ -1791,85 +1793,85 @@ export function ProductDetailView({
         </div>
       </section>
 
-      <nav
-        className="mt-4 flex flex-wrap items-center gap-2"
-        aria-label={`Módulos de ${product.sku}`}
-      >
-        <span className="mr-1 text-[10px] font-extrabold uppercase tracking-[.06em] text-slate-500">
-          Módulos de {product.sku}
-        </span>
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setActiveTab(item.id)}
-            className={cn(
-              'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
-              activeTab === item.id
-                ? 'bg-orange-100 text-primary'
-                : 'bg-slate-100 text-slate-700 hover:bg-orange-50 hover:text-primary',
-            )}
+      <section className="mt-4 min-w-0" aria-label="Detalle complementario">
+        <div className="sticky top-16 z-20 -mx-4 border-y bg-white/95 px-4 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-[35px] lg:px-[35px]">
+          <dl
+            className="grid grid-cols-3 gap-px border-b bg-slate-200 py-px"
+            aria-label="Contexto persistente del producto"
           >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-
-      <section className="mt-6 min-w-0" aria-label="Detalle complementario">
-        <div
-          className="scrollbar-thin sticky top-[72px] z-20 overflow-x-auto border-b bg-white/95 backdrop-blur"
-          role="tablist"
-          aria-label="Secciones de la ficha"
-        >
-          <div className="flex min-w-max gap-1">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  id={`tab-${tab.id}`}
-                  type="button"
-                  role="tab"
-                  tabIndex={active ? 0 : -1}
-                  aria-selected={active}
-                  aria-controls={`panel-${tab.id}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  onKeyDown={(event) => {
-                    const currentIndex = tabs.findIndex((item) => item.id === tab.id);
-                    let targetIndex: number | null = null;
-
-                    if (event.key === 'ArrowRight') {
-                      targetIndex = (currentIndex + 1) % tabs.length;
-                    } else if (event.key === 'ArrowLeft') {
-                      targetIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-                    } else if (event.key === 'Home') {
-                      targetIndex = 0;
-                    } else if (event.key === 'End') {
-                      targetIndex = tabs.length - 1;
-                    }
-
-                    if (targetIndex === null) return;
-                    event.preventDefault();
-                    const target = tabs[targetIndex];
-                    if (!target) return;
-                    setActiveTab(target.id);
-                    requestAnimationFrame(() =>
-                      document.getElementById(`tab-${target.id}`)?.focus(),
-                    );
-                  }}
-                  className={cn(
-                    'flex min-h-12 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cdr-ink',
-                    active
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
+            {[
+              ['SKU · Código de Artículo', product.sku],
+              ['Código de Proveedor', product.providerCode ?? 'No disponible'],
+              ['Marca', product.brand],
+            ].map(([label, value]) => (
+              <div key={label} className="min-w-0 bg-white px-2 py-1.5 sm:px-3">
+                <dt className="truncate text-[9px] font-bold uppercase tracking-[.05em] text-slate-500">
+                  {label}
+                </dt>
+                <dd
+                  className="truncate text-[11px] font-semibold text-cdr-ink sm:text-xs"
+                  title={value}
                 >
-                  <Icon aria-hidden="true" className="size-4" />
-                  {tab.label}
-                </button>
-              );
-            })}
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div
+            className="scrollbar-thin overflow-x-auto"
+            role="tablist"
+            aria-label="Secciones de la ficha"
+          >
+            <div className="flex min-w-max gap-1">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    id={`tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    tabIndex={active ? 0 : -1}
+                    aria-selected={active}
+                    aria-controls={`panel-${tab.id}`}
+                    onClick={() => setActiveTab(tab.id)}
+                    onKeyDown={(event) => {
+                      const currentIndex = tabs.findIndex((item) => item.id === tab.id);
+                      let targetIndex: number | null = null;
+
+                      if (event.key === 'ArrowRight') {
+                        targetIndex = (currentIndex + 1) % tabs.length;
+                      } else if (event.key === 'ArrowLeft') {
+                        targetIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                      } else if (event.key === 'Home') {
+                        targetIndex = 0;
+                      } else if (event.key === 'End') {
+                        targetIndex = tabs.length - 1;
+                      }
+
+                      if (targetIndex === null) return;
+                      event.preventDefault();
+                      const target = tabs[targetIndex];
+                      if (!target) return;
+                      setActiveTab(target.id);
+                      requestAnimationFrame(() =>
+                        document.getElementById(`tab-${target.id}`)?.focus(),
+                      );
+                    }}
+                    className={cn(
+                      'flex min-h-10 items-center gap-2 border-b-2 px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cdr-ink sm:px-4',
+                      active
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Icon aria-hidden="true" className="size-4" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
         <div
