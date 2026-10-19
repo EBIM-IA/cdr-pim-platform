@@ -48,7 +48,6 @@ describe('parseImportPayload', () => {
     expect(rows[0]).toMatchObject({
       valid: false,
       errors: expect.arrayContaining([
-        'vehicleType is required',
         'make is required',
         'model is required',
         'yearFrom must not exceed yearTo',
@@ -114,6 +113,31 @@ describe('parseImportPayload', () => {
     });
   });
 
+  it('maps the PIM(2) Tipo column to bodyStyle without replacing the group vehicle type', () => {
+    const [application] = parseImportPayload({
+      target: 'applications',
+      format: 'csv',
+      idempotencyKey: 'pim-application-master',
+      csv: 'Código Unificador,Marca Vehículo,Modelo,Tipo,Combustible,Tracción,Cilindraje,Año Desde,Año Hasta,Area,Subarea\nR177.19,SUZUKI,S-CROSS SX4 M6,HB,GSL,4X2,1.6L,2013,2019,RUEDA POSTERIOR,MANZANA 5 PERNOS CON ABS',
+    });
+
+    expect(application).toMatchObject({
+      valid: true,
+      data: {
+        unifiedCode: 'R177.19',
+        make: 'SUZUKI',
+        model: 'S-CROSS SX4 M6',
+        bodyStyle: 'HB',
+        fuel: 'GSL',
+        traction: '4X2',
+        displacement: '1.6L',
+        area: 'RUEDA POSTERIOR',
+        subarea: 'MANZANA 5 PERNOS CON ABS',
+      },
+    });
+    expect(application?.data.vehicleType).toBeUndefined();
+  });
+
   it('canonicalizes OEM aliases and multi-brand values in CSV and JSON', () => {
     const [csv] = parseImportPayload({
       target: 'oem',
@@ -165,7 +189,6 @@ describe('parseImportPayload', () => {
     expect(application).toMatchObject({
       valid: false,
       errors: expect.arrayContaining([
-        'vehicleType is required',
         'make must contain at most 160 characters',
         'model is required',
       ]),

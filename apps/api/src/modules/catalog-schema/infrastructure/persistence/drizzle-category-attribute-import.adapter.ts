@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundError, type Uuid } from '@cdr/shared';
+import { NotFoundError, ValidationError, type Uuid } from '@cdr/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
@@ -458,7 +458,13 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
           eq(attributeTemplates.status, 'active'),
         ),
       )
-      .limit(1);
+      .limit(2);
+    if (headers.length > 1) {
+      throw new ValidationError(
+        'Category has multiple active template variants; a template-specific import is required',
+        { categorySlug },
+      );
+    }
     const header = headers[0];
     if (!header) throw new NotFoundError('Active category template', categorySlug);
     const accessRows = await this.db

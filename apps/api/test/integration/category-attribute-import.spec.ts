@@ -35,6 +35,16 @@ describe('category attribute imports', () => {
 
   afterAll(() => database.close());
 
+  it('rejects a category-only import when multiple active variants exist', async () => {
+    await expect(
+      adapter.prepare({
+        categorySlug: 'mantenimiento-vehiculo-aditivo-aditivo',
+        roles,
+        rows: [],
+      }),
+    ).rejects.toThrow('multiple active template variants');
+  });
+
   it('previews only active PIM-owned importable columns and persists source + audit atomically', async () => {
     const fixture = await findImportFixture(database);
     const importedValue = 'Nuevo valor desde archivo';
@@ -375,6 +385,13 @@ async function findImportFixture(
       AND access.can_view = true
       AND access.can_import = true
     WHERE (${replicable}::boolean = false OR taa.replicable = true)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM attribute_templates other
+        WHERE other.category_id = t.category_id
+          AND other.status = 'active'
+          AND other.id <> t.id
+      )
       AND (
         ${replicable}::boolean = false
         OR EXISTS (
@@ -419,6 +436,13 @@ async function addPimAttribute(input: {
     FROM attribute_templates t
     JOIN catalog_categories c ON c.id = t.category_id
     WHERE c.slug = ${input.categorySlug} AND c.active = true AND t.status = 'active'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM attribute_templates other
+        WHERE other.category_id = t.category_id
+          AND other.status = 'active'
+          AND other.id <> t.id
+      )
     LIMIT 1
   `;
   expect(resolved).toBeTruthy();

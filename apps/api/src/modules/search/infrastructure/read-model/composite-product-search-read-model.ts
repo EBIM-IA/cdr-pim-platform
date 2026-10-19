@@ -79,6 +79,7 @@ export class CompositeProductSearchReadModel implements ProductSearchReadModelPo
           categories.map((category) =>
             this.catalog.listGrid({
               categoryId: category.id,
+              selector: { templateId: category.templateId },
               roles,
               page: 1,
               pageSize: input.limit,
@@ -142,8 +143,14 @@ export class CompositeProductSearchReadModel implements ProductSearchReadModelPo
         value.vehicleType,
         value.make,
         value.model,
+        value.bodyStyle,
+        value.fuel,
+        value.traction,
+        value.displacement,
         value.yearFrom,
         value.yearTo,
+        value.area,
+        value.subarea,
         value.engine,
         value.notes,
       ]

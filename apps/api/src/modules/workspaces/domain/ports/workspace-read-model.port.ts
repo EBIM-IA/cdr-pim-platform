@@ -1,4 +1,4 @@
-import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
+import type { WorkspaceDto, WorkspaceQuery, WorkspaceSlug } from '@cdr/contracts';
 
 import type { AuthenticatedActor } from '../../../identity/domain/entities/role';
 
@@ -10,5 +10,9 @@ export const WORKSPACE_READ_MODEL = Symbol('WORKSPACE_READ_MODEL');
  * door around their future business rules.
  */
 export interface WorkspaceReadModelPort {
-  read(slug: WorkspaceSlug, actor: AuthenticatedActor): Promise<WorkspaceDto>;
+  read(
+    slug: WorkspaceSlug,
+    actor: AuthenticatedActor,
+    query?: WorkspaceQuery,
+  ): Promise<WorkspaceDto>;
 }

@@ -78,7 +78,13 @@ export class DynamicCatalogController {
     @Query(new ZodValidationPipe(catalogSchemaQuerySchema)) query: CatalogSchemaQuery,
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<CatalogGridSchemaDto> {
-    return toGridSchemaDto(await this.getSchema.execute(query.categoryId, actor));
+    return toGridSchemaDto(
+      await this.getSchema.execute(
+        query.categoryId,
+        { templateId: query.templateId, variantKey: query.variantKey },
+        actor,
+      ),
+    );
   }
 
   @Get('grid')

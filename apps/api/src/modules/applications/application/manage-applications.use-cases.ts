@@ -8,6 +8,7 @@ import {
   type Clock,
   ConflictError,
   NotFoundError,
+  ValidationError,
   assertUuid,
   getCorrelationId,
   newUuid,
@@ -52,16 +53,28 @@ export class CreateGroupApplicationUseCase {
   ): Promise<GroupApplication> {
     const group = await this.repository.findGroupByCode(input.unifiedCode);
     if (!group) throw new NotFoundError('EquivalenceGroup', input.unifiedCode);
+    if (group.vehicleType && group.vehicleType !== input.vehicleType) {
+      throw new ValidationError('vehicleType must match the application context of the group', {
+        unifiedCode: group.code,
+        expectedVehicleType: group.vehicleType,
+      });
+    }
     const occurredAt = this.clock.now();
     const application = GroupApplication.create(
       {
         groupId: group.id,
         unifiedCode: group.code,
-        vehicleType: input.vehicleType,
+        vehicleType: group.vehicleType ?? input.vehicleType,
         make: input.make,
         model: input.model,
+        bodyStyle: input.bodyStyle,
+        fuel: input.fuel,
+        traction: input.traction,
+        displacement: input.displacement,
         yearFrom: input.yearFrom,
         yearTo: input.yearTo,
+        area: input.area,
+        subarea: input.subarea,
         engine: input.engine,
         notes: input.notes,
       },
@@ -94,14 +107,26 @@ export class UpdateGroupApplicationUseCase {
     const application = await this.repository.findById(applicationId);
     if (!application) throw new NotFoundError('GroupApplication', id);
     const { expectedUpdatedAt, ...fields } = input;
+    if (
+      fields.vehicleType !== undefined &&
+      fields.vehicleType !== application.toSnapshot().vehicleType
+    ) {
+      throw new ValidationError('vehicleType is derived from the application context of the group');
+    }
     const occurredAt = this.clock.now();
     application.update(
       {
         vehicleType: fields.vehicleType,
         make: fields.make,
         model: fields.model,
+        bodyStyle: fields.bodyStyle,
+        fuel: fields.fuel,
+        traction: fields.traction,
+        displacement: fields.displacement,
         yearFrom: fields.yearFrom,
         yearTo: fields.yearTo,
+        area: fields.area,
+        subarea: fields.subarea,
         engine: fields.engine,
         notes: fields.notes,
         active: fields.active,

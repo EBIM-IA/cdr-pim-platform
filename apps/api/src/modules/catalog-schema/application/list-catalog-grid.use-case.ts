@@ -15,6 +15,8 @@ const OPERATORS = new Set<AttributeFilterOperator>(['eq', 'contains', 'gt', 'gte
 
 export interface ListCatalogGridQuery {
   readonly categoryId: string;
+  readonly templateId?: string;
+  readonly variantKey?: string;
   readonly page: number;
   readonly pageSize: number;
   readonly q?: string;
@@ -32,8 +34,14 @@ export class ListCatalogGridUseCase {
     query: ListCatalogGridQuery,
     actor: AuthenticatedActor,
   ): Promise<{ items: CatalogGridProduct[]; total: number }> {
+    if (Boolean(query.templateId) === Boolean(query.variantKey)) {
+      throw new ValidationError('Exactly one template selector is required');
+    }
     return this.catalog.listGrid({
       categoryId: assertUuid(query.categoryId, 'categoryId'),
+      selector: query.templateId
+        ? { templateId: assertUuid(query.templateId, 'templateId') }
+        : { variantKey: query.variantKey as string },
       roles: catalogBusinessRoles(actor),
       page: query.page,
       pageSize: query.pageSize,

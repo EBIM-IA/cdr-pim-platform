@@ -377,14 +377,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Reportes',
     eyebrow: 'Seguimiento',
     description:
-      'Tabla lineal de agregados globales calculados en PostgreSQL, con filtros y exportación local.',
+      'Resumen operativo y tres formatos PIM calculados desde catálogo y auditoría persistidos.',
     objective:
-      'Permite filtrar y exportar las filas reales del reporte sin presentar formatos del cliente que todavía no fueron recibidos.',
+      'Permite consultar y exportar REPORTE ATRIBUTOS, REPORTE GENERAL y RESULTADOS DE PERIODO sin completar datos históricos inexistentes.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de reportes.',
     limitation:
-      'Los Excel definitivos, los filtros de fecha y categoría de cada formato y su persistencia versionada siguen pendientes del cliente y del contrato técnico.',
+      'No existe un baseline histórico del reporte general ni una historia temporal de membresías; esas ausencias se muestran explícitamente.',
     kind: 'workspace',
     capabilities: [
       {
@@ -393,9 +393,9 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
         status: 'available',
       },
       {
-        title: 'Calidad y cobertura',
-        description: 'Indicadores basados en reglas de calidad aprobadas.',
-        status: 'blocked',
+        title: 'Formatos PIM',
+        description: 'Cambios de atributos, estado general y resultados mensuales.',
+        status: 'available',
       },
       {
         title: 'Exportaciones',
@@ -404,9 +404,9 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       },
     ],
     dependencies: [
-      'Reglas de calidad',
-      'Endpoint de analítica',
-      'Catálogo definitivo de reportes y política de exportación',
+      'Baseline histórico para comparativos anteriores',
+      'Historia temporal de membresías de código unificador',
+      'Política de paginación/exportación para catálogos mayores a 5.000 filas',
     ],
   },
   administration: {

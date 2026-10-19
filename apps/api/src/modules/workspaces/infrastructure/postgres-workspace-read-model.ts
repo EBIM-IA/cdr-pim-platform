@@ -7,7 +7,9 @@ import type {
   WorkspaceMetric,
   WorkspaceNotice,
   WorkspaceOperationalStatus,
+  ReportFormat,
   WorkspaceRow,
+  WorkspaceQuery,
   WorkspaceSlug,
 } from '@cdr/contracts';
 
@@ -39,6 +41,45 @@ interface ProductSummaryRow {
 interface GroupSummaryRow {
   readonly groups: number;
   readonly memberships: number;
+}
+
+interface AttributeReportRow {
+  readonly id: string;
+  readonly sku: string;
+  readonly unifiedCode: string | null;
+  readonly category: string | null;
+  readonly completeness: number;
+  readonly requiredMissing: number;
+  readonly optionalMissing: number;
+  readonly field: string;
+  readonly before: string | null;
+  readonly after: string | null;
+  readonly previousAt: Date | string | null;
+  readonly changedAt: Date | string;
+  readonly source: string;
+  readonly actor: string | null;
+  readonly totalRows: number;
+}
+
+interface GeneralReportRow {
+  readonly id: string;
+  readonly sku: string;
+  readonly unifiedCode: string | null;
+  readonly category: string | null;
+  readonly completeness: number;
+  readonly requiredMissing: number;
+  readonly optionalMissing: number;
+  readonly currentApplications: number;
+  readonly currentOem: number;
+  readonly currentHomologs: number;
+  readonly currentAttributes: number;
+  readonly totalRows: number;
+}
+
+interface PeriodReportRow {
+  readonly year: number;
+  readonly month: number;
+  readonly products: number;
 }
 
 const textMetric = (key: string, label: string, value: string): WorkspaceMetric => ({
@@ -101,7 +142,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     @Inject(API_ENV) private readonly env: ApiEnv,
   ) {}
 
-  read(slug: WorkspaceSlug, actor: AuthenticatedActor): Promise<WorkspaceDto> {
+  read(
+    slug: WorkspaceSlug,
+    actor: AuthenticatedActor,
+    query: WorkspaceQuery = {},
+  ): Promise<WorkspaceDto> {
     switch (slug) {
       case 'categories':
         return this.readCategories();
@@ -122,10 +167,20 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       case 'integrations':
         return this.readIntegrations();
       case 'reports':
-        return this.readReports();
+        return this.readReports(query.report ?? 'summary');
       case 'administration':
         return Promise.resolve(this.readAdministration(actor));
     }
+  }
+
+  private reportRefreshAction(format: ReportFormat): WorkspaceAction {
+    return {
+      id: 'refresh',
+      label: 'Actualizar datos',
+      availability: 'supported',
+      method: 'GET',
+      endpoint: `/api/v1/workspaces/reports?report=${format}`,
+    };
   }
 
   private response(slug: WorkspaceSlug, parts: WorkspaceParts): WorkspaceDto {
@@ -398,6 +453,12 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           vehicleType: string | null;
           make: string | null;
           model: string | null;
+          bodyStyle: string | null;
+          fuel: string | null;
+          traction: string | null;
+          displacement: string | null;
+          area: string | null;
+          subarea: string | null;
           years: string;
           active: boolean;
           source: string;
@@ -409,6 +470,12 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           ga.vehicle_type AS "vehicleType",
           ga.make,
           ga.model,
+          ga.body_style AS "bodyStyle",
+          ga.fuel,
+          ga.traction,
+          ga.displacement,
+          ga.area,
+          ga.subarea,
           CASE
             WHEN ga.year_from IS NULL AND ga.year_to IS NULL THEN '—'
             WHEN ga.year_from = ga.year_to OR ga.year_to IS NULL THEN ga.year_from::text
@@ -439,10 +506,16 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       ],
       columns: [
         { key: 'unifiedCode', label: 'Código unificador', type: 'text' },
-        { key: 'vehicleType', label: 'Tipo', type: 'text' },
+        { key: 'vehicleType', label: 'Contexto', type: 'text' },
         { key: 'make', label: 'Marca / industria', type: 'text' },
         { key: 'model', label: 'Modelo / equipo', type: 'text' },
+        { key: 'bodyStyle', label: 'Tipo', type: 'text' },
+        { key: 'fuel', label: 'Combustible', type: 'text' },
+        { key: 'traction', label: 'Tracción', type: 'text' },
+        { key: 'displacement', label: 'Cilindraje', type: 'text' },
         { key: 'years', label: 'Años / uso', type: 'text' },
+        { key: 'area', label: 'Área', type: 'text' },
+        { key: 'subarea', label: 'Subárea', type: 'text' },
         { key: 'status', label: 'Estado', type: 'status' },
         { key: 'source', label: 'Fuente', type: 'text' },
       ],
@@ -453,7 +526,13 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           vehicleType: row.vehicleType ?? 'Sin tipo',
           make: row.make ?? 'Sin marca',
           model: row.model ?? 'Sin modelo',
+          bodyStyle: row.bodyStyle ?? '—',
+          fuel: row.fuel ?? '—',
+          traction: row.traction ?? '—',
+          displacement: row.displacement ?? '—',
           years: row.years,
+          area: row.area ?? '—',
+          subarea: row.subarea ?? '—',
           status: row.active ? 'Activo' : 'Inactivo',
           source: row.source,
         },
@@ -1145,7 +1224,477 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
-  private async readReports(): Promise<WorkspaceDto> {
+  private readReports(format: ReportFormat): Promise<WorkspaceDto> {
+    switch (format) {
+      case 'attribute_changes':
+        return this.readAttributeReport();
+      case 'general_results':
+        return this.readGeneralReport();
+      case 'period_results':
+        return this.readPeriodReport();
+      case 'summary':
+        return this.readReportSummary();
+    }
+  }
+
+  private async readAttributeReport(): Promise<WorkspaceDto> {
+    const result = await this.sql<AttributeReportRow[]>`
+      SELECT
+        change.id::text AS "id",
+        product.sku AS "sku",
+        codes.code AS "unifiedCode",
+        category.name AS "category",
+        CASE
+          WHEN readiness.template_id IS NULL THEN 0
+          WHEN readiness.required = 0 THEN 100
+          ELSE ROUND(readiness.completed::numeric * 100 / readiness.required)::int
+        END AS "completeness",
+        GREATEST(COALESCE(readiness.required, 0) - COALESCE(readiness.completed, 0), 0)::int
+          AS "requiredMissing",
+        (
+          COALESCE(optional_attributes.missing, 0) + COALESCE(optional_assets.missing, 0)
+        )::int AS "optionalMissing",
+        definition.label AS "field",
+        CASE
+          WHEN change.before_value IS NULL OR change.before_value = 'null'::jsonb THEN NULL
+          WHEN jsonb_typeof(change.before_value) IN ('string', 'number', 'boolean')
+            THEN change.before_value #>> '{}'
+          ELSE change.before_value::text
+        END AS "before",
+        CASE
+          WHEN change.after_value IS NULL OR change.after_value = 'null'::jsonb THEN NULL
+          WHEN jsonb_typeof(change.after_value) IN ('string', 'number', 'boolean')
+            THEN change.after_value #>> '{}'
+          ELSE change.after_value::text
+        END AS "after",
+        change.previous_value_valid_from AS "previousAt",
+        entry.occurred_at AS "changedAt",
+        entry.source AS "source",
+        entry.actor_id AS "actor",
+        COUNT(*) OVER()::int AS "totalRows"
+      FROM audit_change_items change
+      INNER JOIN audit_entries entry ON entry.id = change.audit_entry_id
+      INNER JOIN products product
+        ON entry.resource_type = 'product'
+       AND product.id::text = entry.resource_id
+      INNER JOIN attribute_definitions definition
+        ON definition.key = change.field_name
+      LEFT JOIN product_template_assignments product_template
+        ON product_template.product_id = product.id
+      LEFT JOIN attribute_templates template ON template.id = product_template.template_id
+      LEFT JOIN catalog_categories category ON category.id = template.category_id
+      LEFT JOIN catalog_product_readiness readiness ON readiness.product_id = product.id
+      LEFT JOIN LATERAL (
+        SELECT STRING_AGG(DISTINCT group_row.code, ', ' ORDER BY group_row.code) AS code
+        FROM equivalence_group_members member
+        INNER JOIN equivalence_groups group_row ON group_row.id = member.group_id
+        WHERE member.product_id = product.id
+      ) codes ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) FILTER (
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM product_attribute_values value
+            WHERE value.product_id = product.id
+              AND value.attribute_definition_id = assignment.attribute_definition_id
+              AND value.deleted_at IS NULL
+          )
+        )::int AS missing
+        FROM template_attribute_assignments assignment
+        INNER JOIN attribute_definitions optional_definition
+          ON optional_definition.id = assignment.attribute_definition_id
+         AND optional_definition.active = true
+        WHERE assignment.template_id = template.id
+          AND assignment.active = true
+          AND assignment.required = false
+      ) optional_attributes ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) FILTER (
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM product_assets asset
+            WHERE asset.product_id = product.id
+              AND asset.type_code = requirement.type_code
+              AND asset.deleted_at IS NULL
+          )
+        )::int AS missing
+        FROM template_asset_requirements requirement
+        WHERE requirement.template_id = template.id
+          AND requirement.active = true
+          AND requirement.required = false
+      ) optional_assets ON true
+      ORDER BY entry.occurred_at DESC, change.id DESC
+      LIMIT 5000
+    `;
+    const totalRows = result[0]?.totalRows ?? 0;
+    const rows: WorkspaceRow[] = result.map((row) => ({
+      id: row.id,
+      values: {
+        sku: row.sku,
+        unifiedCode: row.unifiedCode,
+        category: row.category,
+        completeness: row.completeness,
+        requiredMissing: row.requiredMissing,
+        optionalMissing: row.optionalMissing,
+        field: row.field,
+        before: row.before,
+        after: row.after,
+        previousAt: row.previousAt ? toIsoString(row.previousAt) : null,
+        changedAt: toIsoString(row.changedAt),
+        source: row.source,
+        actor: row.actor,
+        reason: null,
+      },
+    }));
+
+    return this.response('reports', {
+      operationalStatus: 'partial',
+      metrics: [
+        integerMetric('changes', 'Cambios de atributo', totalRows),
+        integerMetric('visible-changes', 'Cambios mostrados', rows.length),
+      ],
+      columns: [
+        { key: 'sku', label: 'Código artículo', type: 'text' },
+        { key: 'unifiedCode', label: 'Código Unificador', type: 'text' },
+        { key: 'category', label: 'Categoría', type: 'text' },
+        { key: 'completeness', label: 'Completitud %', type: 'number' },
+        { key: 'requiredMissing', label: 'Obligatorios faltantes', type: 'number' },
+        { key: 'optionalMissing', label: 'Opcionales faltantes', type: 'number' },
+        { key: 'field', label: 'Campo', type: 'text' },
+        { key: 'before', label: 'Valor anterior', type: 'text' },
+        { key: 'after', label: 'Valor nuevo', type: 'text' },
+        { key: 'previousAt', label: 'Fecha anterior', type: 'datetime' },
+        { key: 'changedAt', label: 'Fecha nueva', type: 'datetime' },
+        { key: 'source', label: 'Origen', type: 'text' },
+        { key: 'actor', label: 'Actor', type: 'text' },
+        { key: 'reason', label: 'Motivo', type: 'text' },
+      ],
+      rows,
+      totalRows,
+      notices: [
+        info(
+          'audit-backed-report',
+          'Historial real de atributos',
+          'Campo, valores, fechas, origen y actor provienen de la auditoría append-only. Código unificador, categoría y completitud muestran el contexto vigente al generar el reporte.',
+        ),
+        warning(
+          'audit-reason-unavailable',
+          'Motivo no disponible',
+          'La auditoría vigente no persiste un motivo separado. La columna se mantiene vacía en lugar de inferirlo desde el origen o la correlación.',
+        ),
+        ...(totalRows > rows.length
+          ? [
+              warning(
+                'report-row-limit',
+                'Vista limitada a 5.000 filas',
+                'El total refleja todos los cambios, pero la tabla y sus exportaciones contienen los 5.000 más recientes.',
+              ),
+            ]
+          : []),
+      ],
+      actions: [this.reportRefreshAction('attribute_changes')],
+    });
+  }
+
+  private async readGeneralReport(): Promise<WorkspaceDto> {
+    const result = await this.sql<GeneralReportRow[]>`
+      SELECT
+        product.id::text AS "id",
+        product.sku AS "sku",
+        codes.code AS "unifiedCode",
+        category.name AS "category",
+        CASE
+          WHEN readiness.template_id IS NULL THEN 0
+          WHEN readiness.required = 0 THEN 100
+          ELSE ROUND(readiness.completed::numeric * 100 / readiness.required)::int
+        END AS "completeness",
+        GREATEST(COALESCE(readiness.required, 0) - COALESCE(readiness.completed, 0), 0)::int
+          AS "requiredMissing",
+        (
+          COALESCE(optional_attributes.missing, 0) + COALESCE(optional_assets.missing, 0)
+        )::int AS "optionalMissing",
+        COALESCE(relations.applications, 0)::int AS "currentApplications",
+        COALESCE(relations.oem, 0)::int AS "currentOem",
+        COALESCE(relations.homologs, 0)::int AS "currentHomologs",
+        COALESCE(current_attributes.total, 0)::int AS "currentAttributes",
+        COUNT(*) OVER()::int AS "totalRows"
+      FROM products product
+      LEFT JOIN product_template_assignments product_template
+        ON product_template.product_id = product.id
+      LEFT JOIN attribute_templates template ON template.id = product_template.template_id
+      LEFT JOIN catalog_categories category ON category.id = template.category_id
+      LEFT JOIN catalog_product_readiness readiness ON readiness.product_id = product.id
+      LEFT JOIN LATERAL (
+        SELECT STRING_AGG(DISTINCT group_row.code, ', ' ORDER BY group_row.code) AS code
+        FROM equivalence_group_members member
+        INNER JOIN equivalence_groups group_row ON group_row.id = member.group_id
+        WHERE member.product_id = product.id
+      ) codes ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          (
+            SELECT COUNT(DISTINCT application.id)
+            FROM equivalence_group_members member
+            INNER JOIN group_applications application
+              ON application.equivalence_group_id = member.group_id
+             AND application.active = true
+            WHERE member.product_id = product.id
+          )::int AS applications,
+          (
+            SELECT COUNT(DISTINCT oem.id)
+            FROM equivalence_group_members member
+            INNER JOIN group_oem_codes oem
+              ON oem.equivalence_group_id = member.group_id
+             AND oem.active = true
+            WHERE member.product_id = product.id
+          )::int AS oem,
+          (
+            SELECT COUNT(DISTINCT homolog.id)
+            FROM equivalence_group_members member
+            INNER JOIN external_homologs homolog
+              ON homolog.equivalence_group_id = member.group_id
+             AND homolog.active = true
+            WHERE member.product_id = product.id
+          )::int AS homologs
+      ) relations ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS total
+        FROM product_attribute_values value
+        INNER JOIN template_attribute_assignments assignment
+          ON assignment.attribute_definition_id = value.attribute_definition_id
+         AND assignment.template_id = template.id
+         AND assignment.active = true
+        INNER JOIN attribute_definitions definition
+          ON definition.id = assignment.attribute_definition_id
+         AND definition.active = true
+        WHERE value.product_id = product.id
+          AND value.deleted_at IS NULL
+      ) current_attributes ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) FILTER (
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM product_attribute_values value
+            WHERE value.product_id = product.id
+              AND value.attribute_definition_id = assignment.attribute_definition_id
+              AND value.deleted_at IS NULL
+          )
+        )::int AS missing
+        FROM template_attribute_assignments assignment
+        INNER JOIN attribute_definitions optional_definition
+          ON optional_definition.id = assignment.attribute_definition_id
+         AND optional_definition.active = true
+        WHERE assignment.template_id = template.id
+          AND assignment.active = true
+          AND assignment.required = false
+      ) optional_attributes ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) FILTER (
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM product_assets asset
+            WHERE asset.product_id = product.id
+              AND asset.type_code = requirement.type_code
+              AND asset.deleted_at IS NULL
+          )
+        )::int AS missing
+        FROM template_asset_requirements requirement
+        WHERE requirement.template_id = template.id
+          AND requirement.active = true
+          AND requirement.required = false
+      ) optional_assets ON true
+      ORDER BY product.sku
+      LIMIT 5000
+    `;
+    const totalRows = result[0]?.totalRows ?? 0;
+    const rows: WorkspaceRow[] = result.map((row) => ({
+      id: row.id,
+      values: {
+        sku: row.sku,
+        unifiedCode: row.unifiedCode,
+        category: row.category,
+        completeness: row.completeness,
+        requiredMissing: row.requiredMissing,
+        optionalMissing: row.optionalMissing,
+        previousApplications: null,
+        currentApplications: row.currentApplications,
+        previousOem: null,
+        currentOem: row.currentOem,
+        previousHomologs: null,
+        currentHomologs: row.currentHomologs,
+        previousAttributes: null,
+        currentAttributes: row.currentAttributes,
+      },
+    }));
+
+    return this.response('reports', {
+      operationalStatus: 'partial',
+      metrics: [
+        integerMetric('products', 'Productos', totalRows),
+        integerMetric('visible-products', 'Productos mostrados', rows.length),
+      ],
+      columns: [
+        { key: 'sku', label: 'Código artículo', type: 'text' },
+        { key: 'unifiedCode', label: 'Código Unificador', type: 'text' },
+        { key: 'category', label: 'Categoría', type: 'text' },
+        { key: 'completeness', label: 'Completitud %', type: 'number' },
+        { key: 'requiredMissing', label: 'Obligatorios faltantes', type: 'number' },
+        { key: 'optionalMissing', label: 'Opcionales faltantes', type: 'number' },
+        { key: 'previousApplications', label: 'Aplicaciones anteriores', type: 'number' },
+        { key: 'currentApplications', label: 'Aplicaciones actuales', type: 'number' },
+        { key: 'previousOem', label: 'OEM anteriores', type: 'number' },
+        { key: 'currentOem', label: 'OEM actuales', type: 'number' },
+        { key: 'previousHomologs', label: 'Homólogos anteriores', type: 'number' },
+        { key: 'currentHomologs', label: 'Homólogos actuales', type: 'number' },
+        {
+          key: 'previousAttributes',
+          label: 'Atributos actualizados anteriores',
+          type: 'number',
+        },
+        {
+          key: 'currentAttributes',
+          label: 'Atributos actualizados actuales',
+          type: 'number',
+        },
+      ],
+      rows,
+      totalRows,
+      notices: [
+        warning(
+          'general-report-no-baseline',
+          'Baseline histórico no disponible',
+          'Las columnas “anteriores” se entregan vacías porque no existe un corte histórico comparable persistido. Las columnas “actuales” se calculan sobre relaciones activas y valores vigentes.',
+        ),
+        info(
+          'current-attribute-definition',
+          'Definición de atributos actuales',
+          '“Atributos actualizados actuales” cuenta valores vigentes pertenecientes a la plantilla actual del producto; no representa cambios dentro de un período.',
+        ),
+        ...(totalRows > rows.length
+          ? [
+              warning(
+                'report-row-limit',
+                'Vista limitada a 5.000 filas',
+                'El total refleja todo el catálogo, pero la tabla y sus exportaciones contienen los primeros 5.000 SKU ordenados por código.',
+              ),
+            ]
+          : []),
+      ],
+      actions: [this.reportRefreshAction('general_results')],
+    });
+  }
+
+  private async readPeriodReport(): Promise<WorkspaceDto> {
+    const result = await this.sql<PeriodReportRow[]>`
+      WITH mapped_changes AS (
+        SELECT entry.id, entry.occurred_at, product.id AS product_id
+        FROM audit_entries entry
+        INNER JOIN products product
+          ON entry.resource_type = 'product'
+         AND product.id::text = entry.resource_id
+
+        UNION ALL
+
+        SELECT entry.id, entry.occurred_at, asset.product_id
+        FROM audit_entries entry
+        INNER JOIN product_assets asset
+          ON entry.resource_type = 'product_asset'
+         AND asset.id::text = entry.resource_id
+
+        UNION ALL
+
+        SELECT entry.id, entry.occurred_at, member.product_id
+        FROM audit_entries entry
+        INNER JOIN group_applications application
+          ON entry.resource_type = 'group_application'
+         AND application.id::text = entry.resource_id
+        INNER JOIN equivalence_group_members member
+          ON member.group_id = application.equivalence_group_id
+
+        UNION ALL
+
+        SELECT entry.id, entry.occurred_at, member.product_id
+        FROM audit_entries entry
+        INNER JOIN group_oem_codes oem
+          ON entry.resource_type = 'group_oem_code'
+         AND oem.id::text = entry.resource_id
+        INNER JOIN equivalence_group_members member
+          ON member.group_id = oem.equivalence_group_id
+
+        UNION ALL
+
+        SELECT entry.id, entry.occurred_at, member.product_id
+        FROM audit_entries entry
+        INNER JOIN external_homologs homolog
+          ON entry.resource_type = 'external_homolog'
+         AND homolog.id::text = entry.resource_id
+        INNER JOIN equivalence_group_members member
+          ON member.group_id = homolog.equivalence_group_id
+      )
+      SELECT
+        EXTRACT(YEAR FROM occurred_at AT TIME ZONE 'UTC')::int AS "year",
+        EXTRACT(MONTH FROM occurred_at AT TIME ZONE 'UTC')::int AS "month",
+        COUNT(DISTINCT product_id)::int AS "products"
+      FROM mapped_changes
+      GROUP BY 1, 2
+      ORDER BY 1 DESC, 2 DESC
+    `;
+    const monthNames = [
+      'Enero',
+      'Febrero',
+      'Marzo',
+      'Abril',
+      'Mayo',
+      'Junio',
+      'Julio',
+      'Agosto',
+      'Septiembre',
+      'Octubre',
+      'Noviembre',
+      'Diciembre',
+    ] as const;
+    const rows: WorkspaceRow[] = result.map((row) => ({
+      id: `period:${row.year}:${row.month}`,
+      values: {
+        year: row.year,
+        month: monthNames[row.month - 1] ?? String(row.month),
+        products: row.products,
+      },
+    }));
+
+    return this.response('reports', {
+      operationalStatus: 'partial',
+      metrics: [
+        integerMetric('months-with-activity', 'Meses con actividad', rows.length),
+        integerMetric(
+          'monthly-product-occurrences',
+          'Participaciones producto/mes',
+          result.reduce((total, row) => total + row.products, 0),
+        ),
+      ],
+      columns: [
+        { key: 'year', label: 'Año', type: 'number' },
+        { key: 'month', label: 'Mes', type: 'text' },
+        { key: 'products', label: 'Productos únicos con cambios', type: 'number' },
+      ],
+      rows,
+      notices: [
+        info(
+          'period-report-definition',
+          'Definición del resultado mensual',
+          'Un producto persistido se cuenta una sola vez por mes calendario UTC cuando existe auditoría resoluble del producto, sus atributos, sus activos o una aplicación, OEM u homólogo asociado a uno de sus códigos unificadores.',
+        ),
+        warning(
+          'period-report-current-membership',
+          'Pertenencia histórica no disponible',
+          'Los eventos de aplicaciones, OEM y homólogos se asignan a los miembros actuales del código unificador. No se reconstruye una membresía pasada que la base no conserva.',
+        ),
+      ],
+      actions: [this.reportRefreshAction('period_results')],
+    });
+  }
+
+  private async readReportSummary(): Promise<WorkspaceDto> {
     const [products, groups, brands, categories, dashboard] = await Promise.all([
       this.productSummary(),
       this.groupSummary(),
@@ -1277,20 +1826,13 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Agregados calculados en PostgreSQL',
           'Los conteos, la completitud y la elegibilidad base se calculan sobre todo el catálogo persistido y sus plantillas activas; no se proyectan desde la página visible.',
         ),
-        warning(
-          'client-report-formats-pending',
-          'Formatos definitivos pendientes del cliente',
-          'La tabla y sus exportaciones usan la proyección actual. Los filtros, columnas y fechas definitivos se habilitarán cuando lleguen los Excel del cliente y exista un contrato de persistencia para sus formatos.',
+        info(
+          'client-report-formats-available',
+          'Formatos PIM disponibles',
+          'REPORTE ATRIBUTOS, REPORTE GENERAL y REPORTE RESULTADOS DE PERIODO se consultan como proyecciones separadas desde las vistas del módulo.',
         ),
       ],
-      actions: [
-        refreshAction('reports'),
-        blockedAction(
-          'create-client-report-format',
-          'Nuevo formato desde plantilla del cliente',
-          'Aún no se recibieron los Excel definitivos ni se aprobó el contrato para guardar y versionar formatos de reporte.',
-        ),
-      ],
+      actions: [this.reportRefreshAction('summary')],
     });
   }
 

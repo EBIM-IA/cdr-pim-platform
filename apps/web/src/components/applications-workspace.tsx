@@ -45,8 +45,14 @@ interface ApplicationForm {
   vehicleType: '' | 'AUTOMOTRIZ' | 'INDUSTRIAL';
   make: string;
   model: string;
+  bodyStyle: string;
+  fuel: string;
+  traction: string;
+  displacement: string;
   yearFrom: string;
   yearTo: string;
+  area: string;
+  subarea: string;
   engine: string;
   notes: string;
 }
@@ -56,8 +62,14 @@ const emptyForm: ApplicationForm = {
   vehicleType: '',
   make: '',
   model: '',
+  bodyStyle: '',
+  fuel: '',
+  traction: '',
+  displacement: '',
   yearFrom: '',
   yearTo: '',
+  area: '',
+  subarea: '',
   engine: '',
   notes: '',
 };
@@ -67,8 +79,14 @@ type ApplicationTableColumnKey =
   | 'vehicleType'
   | 'make'
   | 'model'
+  | 'bodyStyle'
+  | 'fuel'
+  | 'traction'
+  | 'displacement'
   | 'yearFrom'
   | 'yearTo'
+  | 'area'
+  | 'subarea'
   | 'engine'
   | 'notes'
   | 'source'
@@ -76,7 +94,7 @@ type ApplicationTableColumnKey =
 
 type EditableApplicationColumn = Exclude<
   ApplicationTableColumnKey,
-  'unifiedCode' | 'source' | 'active'
+  'unifiedCode' | 'vehicleType' | 'source' | 'active'
 >;
 
 interface EditingApplicationCell {
@@ -96,7 +114,7 @@ const applicationTableColumns: readonly ExcelTableColumn<
   },
   {
     key: 'vehicleType',
-    label: 'Vehículo',
+    label: 'Contexto',
     getValue: (application) => application.vehicleType,
   },
   {
@@ -109,8 +127,18 @@ const applicationTableColumns: readonly ExcelTableColumn<
     label: 'Modelo',
     getValue: (application) => application.model,
   },
+  { key: 'bodyStyle', label: 'Tipo', getValue: (application) => application.bodyStyle },
+  { key: 'fuel', label: 'Combustible', getValue: (application) => application.fuel },
+  { key: 'traction', label: 'Tracción', getValue: (application) => application.traction },
+  {
+    key: 'displacement',
+    label: 'Cilindraje',
+    getValue: (application) => application.displacement,
+  },
   { key: 'yearFrom', label: 'Año desde', getValue: (application) => application.yearFrom },
   { key: 'yearTo', label: 'Año hasta', getValue: (application) => application.yearTo },
+  { key: 'area', label: 'Área', getValue: (application) => application.area },
+  { key: 'subarea', label: 'Subárea', getValue: (application) => application.subarea },
   { key: 'engine', label: 'Motor', getValue: (application) => application.engine },
   { key: 'notes', label: 'Notas', getValue: (application) => application.notes },
   {
@@ -126,11 +154,16 @@ const applicationTableColumns: readonly ExcelTableColumn<
 ];
 
 const editableApplicationColumns: readonly EditableApplicationColumn[] = [
-  'vehicleType',
   'make',
   'model',
+  'bodyStyle',
+  'fuel',
+  'traction',
+  'displacement',
   'yearFrom',
   'yearTo',
+  'area',
+  'subarea',
   'engine',
   'notes',
 ];
@@ -153,13 +186,6 @@ function applicationCellUpdate(
   expectedUpdatedAt: string,
 ): UpdateGroupApplicationInput {
   const value = draft.trim();
-  if (column === 'vehicleType') {
-    const normalized = value.toUpperCase();
-    if (normalized !== 'AUTOMOTRIZ' && normalized !== 'INDUSTRIAL') {
-      throw new Error('El tipo debe ser Automotriz o Industrial.');
-    }
-    return { expectedUpdatedAt, vehicleType: normalized };
-  }
   if (column === 'make' || column === 'model') {
     if (!value || value === '-') {
       throw new Error(`${column === 'make' ? 'Marca' : 'Modelo'} es obligatorio.`);
@@ -184,6 +210,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState('');
+  const [bodyStyleFilter, setBodyStyleFilter] = useState('');
   const [makeFilter, setMakeFilter] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -220,13 +247,27 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     return items.filter(
       (item) =>
         (!normalized ||
-          [item.unifiedCode, item.vehicleType, item.make, item.model, item.engine, item.notes]
+          [
+            item.unifiedCode,
+            item.vehicleType,
+            item.make,
+            item.model,
+            item.bodyStyle,
+            item.fuel,
+            item.traction,
+            item.displacement,
+            item.area,
+            item.subarea,
+            item.engine,
+            item.notes,
+          ]
             .filter(Boolean)
             .some((value) => String(value).toLocaleLowerCase('es').includes(normalized))) &&
         (!vehicleTypeFilter || item.vehicleType === vehicleTypeFilter) &&
+        (!bodyStyleFilter || item.bodyStyle === bodyStyleFilter) &&
         (!makeFilter || item.make === makeFilter),
     );
-  }, [items, makeFilter, query, vehicleTypeFilter]);
+  }, [bodyStyleFilter, items, makeFilter, query, vehicleTypeFilter]);
 
   const unifiedCodes = useMemo(
     () => [...new Set(items.map((item) => item.unifiedCode))].sort(),
@@ -245,8 +286,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     item.vehicleType,
     item.make,
     item.model,
+    item.bodyStyle,
+    item.fuel,
+    item.traction,
+    item.displacement,
     item.yearFrom,
     item.yearTo,
+    item.area,
+    item.subarea,
     item.engine,
     item.notes,
     item.source === 'import' ? 'Importación' : 'Manual',
@@ -274,10 +321,19 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       ].sort(),
     [items],
   );
+  const bodyStyles = useMemo(
+    () =>
+      [
+        ...new Set(
+          items.map((item) => item.bodyStyle).filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(),
+    [items],
+  );
 
   const downloadTemplate = () => {
     const content =
-      'codigo_unificador,tipo_vehiculo,marca,modelo,anio_desde,anio_hasta,motor,notas\n';
+      'codigo_unificador,marca_vehiculo,modelo,tipo,combustible,traccion,cilindraje,anio_desde,anio_hasta,area,subarea,motor,notas\n';
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -301,14 +357,20 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     setError(null);
     try {
       if (!form.vehicleType || !form.make.trim() || !form.model.trim()) {
-        throw new Error('Tipo de aplicación, marca y modelo son obligatorios.');
+        throw new Error('Contexto de aplicación, marca y modelo son obligatorios.');
       }
       const fields = {
         vehicleType: form.vehicleType,
         make: form.make,
         model: form.model,
+        bodyStyle: form.bodyStyle,
+        fuel: form.fuel,
+        traction: form.traction,
+        displacement: form.displacement,
         yearFrom: year(form.yearFrom),
         yearTo: year(form.yearTo),
+        area: form.area,
+        subarea: form.subarea,
         engine: form.engine,
         notes: form.notes,
       };
@@ -414,7 +476,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       <ScreenGuide
         objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
         actions={[
-          'Busca por código, marca, modelo, motor o notas.',
+          'Busca por código, marca, modelo, tipo, combustible, tracción, cilindraje, área, subárea, motor o notas.',
           'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
           'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
         ]}
@@ -447,11 +509,17 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           sheetName="Aplicaciones"
           headers={[
             'Código unificador',
-            'Tipo de vehículo',
+            'Contexto de aplicación',
             'Marca',
             'Modelo',
+            'Tipo',
+            'Combustible',
+            'Tracción',
+            'Cilindraje',
             'Año desde',
             'Año hasta',
+            'Área',
+            'Subárea',
             'Motor',
             'Notas',
             'Origen',
@@ -607,7 +675,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       ) : null}
 
       <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_220px_220px_auto_auto] xl:items-end">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_180px_180px_200px_auto_auto] xl:items-end">
           <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
             Buscar aplicaciones
             <span className="relative block">
@@ -619,17 +687,29 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                 className="pl-9"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Código, marca, modelo o motor"
+                placeholder="Código, marca, modelo, tipo, combustible o área"
               />
             </span>
           </label>
           <Select
-            label="Tipo"
+            label="Contexto"
             value={vehicleTypeFilter}
             onChange={(event) => setVehicleTypeFilter(event.target.value)}
           >
             <option value="">Todos</option>
             {vehicleTypes.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Tipo"
+            value={bodyStyleFilter}
+            onChange={(event) => setBodyStyleFilter(event.target.value)}
+          >
+            <option value="">Todos</option>
+            {bodyStyles.map((value) => (
               <option key={value} value={value}>
                 {value}
               </option>
@@ -692,7 +772,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             onClear={applicationTable.clear}
           />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1750px] text-left text-sm">
+            <table className="w-full min-w-[2700px] text-left text-sm">
               <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="w-12 px-4 py-3">
@@ -754,6 +834,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       />
                     </td>
                     <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
+                    <td className="px-4 py-3">{item.vehicleType ?? '—'}</td>
                     {editableApplicationColumns.map((column) => (
                       <InlineApplicationCell
                         key={column}
@@ -798,7 +879,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                 {applicationTable.visibleRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={12}
+                      colSpan={applicationTableColumns.length + 2}
                       className="px-4 py-10 text-center text-sm text-muted-foreground"
                     >
                       Ninguna fila cumple los filtros de columna combinados.
@@ -840,7 +921,7 @@ function NewApplicationRow({
       </td>
       <td className="px-2 py-2">
         <select
-          aria-label="Nuevo tipo de aplicación"
+          aria-label="Nuevo contexto de aplicación"
           value={form.vehicleType}
           onChange={(event) =>
             onField('vehicleType', event.target.value as ApplicationForm['vehicleType'])
@@ -868,6 +949,38 @@ function NewApplicationRow({
       </td>
       <td className="px-2 py-2">
         <Input
+          aria-label="Nuevo tipo de carrocería"
+          maxLength={200}
+          value={form.bodyStyle}
+          onChange={(event) => onField('bodyStyle', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo combustible"
+          maxLength={200}
+          value={form.fuel}
+          onChange={(event) => onField('fuel', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nueva tracción"
+          maxLength={200}
+          value={form.traction}
+          onChange={(event) => onField('traction', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nuevo cilindraje"
+          maxLength={200}
+          value={form.displacement}
+          onChange={(event) => onField('displacement', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
           aria-label="Nuevo año desde"
           type="number"
           min={1886}
@@ -884,6 +997,22 @@ function NewApplicationRow({
           max={2200}
           value={form.yearTo}
           onChange={(event) => onField('yearTo', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nueva área"
+          maxLength={200}
+          value={form.area}
+          onChange={(event) => onField('area', event.target.value)}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          aria-label="Nueva subárea"
+          maxLength={200}
+          value={form.subarea}
+          onChange={(event) => onField('subarea', event.target.value)}
         />
       </td>
       <td className="px-2 py-2">
@@ -989,35 +1118,20 @@ function InlineApplicationCell({
   return (
     <td className="px-2 py-2">
       <div className="flex min-w-44 items-center gap-1">
-        {column === 'vehicleType' ? (
-          <select
-            autoFocus
-            value={editing.draft}
-            disabled={saving}
-            onChange={(event) => onDraft(event.target.value)}
-            onBlur={onSave}
-            onKeyDown={onKeyDown}
-            aria-label={`Editar ${label}`}
-            className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-          >
-            <option value="AUTOMOTRIZ">Automotriz</option>
-            <option value="INDUSTRIAL">Industrial</option>
-          </select>
-        ) : (
-          <input
-            autoFocus
-            value={editing.draft}
-            disabled={saving}
-            type={column === 'yearFrom' || column === 'yearTo' ? 'number' : 'text'}
-            min={column === 'yearFrom' || column === 'yearTo' ? 1886 : undefined}
-            max={column === 'yearFrom' || column === 'yearTo' ? 2200 : undefined}
-            onChange={(event) => onDraft(event.target.value)}
-            onBlur={onSave}
-            onKeyDown={onKeyDown}
-            aria-label={`Editar ${label}`}
-            className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-          />
-        )}
+        <input
+          autoFocus
+          value={editing.draft}
+          disabled={saving}
+          type={column === 'yearFrom' || column === 'yearTo' ? 'number' : 'text'}
+          min={column === 'yearFrom' || column === 'yearTo' ? 1886 : undefined}
+          max={column === 'yearFrom' || column === 'yearTo' ? 2200 : undefined}
+          onChange={(event) => onDraft(event.target.value)}
+          onBlur={onSave}
+          onKeyDown={onKeyDown}
+          aria-label={`Editar ${label}`}
+          maxLength={column === 'notes' ? 2_000 : 200}
+          className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+        />
         {saving ? <span className="text-xs text-muted-foreground">Guardando…</span> : null}
       </div>
     </td>

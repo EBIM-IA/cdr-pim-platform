@@ -21,6 +21,9 @@ import { DrizzleDynamicCatalogRepository } from '../../src/modules/catalog-schem
 import { productTemplateAssignments } from '../../src/modules/catalog-schema/infrastructure/persistence/catalog-schema.tables';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
+const BRAKE_PAD_CATEGORY_SLUG =
+  'sistema-de-frenado-y-sus-partes-pastilla-de-freno-pastilla-de-freno';
+
 describe('DrizzleDynamicCatalogRepository', () => {
   let database: TestDatabase;
   let repository: DrizzleDynamicCatalogRepository;
@@ -37,11 +40,19 @@ describe('DrizzleDynamicCatalogRepository', () => {
 
   it('discovers active categories and filters every schema by role access', async () => {
     const categories = await repository.listActiveCategories(['COMPRAS']);
-    expect(categories).toHaveLength(32);
+    expect(categories).toHaveLength(52);
 
-    const brakePads = categories.find((category) => category.slug === 'pastillas-de-freno');
-    const purchasing = await repository.getActiveSchema(brakePads!.id, ['COMPRAS']);
-    const sales = await repository.getActiveSchema(brakePads!.id, ['VENTAS']);
+    const brakePads = categories.find((category) => category.slug === BRAKE_PAD_CATEGORY_SLUG);
+    const purchasing = await repository.getActiveSchema(
+      brakePads!.id,
+      { templateId: brakePads!.templateId },
+      ['COMPRAS'],
+    );
+    const sales = await repository.getActiveSchema(
+      brakePads!.id,
+      { variantKey: brakePads!.templateVariantKey },
+      ['VENTAS'],
+    );
     expect(purchasing?.attributes.length).toBeGreaterThan(6);
     expect(
       purchasing?.attributes.some(
@@ -54,15 +65,40 @@ describe('DrizzleDynamicCatalogRepository', () => {
         .every((attribute) => !attribute.permissions.edit),
     ).toBe(true);
     expect(sales?.attributes.every((attribute) => !attribute.permissions.edit)).toBe(true);
+    const additiveVariants = categories.filter(
+      (category) => category.slug === 'mantenimiento-vehiculo-aditivo-aditivo',
+    );
+    expect(additiveVariants.map((category) => category.templateVariantKey)).toEqual([
+      '42.1',
+      '42.2',
+      '42.3',
+      '42.4',
+      '42.5',
+      '42.6',
+    ]);
+    expect(new Set(additiveVariants.map((category) => category.id)).size).toBe(1);
+    const selectedVariant = additiveVariants.find(
+      (category) => category.templateVariantKey === '42.6',
+    );
+    await expect(
+      repository.getActiveSchema(
+        selectedVariant!.id,
+        { variantKey: selectedVariant!.templateVariantKey },
+        ['COMPRAS'],
+      ),
+    ).resolves.toMatchObject({
+      template: { id: selectedVariant!.templateId, variantKey: '42.6' },
+    });
     expect(await repository.listActiveCategories(['UNKNOWN'])).toEqual([]);
   });
 
   it('lists products using dynamic searchable-attribute filters', async () => {
     const category = (await repository.listActiveCategories(['COMPRAS'])).find(
-      (item) => item.slug === 'pastillas-de-freno',
+      (item) => item.slug === BRAKE_PAD_CATEGORY_SLUG,
     );
     const result = await repository.listGrid({
       categoryId: category!.id,
+      selector: { templateId: category!.templateId },
       roles: ['COMPRAS'],
       page: 1,
       pageSize: 25,
@@ -272,7 +308,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
 
     const updated = await repository.updateAttribute({
       productId: primaryId,
-      attributeKey: 'tipo_indicador_de_desgaste',
+      attributeKey: 'tipo_de_indicador_de_desgaste',
       value: 'Sensor',
       source: AttributeValueSource.Manual,
       expectedVersion: 1,
@@ -298,7 +334,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
       page: 1,
       pageSize: 25,
       sku: 'D1672',
-      field: 'tipo_indicador_de_desgaste',
+      field: 'tipo_de_indicador_de_desgaste',
       source: 'manual',
     });
     expect(audit).toMatchObject({
@@ -309,7 +345,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
     await expect(
       repository.updateAttribute({
         productId: primaryId,
-        attributeKey: 'tipo_indicador_de_desgaste',
+        attributeKey: 'tipo_de_indicador_de_desgaste',
         value: 'STALE',
         source: AttributeValueSource.Manual,
         expectedVersion: 1,
@@ -404,9 +440,11 @@ describe('DrizzleDynamicCatalogRepository', () => {
       valueJson: null,
       deletedAt,
     });
-    expect(
-      (await repository.getProductSheet(productId, ['COMPRAS']))?.product.attributes,
-    ).toMatchObject({ descripcion_tecnica_prueba: { value: null, version: 2 } });
+    const sheet = await repository.getProductSheet(productId, ['COMPRAS']);
+    expect(sheet?.schema.template.id).toBe(template!.id);
+    expect(sheet?.product.attributes).toMatchObject({
+      descripcion_tecnica_prueba: { value: null, version: 2 },
+    });
 
     await expect(
       repository.updateAttribute({

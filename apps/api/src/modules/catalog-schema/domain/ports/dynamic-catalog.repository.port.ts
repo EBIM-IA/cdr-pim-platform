@@ -21,12 +21,16 @@ export interface CatalogAttributeFilter {
 
 export interface CatalogGridOptions {
   readonly categoryId: Uuid;
+  readonly selector: CatalogTemplateSelector;
   readonly roles: readonly string[];
   readonly page: number;
   readonly pageSize: number;
   readonly q?: string;
   readonly filters: readonly CatalogAttributeFilter[];
 }
+
+export type CatalogTemplateSelector =
+  { readonly templateId: Uuid } | { readonly variantKey: string };
 
 export interface CatalogWorkbookOptions {
   readonly categoryId?: Uuid;
@@ -108,11 +112,16 @@ export interface DynamicCatalogRepositoryPort {
       name: string;
       path: string;
       templateId: Uuid;
+      templateVariantKey: string;
       templateName: string;
       templateVersion: number;
     }[]
   >;
-  getActiveSchema(categoryId: Uuid, roles: readonly string[]): Promise<DynamicCatalogSchema | null>;
+  getActiveSchema(
+    categoryId: Uuid,
+    selector: CatalogTemplateSelector,
+    roles: readonly string[],
+  ): Promise<DynamicCatalogSchema | null>;
   getProductSheet(
     productId: Uuid,
     roles: readonly string[],

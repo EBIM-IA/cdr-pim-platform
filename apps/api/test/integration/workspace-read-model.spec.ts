@@ -15,6 +15,10 @@ const ASSET_ID = '55000000-0000-4000-8000-000000000001';
 const APPLICATION_ID = '60000000-0000-4000-8000-000000000001';
 const HOMOLOG_ID = '70000000-0000-4000-8000-000000000001';
 const BATCH_ID = '80000000-0000-4000-8000-000000000001';
+const AUDIT_ATTRIBUTE_ID = '90000000-0000-4000-8000-000000000001';
+const AUDIT_APPLICATION_ID = '90000000-0000-4000-8000-000000000002';
+const AUDIT_NOVEMBER_ID = '90000000-0000-4000-8000-000000000003';
+const AUDIT_CHANGE_ID = '91000000-0000-4000-8000-000000000001';
 
 const actor: AuthenticatedActor = {
   id: 'integration-viewer',
@@ -64,8 +68,8 @@ describe('PostgresWorkspaceReadModel', () => {
       VALUES (${CATEGORY_ID}, 'rodamientos', 'Rodamientos', 'rodamientos', 1)
     `;
     await database.sql`
-      INSERT INTO attribute_templates (id, category_id, name, version, status)
-      VALUES (${TEMPLATE_ID}, ${CATEGORY_ID}, 'Rodamiento', 1, 'active')
+      INSERT INTO attribute_templates (id, category_id, variant_key, name, version, status)
+      VALUES (${TEMPLATE_ID}, ${CATEGORY_ID}, '22.1', 'Rodamiento', 1, 'active')
     `;
     await database.sql`
       INSERT INTO attribute_definitions (id, key, label, data_type, unit, source_authority)
@@ -190,8 +194,9 @@ describe('PostgresWorkspaceReadModel', () => {
     );
     expect(reports.actions).toContainEqual(
       expect.objectContaining({
-        id: 'create-client-report-format',
-        availability: 'blocked',
+        id: 'refresh',
+        availability: 'supported',
+        endpoint: '/api/v1/workspaces/reports?report=summary',
       }),
     );
     expect(templates.operationalStatus).toBe('operational');
@@ -222,6 +227,113 @@ describe('PostgresWorkspaceReadModel', () => {
       expect.objectContaining({
         values: { dimension: 'Categoría', value: 'Rodamientos', products: 1 },
       }),
+    );
+  });
+
+  it('projects the three PIM report formats without inventing a historical baseline', async () => {
+    await database.sql`
+      INSERT INTO product_attribute_values (
+        product_id, attribute_definition_id, value_number, source, confidence, version
+      ) VALUES (${PRODUCT_ID}, ${ATTRIBUTE_ID}, 25, 'manual', 1, 1)
+    `;
+    await database.sql`
+      INSERT INTO audit_entries (
+        id, resource_type, resource_id, action, actor_id, source, correlation_id,
+        occurred_at, changes
+      ) VALUES
+        (
+          ${AUDIT_ATTRIBUTE_ID}, 'product', ${PRODUCT_ID}, 'updated', ${actor.id}, 'api',
+          'report-attribute-change', '2026-10-10T12:00:00.000Z',
+          '{"diametro_interior":{"before":20,"after":25}}'::jsonb
+        ),
+        (
+          ${AUDIT_APPLICATION_ID}, 'group_application', ${APPLICATION_ID}, 'updated',
+          ${actor.id}, 'api', 'report-application-change', '2026-10-11T12:00:00.000Z',
+          '{}'::jsonb
+        ),
+        (
+          ${AUDIT_NOVEMBER_ID}, 'product', ${PRODUCT_ID}, 'updated', ${actor.id}, 'api',
+          'report-november-change', '2026-11-02T12:00:00.000Z', '{}'::jsonb
+        )
+    `;
+    await database.sql`
+      INSERT INTO audit_change_items (
+        id, audit_entry_id, field_name, before_value, after_value, previous_value_valid_from
+      ) VALUES (
+        ${AUDIT_CHANGE_ID}, ${AUDIT_ATTRIBUTE_ID}, 'diametro_interior', '20'::jsonb, '25'::jsonb,
+        '2026-09-01T12:00:00.000Z'
+      )
+    `;
+
+    const [attributes, general, period] = await Promise.all([
+      readModel.read('reports', actor, { report: 'attribute_changes' }),
+      readModel.read('reports', actor, { report: 'general_results' }),
+      readModel.read('reports', actor, { report: 'period_results' }),
+    ]);
+
+    expect(attributes.columns.map((column) => column.label)).toEqual([
+      'Código artículo',
+      'Código Unificador',
+      'Categoría',
+      'Completitud %',
+      'Obligatorios faltantes',
+      'Opcionales faltantes',
+      'Campo',
+      'Valor anterior',
+      'Valor nuevo',
+      'Fecha anterior',
+      'Fecha nueva',
+      'Origen',
+      'Actor',
+      'Motivo',
+    ]);
+    expect(attributes.rows[0]?.values).toMatchObject({
+      sku: 'SKU-001',
+      unifiedCode: 'UNIF-001',
+      category: 'Rodamientos',
+      completeness: 50,
+      requiredMissing: 1,
+      field: 'Diámetro interior',
+      before: '20',
+      after: '25',
+      actor: actor.id,
+      reason: null,
+    });
+
+    expect(general.columns.map((column) => column.label)).toEqual([
+      'Código artículo',
+      'Código Unificador',
+      'Categoría',
+      'Completitud %',
+      'Obligatorios faltantes',
+      'Opcionales faltantes',
+      'Aplicaciones anteriores',
+      'Aplicaciones actuales',
+      'OEM anteriores',
+      'OEM actuales',
+      'Homólogos anteriores',
+      'Homólogos actuales',
+      'Atributos actualizados anteriores',
+      'Atributos actualizados actuales',
+    ]);
+    expect(general.rows[0]?.values).toMatchObject({
+      sku: 'SKU-001',
+      previousApplications: null,
+      currentApplications: 1,
+      previousOem: null,
+      currentOem: 0,
+      previousHomologs: null,
+      currentHomologs: 1,
+      previousAttributes: null,
+      currentAttributes: 1,
+    });
+
+    expect(period.rows.map((row) => row.values)).toEqual([
+      { year: 2026, month: 'Noviembre', products: 1 },
+      { year: 2026, month: 'Octubre', products: 1 },
+    ]);
+    expect(period.notices).toContainEqual(
+      expect.objectContaining({ id: 'period-report-definition' }),
     );
   });
 

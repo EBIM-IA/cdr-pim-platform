@@ -20,6 +20,7 @@ describe('dynamic catalog browser client', () => {
 
     await fetchCatalogGrid({
       categoryId: '11111111-1111-4111-8111-111111111111',
+      templateId: '22222222-2222-4222-8222-222222222222',
       page: 1,
       pageSize: 25,
       filter: ['material:contains:acero', 'diametro:eq:20'],
@@ -27,6 +28,7 @@ describe('dynamic catalog browser client', () => {
 
     const [rawUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
     const url = new URL(rawUrl, 'http://localhost');
+    expect(url.searchParams.get('templateId')).toBe('22222222-2222-4222-8222-222222222222');
     expect(url.searchParams.getAll('filter')).toEqual([
       'material:contains:acero',
       'diametro:eq:20',

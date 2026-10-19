@@ -26,6 +26,7 @@ import {
   FileSpreadsheet,
   ImageIcon,
   KeyRound,
+  ListChecks,
   LockKeyhole,
   Pencil,
   Plus,
@@ -80,6 +81,9 @@ export type OperationsSecondaryView =
   | 'roles'
   | 'audit'
   | 'reports'
+  | 'attribute-report'
+  | 'general-report'
+  | 'period-report'
   | 'data'
   | 'searches'
   | 'settings';
@@ -208,6 +212,33 @@ const viewDefinitions: Record<OperationsSecondaryView, ViewDefinition> = {
     icon: BarChart3,
     emptyTitle: 'No hay agregados disponibles',
     emptyDescription: 'El backend no publicó indicadores para este corte.',
+    presentation: 'reports',
+  },
+  'attribute-report': {
+    slug: 'reports',
+    title: 'REPORTE ATRIBUTOS',
+    description: 'Cambios de atributos respaldados por la auditoría persistida.',
+    icon: ListChecks,
+    emptyTitle: 'No hay cambios de atributos auditados',
+    emptyDescription: 'La auditoría no contiene cambios de definiciones dinámicas para este corte.',
+    presentation: 'reports',
+  },
+  'general-report': {
+    slug: 'reports',
+    title: 'REPORTE GENERAL (RESULTADOS)',
+    description: 'Estado actual del catálogo con baseline histórico explícitamente no disponible.',
+    icon: Database,
+    emptyTitle: 'No hay productos para reportar',
+    emptyDescription: 'El catálogo no contiene productos persistidos para este corte.',
+    presentation: 'reports',
+  },
+  'period-report': {
+    slug: 'reports',
+    title: 'REPORTE RESULTADOS DE PERIODO',
+    description: 'Productos únicos con actividad auditada agrupados por mes calendario UTC.',
+    icon: BarChart3,
+    emptyTitle: 'No hay períodos con actividad',
+    emptyDescription: 'No existen eventos de auditoría que puedan asociarse a productos.',
     presentation: 'reports',
   },
   data: {
@@ -1710,19 +1741,38 @@ function ConnectorCards({ workspace }: { workspace: WorkspaceDto }) {
   );
 }
 
-function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
+function ReportSummary({
+  workspace,
+  view,
+}: {
+  workspace: WorkspaceDto;
+  view: OperationsSecondaryView;
+}) {
   const [query, setQuery] = useState('');
   const [section, setSection] = useState('');
+  const definition = viewDefinitions[view];
+  const hasSections = workspace.columns.some((column) => column.key === 'section');
   const sections = useMemo(
-    () => [...new Set(workspace.rows.map((row) => String(row.values.section ?? 'Otros')))],
-    [workspace.rows],
+    () =>
+      hasSections
+        ? [...new Set(workspace.rows.map((row) => String(row.values.section ?? 'Otros')))]
+        : [],
+    [hasSections, workspace.rows],
   );
   const rows = useMemo(() => {
     const searched = filterWorkspaceRows(workspace.rows, workspace.columns, query);
-    return section
+    return hasSections && section
       ? searched.filter((row) => String(row.values.section ?? 'Otros') === section)
       : searched;
-  }, [query, section, workspace.columns, workspace.rows]);
+  }, [hasSections, query, section, workspace.columns, workspace.rows]);
+  const filename =
+    view === 'attribute-report'
+      ? 'reporte-atributos'
+      : view === 'general-report'
+        ? 'reporte-general-resultados'
+        : view === 'period-report'
+          ? 'reporte-resultados-periodo'
+          : 'reporte-cdr';
   const exportData = useMemo<TabularData>(
     () => ({
       headers: workspace.columns.map((column) => column.label),
@@ -1732,12 +1782,9 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
           return value === null ? '' : value;
         }),
       ),
-      sheetName: 'Reporte PIM',
+      sheetName: definition.title,
     }),
-    [rows, workspace.columns],
-  );
-  const reportFormatAction = blockedActions(workspace).find(
-    (action) => action.id === 'create-client-report-format',
+    [definition.title, rows, workspace.columns],
   );
 
   return (
@@ -1745,10 +1792,10 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
       <Card className="p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-cdr-ink">Reporte Operativo del PIM</h3>
+            <h3 className="text-sm font-semibold text-cdr-ink">{definition.title}</h3>
             <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              Vista lineal de los agregados reales publicados por el backend. La búsqueda, el filtro
-              y las exportaciones se aplican exactamente a las filas visibles.
+              {definition.description} La búsqueda y las exportaciones se aplican exactamente a las
+              filas visibles.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1756,18 +1803,8 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
               type="button"
               size="sm"
               variant="outline"
-              disabled
-              title={reportFormatAction?.reason ?? 'Formato definitivo pendiente'}
-            >
-              <FileSpreadsheet className="size-4" aria-hidden="true" /> Nuevo Formato desde
-              Plantilla
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
               disabled={rows.length === 0}
-              onClick={() => downloadCsv(exportData, 'reporte-cdr')}
+              onClick={() => downloadCsv(exportData, filename)}
             >
               <Download className="size-4" aria-hidden="true" /> CSV
             </Button>
@@ -1775,7 +1812,7 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
               type="button"
               size="sm"
               disabled={rows.length === 0}
-              onClick={() => downloadXlsx(exportData, 'reporte-cdr')}
+              onClick={() => downloadXlsx(exportData, filename)}
             >
               <FileSpreadsheet className="size-4" aria-hidden="true" /> Excel
             </Button>
@@ -1790,7 +1827,12 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
             </Button>
           </div>
         </div>
-        <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.35fr)]">
+        <div
+          className={cn(
+            'mt-4 grid gap-2',
+            hasSections && 'md:grid-cols-[minmax(0,1fr)_minmax(220px,0.35fr)]',
+          )}
+        >
           <label className="relative block">
             <span className="sr-only">Buscar en el reporte</span>
             <Search
@@ -1801,37 +1843,45 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar sección, indicador o valor…"
+              placeholder="Buscar en las filas del reporte…"
               className="bg-white pl-9"
             />
           </label>
-          <label>
-            <span className="sr-only">Filtrar por sección</span>
-            <select
-              aria-label="Filtrar por sección"
-              value={section}
-              onChange={(event) => setSection(event.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-cdr-ink"
-            >
-              <option value="">Todas las secciones</option>
-              {sections.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
+          {hasSections ? (
+            <label>
+              <span className="sr-only">Filtrar por sección</span>
+              <select
+                aria-label="Filtrar por sección"
+                value={section}
+                onChange={(event) => setSection(event.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-cdr-ink"
+              >
+                <option value="">Todas las secciones</option>
+                {sections.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
           La opción PDF abre la impresión del navegador; el usuario decide si imprime o guarda como
-          PDF. No se presenta como un formato definitivo del cliente.
+          PDF. CSV y Excel incluyen las mismas columnas y filas que permanecen visibles después de
+          aplicar la búsqueda.
         </p>
       </Card>
 
       <Card id="cdr-report-print-area" className="overflow-hidden">
         {rows.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-left text-sm">
+            <table
+              className={cn(
+                'w-full text-left text-sm',
+                workspace.columns.length > 8 ? 'min-w-[1600px]' : 'min-w-[680px]',
+              )}
+            >
               <thead className="border-b bg-slate-50 text-[11px] text-muted-foreground">
                 <tr>
                   {workspace.columns.map((column) => (
@@ -1896,12 +1946,6 @@ function ReportSummary({ workspace }: { workspace: WorkspaceDto }) {
           }
         }
       `}</style>
-
-      <BlockedBanner
-        workspace={workspace}
-        actionId="create-client-report-format"
-        fallback="Faltan los Excel definitivos del cliente y el contrato para guardar formatos."
-      />
     </div>
   );
 }
@@ -1937,7 +1981,16 @@ export function OperationsSecondaryWorkspace({
   }
 
   const showRows = workspace.rows.length > 0;
-  const showMetrics = ['channels', 'prestashop', 'monitor', 'reports', 'data'].includes(view);
+  const showMetrics = [
+    'channels',
+    'prestashop',
+    'monitor',
+    'reports',
+    'attribute-report',
+    'general-report',
+    'period-report',
+    'data',
+  ].includes(view);
 
   return (
     <div className="space-y-5">
@@ -1980,11 +2033,7 @@ export function OperationsSecondaryWorkspace({
         )
       ) : null}
       {definition.presentation === 'reports' ? (
-        showRows ? (
-          <ReportSummary workspace={workspace} />
-        ) : (
-          <EmptyCapability definition={definition} />
-        )
+        <ReportSummary workspace={workspace} view={view} />
       ) : null}
       {definition.presentation === 'capabilities' ? (
         view === 'prestashop' ? (

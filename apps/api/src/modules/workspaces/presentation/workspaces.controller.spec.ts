@@ -34,8 +34,8 @@ describe('WorkspacesController', () => {
     const useCase = { execute } as unknown as GetWorkspaceUseCase;
     const controller = new WorkspacesController(useCase);
 
-    await expect(controller.findOne('administration', { actor })).resolves.toEqual(projection);
-    expect(execute).toHaveBeenCalledWith('administration', actor);
+    await expect(controller.findOne('administration', {}, { actor })).resolves.toEqual(projection);
+    expect(execute).toHaveBeenCalledWith('administration', actor, {});
   });
 
   it('rejects a malformed projection before it reaches the web renderer', async () => {
@@ -46,6 +46,6 @@ describe('WorkspacesController', () => {
     });
     const controller = new WorkspacesController({ execute } as unknown as GetWorkspaceUseCase);
 
-    await expect(controller.findOne('reports', { actor })).rejects.toThrow();
+    await expect(controller.findOne('reports', {}, { actor })).rejects.toThrow();
   });
 });

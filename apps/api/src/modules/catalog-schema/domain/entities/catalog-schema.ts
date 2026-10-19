@@ -65,6 +65,7 @@ export interface DynamicCatalogSchema {
   };
   readonly template: {
     readonly id: Uuid;
+    readonly variantKey: string;
     readonly name: string;
     readonly version: number;
   };
@@ -115,6 +116,7 @@ export interface CatalogWorkbookProduct {
   readonly category: { readonly id: Uuid; readonly name: string };
   readonly template: {
     readonly id: Uuid;
+    readonly variantKey: string;
     readonly name: string;
     readonly version: number;
   };

@@ -49,6 +49,7 @@ export interface AdminAttributeTemplate {
   readonly id: Uuid;
   readonly categoryId: Uuid;
   readonly categoryName: string;
+  readonly variantKey: string;
   readonly name: string;
   readonly version: number;
   readonly status: 'draft' | 'active' | 'retired';

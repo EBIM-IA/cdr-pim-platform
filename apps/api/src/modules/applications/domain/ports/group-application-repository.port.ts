@@ -1,3 +1,4 @@
+import type { ApplicationVehicleType } from '@cdr/contracts';
 import type { Uuid } from '@cdr/shared';
 
 import type { GroupApplication } from '../entities/group-application';
@@ -20,7 +21,9 @@ export type GroupApplicationMutationResult =
   | { readonly kind: 'version_conflict'; readonly actualUpdatedAt: Date };
 
 export interface GroupApplicationRepositoryPort {
-  findGroupByCode(code: string): Promise<{ id: Uuid; code: string } | null>;
+  findGroupByCode(
+    code: string,
+  ): Promise<{ id: Uuid; code: string; vehicleType: ApplicationVehicleType | null } | null>;
   findById(id: Uuid): Promise<GroupApplication | null>;
   list(criteria: ApplicationCriteria): Promise<GroupApplication[]>;
   /** Inserts the aggregate and its immutable audit event in one transaction. */

@@ -29,7 +29,7 @@ class MemoryApplicationRepository implements GroupApplicationRepositoryPort {
   readonly audits: ApplicationAuditWriteContext[] = [];
 
   async findGroupByCode(code: string) {
-    return { id: groupId, code: code.trim().toUpperCase() };
+    return { id: groupId, code: code.trim().toUpperCase(), vehicleType: 'AUTOMOTRIZ' as const };
   }
 
   async findById(id: ReturnType<typeof assertUuid>) {
@@ -90,14 +90,47 @@ describe('manual group application mutations', () => {
         vehicleType: 'AUTOMOTRIZ',
         make: 'Toyota',
         model: 'Hilux',
+        bodyStyle: 'HB',
+        fuel: 'GSL',
+        traction: '4X2',
+        displacement: '1.6L',
+        area: 'RUEDA POSTERIOR',
+        subarea: 'MANZANA 5 PERNOS CON ABS',
       },
       actor,
     );
 
-    expect(repository.item?.toSnapshot().unifiedCode).toBe('D1672');
+    expect(repository.item?.toSnapshot()).toMatchObject({
+      unifiedCode: 'D1672',
+      bodyStyle: 'HB',
+      fuel: 'GSL',
+      traction: '4X2',
+      displacement: '1.6L',
+      area: 'RUEDA POSTERIOR',
+      subarea: 'MANZANA 5 PERNOS CON ABS',
+    });
     expect(repository.audits).toEqual([
       expect.objectContaining({ action: 'created', actorId: actor.id, occurredAt: changedAt }),
     ]);
+  });
+
+  it('does not let workbook Tipo replace the application context derived from the group', async () => {
+    const repository = new MemoryApplicationRepository();
+    const create = new CreateGroupApplicationUseCase(repository, new FixedClock(changedAt));
+
+    await expect(
+      create.execute(
+        {
+          unifiedCode: 'D1672',
+          vehicleType: 'INDUSTRIAL',
+          make: 'Toyota',
+          model: 'Hilux',
+          bodyStyle: 'HB',
+        },
+        actor,
+      ),
+    ).rejects.toThrow('vehicleType must match the application context of the group');
+    expect(repository.item).toBeNull();
   });
 
   it('rejects a stale update without persisting or auditing it', async () => {

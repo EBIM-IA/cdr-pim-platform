@@ -12,8 +12,14 @@ export const groupApplicationSchema = z.object({
   vehicleType: applicationVehicleTypeSchema.nullable(),
   make: z.string().max(160).nullable(),
   model: z.string().max(200).nullable(),
+  bodyStyle: z.string().max(200).nullable(),
+  fuel: z.string().max(200).nullable(),
+  traction: z.string().max(200).nullable(),
+  displacement: z.string().max(200).nullable(),
   yearFrom: z.number().int().min(1886).max(2200).nullable(),
   yearTo: z.number().int().min(1886).max(2200).nullable(),
+  area: z.string().max(200).nullable(),
+  subarea: z.string().max(200).nullable(),
   engine: z.string().max(200).nullable(),
   notes: z.string().max(2_000).nullable(),
   active: z.boolean(),
@@ -45,8 +51,14 @@ const groupApplicationWriteFieldsSchema = z.object({
   vehicleType: applicationVehicleTypeWriteSchema,
   make: z.string().trim().min(1).max(160),
   model: z.string().trim().min(1).max(200),
+  bodyStyle: z.string().trim().max(200).nullable().optional(),
+  fuel: z.string().trim().max(200).nullable().optional(),
+  traction: z.string().trim().max(200).nullable().optional(),
+  displacement: z.string().trim().max(200).nullable().optional(),
   yearFrom: z.number().int().min(1886).max(2200).optional(),
   yearTo: z.number().int().min(1886).max(2200).optional(),
+  area: z.string().trim().max(200).nullable().optional(),
+  subarea: z.string().trim().max(200).nullable().optional(),
   engine: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(2_000).optional(),
 });
@@ -75,8 +87,14 @@ export const updateGroupApplicationSchema = z
     vehicleType: applicationVehicleTypeWriteSchema.optional(),
     make: z.string().trim().min(1).max(160).optional(),
     model: z.string().trim().min(1).max(200).optional(),
+    bodyStyle: z.string().trim().max(200).nullable().optional(),
+    fuel: z.string().trim().max(200).nullable().optional(),
+    traction: z.string().trim().max(200).nullable().optional(),
+    displacement: z.string().trim().max(200).nullable().optional(),
     yearFrom: z.number().int().min(1886).max(2200).nullable().optional(),
     yearTo: z.number().int().min(1886).max(2200).nullable().optional(),
+    area: z.string().trim().max(200).nullable().optional(),
+    subarea: z.string().trim().max(200).nullable().optional(),
     engine: z.string().trim().max(200).optional(),
     notes: z.string().trim().max(2_000).optional(),
     active: z.boolean().optional(),
@@ -86,8 +104,14 @@ export const updateGroupApplicationSchema = z
       value.vehicleType !== undefined ||
       value.make !== undefined ||
       value.model !== undefined ||
+      value.bodyStyle !== undefined ||
+      value.fuel !== undefined ||
+      value.traction !== undefined ||
+      value.displacement !== undefined ||
       value.yearFrom !== undefined ||
       value.yearTo !== undefined ||
+      value.area !== undefined ||
+      value.subarea !== undefined ||
       value.engine !== undefined ||
       value.notes !== undefined ||
       value.active !== undefined,

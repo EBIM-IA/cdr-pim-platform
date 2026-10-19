@@ -65,6 +65,7 @@ export const attributeTemplates = pgTable(
     categoryId: uuid('category_id')
       .notNull()
       .references(() => catalogCategories.id, { onDelete: 'restrict' }),
+    variantKey: text('variant_key').notNull(),
     name: text('name').notNull(),
     version: integer('version').notNull(),
     status: text('status').notNull().default('draft'),
@@ -72,9 +73,13 @@ export const attributeTemplates = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('attribute_templates_category_version_key').on(table.categoryId, table.version),
-    uniqueIndex('attribute_templates_one_active_per_category')
-      .on(table.categoryId)
+    uniqueIndex('attribute_templates_category_variant_version_key').on(
+      table.categoryId,
+      table.variantKey,
+      table.version,
+    ),
+    uniqueIndex('attribute_templates_one_active_per_category_variant')
+      .on(table.categoryId, table.variantKey)
       .where(sql`${table.status} = 'active'`),
   ],
 );

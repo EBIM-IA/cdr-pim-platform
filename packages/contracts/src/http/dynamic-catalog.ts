@@ -60,6 +60,7 @@ export const catalogGridSchemaSchema = z.object({
   }),
   template: z.object({
     id: uuidSchema,
+    variantKey: z.string().trim().min(1).max(100),
     name: z.string(),
     version: z.number().int().positive(),
   }),
@@ -73,6 +74,7 @@ export const catalogCategorySummarySchema = z.object({
   name: z.string(),
   path: z.string(),
   templateId: uuidSchema,
+  templateVariantKey: z.string().trim().min(1).max(100),
   templateName: z.string(),
   templateVersion: z.number().int().positive(),
 });
@@ -136,7 +138,12 @@ export const catalogWorkbookProductSchema = z.object({
   status: z.string(),
   updatedAt: z.string().datetime(),
   category: z.object({ id: uuidSchema, name: z.string() }),
-  template: z.object({ id: uuidSchema, name: z.string(), version: z.number().int().positive() }),
+  template: z.object({
+    id: uuidSchema,
+    variantKey: z.string().trim().min(1).max(100),
+    name: z.string(),
+    version: z.number().int().positive(),
+  }),
   providerCode: z.string().nullable(),
   unifiedCode: z.string().nullable(),
   applicationTypes: z.array(z.string()),
@@ -172,11 +179,28 @@ const workbookColumnFilterQuerySchema = z.preprocess(
   z.array(z.string().min(3).max(4_000)).max(25),
 );
 
-export const catalogGridQuerySchema = paginationQuerySchema.extend({
-  categoryId: uuidSchema,
-  q: z.string().trim().min(1).max(300).optional(),
-  filter: filterQuerySchema.default([]),
-});
+function requireExactlyOneTemplateSelector(
+  value: { templateId?: string; variantKey?: string },
+  context: z.RefinementCtx,
+): void {
+  if (Boolean(value.templateId) === Boolean(value.variantKey)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['templateId'],
+      message: 'Exactly one of templateId or variantKey is required',
+    });
+  }
+}
+
+export const catalogGridQuerySchema = paginationQuerySchema
+  .extend({
+    categoryId: uuidSchema,
+    templateId: uuidSchema.optional(),
+    variantKey: z.string().trim().min(1).max(100).optional(),
+    q: z.string().trim().min(1).max(300).optional(),
+    filter: filterQuerySchema.default([]),
+  })
+  .superRefine(requireExactlyOneTemplateSelector);
 export type CatalogGridQuery = z.infer<typeof catalogGridQuerySchema>;
 
 export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
@@ -194,7 +218,13 @@ export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
 });
 export type CatalogWorkbookQuery = z.infer<typeof catalogWorkbookQuerySchema>;
 
-export const catalogSchemaQuerySchema = z.object({ categoryId: uuidSchema });
+export const catalogSchemaQuerySchema = z
+  .object({
+    categoryId: uuidSchema,
+    templateId: uuidSchema.optional(),
+    variantKey: z.string().trim().min(1).max(100).optional(),
+  })
+  .superRefine(requireExactlyOneTemplateSelector);
 export type CatalogSchemaQuery = z.infer<typeof catalogSchemaQuerySchema>;
 
 export const updateProductAttributeSchema = z.object({
@@ -314,6 +344,7 @@ export const adminTemplateSchema = z.object({
   id: uuidSchema,
   categoryId: uuidSchema,
   categoryName: z.string(),
+  variantKey: z.string().trim().min(1).max(100),
   name: z.string(),
   version: z.number().int().positive(),
   status: z.enum(['draft', 'active', 'retired']),

@@ -2,7 +2,11 @@ import { newUuid } from '@cdr/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { deterministicDemoUuid, seedDemoCatalog } from '../../src/database/demo-seed';
+import {
+  DEMO_PRODUCT_SEEDS,
+  deterministicDemoUuid,
+  seedDemoCatalog,
+} from '../../src/database/demo-seed';
 import {
   attributeDefinitions,
   attributeTemplates,
@@ -23,6 +27,160 @@ import { SemanticSearchUseCase } from '../../src/modules/search/application/sema
 import { DrizzleProductVectorIndex } from '../../src/modules/search/infrastructure/persistence/drizzle-product-vector-index.adapter';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
+const PIM1_CATEGORY_SLUGS = [
+  'pastillas-de-freno',
+  'grasa-automotriz',
+  'rodamientos-de-bolas-autoalineables',
+  'rodamientos-de-bolas-doble-hilera-de-contacto-angular',
+  'aceite-de-motor',
+  'zapatas',
+  'retenedores',
+  'banda-de-distribucion',
+  'banda-de-accesorios',
+  'cruceta',
+  'disco-de-freno',
+  'tambor-de-freno',
+  'liquido-de-freno',
+  'rodamiento-de-rigido-de-bolas',
+  'bolas-de-acero',
+  'refrigerantes',
+  'rodamiento-de-bolas-axial',
+  'rodamiento-de-rodillos-cilindricos',
+  'rodamiento-de-rodillos-esfericos',
+  'arandelas-de-fijacion',
+  'filtro-de-aceite',
+  'filtor-de-aire-rectangular',
+  'filtro-de-aire-cilindrico',
+  'filtro-de-combustible-elemento',
+  'fitro-de-combustible-cilindrico',
+  'fitro-de-combustible-estandar',
+  'rodamientos-conicos',
+  'aceite-de-transmision-manual-diferencial',
+  'bujias',
+  'baterias',
+  'silicon',
+  'manzana-de-rueda',
+  'aceite-de-transmision-automatica',
+  'amortiguador',
+  'kit-de-distribucion',
+  'kit-de-embrague',
+] as const;
+
+const PIM1_TEMPLATE_SLUGS = [
+  'kit-de-embrague',
+  'amortiguador',
+  'aceite-de-transmision-automatica',
+  'manzana-de-rueda',
+  'silicon',
+  'baterias',
+  'bujias',
+  'aceite-de-transmision-manual-diferencial',
+  'filtro-de-combustible-elemento',
+  'filtro-de-aire-cilindrico',
+  'filtor-de-aire-rectangular',
+  'filtro-de-aceite',
+  'pastillas-de-freno',
+  'grasa-automotriz',
+  'rodamientos-de-bolas-autoalineables',
+  'rodamientos-de-bolas-doble-hilera-de-contacto-angular',
+  'aceite-de-motor',
+  'zapatas',
+  'retenedores',
+  'banda-de-distribucion',
+  'banda-de-accesorios',
+  'cruceta',
+  'disco-de-freno',
+  'tambor-de-freno',
+  'liquido-de-freno',
+  'rodamiento-de-rigido-de-bolas',
+  'bolas-de-acero',
+  'refrigerantes',
+  'rodamiento-de-bolas-axial',
+  'rodamiento-de-rodillos-cilindricos',
+  'rodamiento-de-rodillos-esfericos',
+  'arandelas-de-fijacion',
+] as const;
+
+const PIM1_PRODUCT_SKUS = [
+  'CDR-0000001298',
+  'CDR-0000011635',
+  'CDR-0000016850',
+  'CDR-0000010489',
+  'CDR-0000005026',
+  'CDR-0000021659',
+  'CDR-0000021341',
+  'CDR-0000010027',
+  'CDR-0000011703',
+  'CDR-0000011695',
+  'CDR-0000016659',
+  'CDR-0000016639',
+  'D1672',
+  'CDR-0000002854',
+  'D227',
+  'CDR-0000004259',
+  'D320',
+  'D451',
+  'CDR-0000005804',
+  'CDR-0000005773',
+  'CDR-0000005774',
+  'CDR-0000005805',
+  'CDR-0000005775',
+  'CDR-0000005776',
+  'CDR-0000005806',
+  'D497',
+  'CDR-0000005777',
+  'CDR-0000005778',
+  'CDR-0000002858',
+  'D510',
+  'CDR-0000002889',
+  'CDR-0000003898',
+  'CDR-0000000933',
+  'CDR-0000007169',
+  'GRASA AZUL GRADO 2',
+  'CDR-0000007168',
+  'CDR-0000005238',
+  'CDR-0000000898',
+  'CDR-0000000900',
+  'GRASA MP2 (180KGS) -',
+  'GRASA AMBAR GRADO 3',
+  'CDR-0000007170',
+  'CDR-0000000899',
+  'CDR-0000000901',
+  'GRASA MP3 (180KGS)',
+  'CDR-0000009908',
+  'CDR-0000009907',
+  'CDR-0000005239',
+  'CDR-0000007171',
+  'CDR-0000007940',
+  'CDR-0000009565',
+  'CDR-0000005240',
+  'CDR-0000014686',
+  'CDR-0000014687',
+  'CDR-0000014688',
+  'CDR-0000014836',
+  'CDR-0000014837',
+  '1200-TVH-C3',
+  'CDR-0000015254',
+  'CDR-0000016843',
+  'BS814',
+  'CDR-0000014230',
+  'CT686_CONTITECH',
+  '6PK 1875_CONTITECH',
+  'CDR-0000007681',
+  'CDR-0000024151',
+  'CDR-0000024152',
+  'CDR-0000024113',
+  'CDR-0000024114',
+  'CDR-0000001638',
+  '6202-2RSR-L038-C3',
+  'CDR-0000007311',
+  'CDR-0000015241',
+  '51101_FAG',
+  'NU1006-M1_FAG',
+  '22207-E1-C3',
+  'CDR-0000009964',
+] as const;
+
 describe('demo seed', () => {
   let database: TestDatabase;
 
@@ -34,14 +192,14 @@ describe('demo seed', () => {
 
   it('creates the complete source-backed workbook catalogue and is idempotent', async () => {
     await expect(seedDemoCatalog(database.db)).resolves.toEqual({
-      productsInserted: 77,
-      identifiersInserted: 154,
-      groupsInserted: 73,
-      membershipsInserted: 77,
-      embeddingsIndexed: 77,
+      productsInserted: 97,
+      identifiersInserted: 194,
+      groupsInserted: 93,
+      membershipsInserted: 97,
+      embeddingsIndexed: 97,
     });
     await database.db.insert(templateAssetRequirements).values({
-      templateId: deterministicDemoUuid('attribute-template', 'grasa-automotriz:1'),
+      templateId: deterministicDemoUuid('attribute-template', 'lubricantes-grasa-grasa:1'),
       // PLANO is a supported type but is no longer part of this manifest template.
       typeCode: 'PLANO',
       required: true,
@@ -63,7 +221,7 @@ describe('demo seed', () => {
           and(
             eq(
               templateAssetRequirements.templateId,
-              deterministicDemoUuid('attribute-template', 'grasa-automotriz:1'),
+              deterministicDemoUuid('attribute-template', 'lubricantes-grasa-grasa:1'),
             ),
             eq(templateAssetRequirements.typeCode, 'PLANO'),
           ),
@@ -92,7 +250,7 @@ describe('demo seed', () => {
       groups: groupCount?.count,
       members: memberCount?.count,
       embeddings: embeddingCount?.count,
-    }).toEqual({ products: 77, identifiers: 154, groups: 73, members: 77, embeddings: 77 });
+    }).toEqual({ products: 97, identifiers: 194, groups: 93, members: 97, embeddings: 97 });
 
     const [schemaCounts] = await database.sql<
       {
@@ -126,17 +284,17 @@ describe('demo seed', () => {
         ) AS prioritized_categories
     `;
     expect(schemaCounts).toEqual({
-      categories: 36,
-      active_categories: 32,
-      templates: 32,
-      definitions: 251,
-      assignments: 916,
-      role_access: 2748,
-      product_templates: 77,
-      attribute_values: 1485,
-      asset_requirements: 140,
-      required_assets: 11,
-      prioritized_categories: 20,
+      categories: 351,
+      active_categories: 78,
+      templates: 52,
+      definitions: 294,
+      assignments: 1472,
+      role_access: 4416,
+      product_templates: 97,
+      attribute_values: 2079,
+      asset_requirements: 256,
+      required_assets: 28,
+      prioritized_categories: 44,
     });
 
     const [relationCounts] = await database.sql<
@@ -154,6 +312,171 @@ describe('demo seed', () => {
         ) AS oem_codes
     `;
     expect(relationCounts).toEqual({ applications: 1, homologs: 3, oem_codes: 3 });
+
+    const [application] = await database.sql<
+      {
+        body_style: string | null;
+        fuel: string | null;
+        traction: string | null;
+        displacement: string | null;
+        area: string | null;
+        subarea: string | null;
+        notes: string | null;
+      }[]
+    >`
+      SELECT body_style, fuel, traction, displacement, area, subarea, notes
+      FROM group_applications
+      WHERE source = 'import'
+    `;
+    expect(application).toEqual({
+      body_style: 'HB',
+      fuel: 'GSL',
+      traction: '4X2',
+      displacement: '1.6L',
+      area: 'RUEDA POSTERIOR',
+      subarea: 'MANZANA 5 PERNOS CON ABS',
+      notes: null,
+    });
+  });
+
+  it('upgrades all overlapping PIM(1) products and hides only seed-owned PIM(1) schemas', async () => {
+    expect(PIM1_CATEGORY_SLUGS).toHaveLength(36);
+    expect(PIM1_TEMPLATE_SLUGS).toHaveLength(32);
+    expect(PIM1_PRODUCT_SKUS).toHaveLength(77);
+    const currentSkus = new Set(DEMO_PRODUCT_SEEDS.map((product) => product.sku));
+    expect(PIM1_PRODUCT_SKUS.every((sku) => currentSkus.has(sku))).toBe(true);
+
+    const pim1CategoryIds = PIM1_CATEGORY_SLUGS.map((slug) =>
+      deterministicDemoUuid('category', slug),
+    );
+    const pim1TemplateIds = PIM1_TEMPLATE_SLUGS.map((slug) =>
+      deterministicDemoUuid('attribute-template', `${slug}:1`),
+    );
+    const pim1TemplateIdSet = new Set<string>(pim1TemplateIds);
+    const pim1ProductIds = PIM1_PRODUCT_SKUS.map((sku) => deterministicDemoUuid('product', sku));
+
+    await database.db.insert(catalogCategories).values(
+      PIM1_CATEGORY_SLUGS.map((slug, position) => ({
+        id: deterministicDemoUuid('category', slug),
+        slug,
+        name: `PIM(1) ${slug}`,
+        path: slug,
+        position,
+        active: true,
+      })),
+    );
+    await database.db.insert(attributeTemplates).values(
+      PIM1_TEMPLATE_SLUGS.map((slug) => ({
+        id: deterministicDemoUuid('attribute-template', `${slug}:1`),
+        categoryId: deterministicDemoUuid('category', slug),
+        variantKey: 'legacy',
+        name: `PIM(1) ${slug}`,
+        version: 1,
+        status: 'active',
+      })),
+    );
+    await database.db.insert(products).values(
+      PIM1_PRODUCT_SKUS.map((sku) => ({
+        id: deterministicDemoUuid('product', sku),
+        sku,
+        name: `PIM(1) ${sku}`,
+        status: 'in_review',
+      })),
+    );
+    await database.db.insert(productTemplateAssignments).values(
+      PIM1_PRODUCT_SKUS.map((sku, index) => ({
+        productId: deterministicDemoUuid('product', sku),
+        templateId: pim1TemplateIds[index % pim1TemplateIds.length] as string,
+      })),
+    );
+
+    const manualCategoryId = newUuid();
+    const manualTemplateId = newUuid();
+    const manualProductId = newUuid();
+    await database.db.insert(catalogCategories).values({
+      id: manualCategoryId,
+      slug: 'categoria-manual-preservada',
+      name: 'Categoría manual preservada',
+      path: 'categoria-manual-preservada',
+      active: true,
+    });
+    await database.db.insert(attributeTemplates).values({
+      id: manualTemplateId,
+      categoryId: manualCategoryId,
+      variantKey: 'manual',
+      name: 'Plantilla manual preservada',
+      version: 1,
+      status: 'active',
+    });
+    await database.db.insert(products).values({
+      id: manualProductId,
+      sku: 'SKU-MANUAL-PRESERVADO',
+      name: 'Producto manual preservado',
+      status: 'draft',
+    });
+    await database.db.insert(productTemplateAssignments).values({
+      productId: manualProductId,
+      templateId: manualTemplateId,
+    });
+
+    await seedDemoCatalog(database.db);
+    await seedDemoCatalog(database.db);
+
+    const [pim1Categories, pim1Templates, reassignedProducts, manualCategory, manualTemplate] =
+      await Promise.all([
+        database.db
+          .select({ id: catalogCategories.id, active: catalogCategories.active })
+          .from(catalogCategories)
+          .where(inArray(catalogCategories.id, pim1CategoryIds)),
+        database.db
+          .select({ id: attributeTemplates.id, status: attributeTemplates.status })
+          .from(attributeTemplates)
+          .where(inArray(attributeTemplates.id, pim1TemplateIds)),
+        database.db
+          .select({
+            productId: productTemplateAssignments.productId,
+            templateId: productTemplateAssignments.templateId,
+            templateStatus: attributeTemplates.status,
+            categoryActive: catalogCategories.active,
+          })
+          .from(productTemplateAssignments)
+          .innerJoin(
+            attributeTemplates,
+            eq(attributeTemplates.id, productTemplateAssignments.templateId),
+          )
+          .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+          .where(inArray(productTemplateAssignments.productId, pim1ProductIds)),
+        database.db
+          .select({ active: catalogCategories.active })
+          .from(catalogCategories)
+          .where(eq(catalogCategories.id, manualCategoryId)),
+        database.db
+          .select({ status: attributeTemplates.status })
+          .from(attributeTemplates)
+          .where(eq(attributeTemplates.id, manualTemplateId)),
+      ]);
+
+    expect(pim1Categories).toHaveLength(36);
+    expect(pim1Categories.every((category) => !category.active)).toBe(true);
+    expect(pim1Templates).toHaveLength(32);
+    expect(pim1Templates.every((template) => template.status === 'retired')).toBe(true);
+    expect(reassignedProducts).toHaveLength(77);
+    expect(
+      reassignedProducts.every(
+        (assignment) =>
+          !pim1TemplateIdSet.has(assignment.templateId) &&
+          assignment.templateStatus === 'active' &&
+          assignment.categoryActive,
+      ),
+    ).toBe(true);
+    expect(manualCategory).toEqual([{ active: true }]);
+    expect(manualTemplate).toEqual([{ status: 'active' }]);
+    await expect(
+      database.db
+        .select({ templateId: productTemplateAssignments.templateId })
+        .from(productTemplateAssignments)
+        .where(eq(productTemplateAssignments.productId, manualProductId)),
+    ).resolves.toEqual([{ templateId: manualTemplateId }]);
   });
 
   it('upgrades only deterministic artifacts from the former seven-row seed', async () => {
@@ -211,6 +534,7 @@ describe('demo seed', () => {
     await database.db.insert(attributeTemplates).values({
       id: oldTemplateId,
       categoryId: oldCategoryId,
+      variantKey: 'legacy',
       name: 'Plantilla Grasas',
       version: 1,
       status: 'active',
@@ -296,7 +620,7 @@ describe('demo seed', () => {
       );
     expect(upgraded).toMatchObject({
       productName: 'GRASA AZUL G2 1/4LB',
-      categorySlug: 'grasa-automotriz',
+      categorySlug: 'lubricantes-grasa-grasa',
       unifiedCode: 'AZUL G2-1/4LB',
       valueVersion: 2,
     });
@@ -422,8 +746,8 @@ describe('demo seed', () => {
       .from(equivalenceGroupMembers)
       .where(eq(equivalenceGroupMembers.productId, existingProductId));
 
-    expect(result.productsInserted).toBe(76);
-    expect(result.groupsInserted).toBe(72);
+    expect(result.productsInserted).toBe(96);
+    expect(result.groupsInserted).toBe(92);
     expect(preservedProduct).toMatchObject({
       name: 'Nombre curado por un usuario',
       status: 'draft',

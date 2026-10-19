@@ -2,6 +2,7 @@ import { FixedClock, assertUuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GroupApplicationRepositoryPort } from '../../applications/domain/ports/group-application-repository.port';
+import { GroupApplication } from '../../applications/domain/entities/group-application';
 import type { ExternalHomologRepositoryPort } from '../../equivalences/domain/ports/external-homolog-repository.port';
 import type { GroupOemCode } from '../../equivalences/domain/entities/group-oem-code';
 import type { GroupOemCodeRepositoryPort } from '../../equivalences/domain/ports/group-oem-code-repository.port';
@@ -107,6 +108,76 @@ describe('OEM imports', () => {
     expect(preview.toSnapshot().rows[0]).toMatchObject({
       valid: false,
       errors: ['Los códigos OEM solo se permiten en grupos automotrices'],
+    });
+  });
+});
+
+describe('application imports', () => {
+  it('derives vehicleType from the group and persists every PIM(2) application field', async () => {
+    const imports = new MemoryImportBatchRepository();
+    const saved: GroupApplication[] = [];
+    const applications: GroupApplicationRepositoryPort = {
+      findGroupByCode: vi.fn(async (code: string) => ({
+        id: groupId,
+        code,
+        vehicleType: 'AUTOMOTRIZ' as const,
+      })),
+      findById: vi.fn(async () => null),
+      list: vi.fn(async () => []),
+      insertWithAudit: vi.fn(async () => undefined),
+      updateWithAudit: vi.fn(async (application) => ({
+        kind: 'updated' as const,
+        value: application,
+      })),
+      saveImported: vi.fn(async (application) => {
+        saved.push(application);
+      }),
+    };
+    const common = [
+      imports,
+      new FixedClock(now),
+      applications,
+      emptyHomologs(),
+      createOemRepository(true),
+      emptyCategoryImports(),
+    ] as const;
+    const preview = await new PreviewImportBatchUseCase(...common).execute(
+      {
+        target: 'applications',
+        format: 'json',
+        idempotencyKey: 'pim-application-import',
+        records: [
+          {
+            codigo_unificador: 'R177.19',
+            marca_vehiculo: 'SUZUKI',
+            modelo: 'S-CROSS SX4 M6',
+            tipo: 'HB',
+            combustible: 'GSL',
+            traccion: '4X2',
+            cilindraje: '1.6L',
+            ano_desde: 2013,
+            ano_hasta: 2019,
+            area: 'RUEDA POSTERIOR',
+            subarea: 'MANZANA 5 PERNOS CON ABS',
+          },
+        ],
+      },
+      actor,
+    );
+
+    expect(preview.toSnapshot().rows[0]).toMatchObject({
+      valid: true,
+      data: { vehicleType: 'AUTOMOTRIZ', bodyStyle: 'HB' },
+    });
+    await new ConfirmImportBatchUseCase(...common).execute(preview.toSnapshot().id, actor);
+    expect(saved[0]?.toSnapshot()).toMatchObject({
+      vehicleType: 'AUTOMOTRIZ',
+      bodyStyle: 'HB',
+      fuel: 'GSL',
+      traction: '4X2',
+      displacement: '1.6L',
+      area: 'RUEDA POSTERIOR',
+      subarea: 'MANZANA 5 PERNOS CON ABS',
     });
   });
 });

@@ -1,23 +1,24 @@
 'use client';
 
-import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
+import type { WorkspaceDto, WorkspaceQuery, WorkspaceSlug } from '@cdr/contracts';
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchWorkspace } from '@/lib/workspace-api';
 
-export function useWorkspaceData(slug: WorkspaceSlug) {
+export function useWorkspaceData(slug: WorkspaceSlug, query: WorkspaceQuery = {}) {
   const [workspace, setWorkspace] = useState<WorkspaceDto | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [settledRequest, setSettledRequest] = useState('');
   const [revision, setRevision] = useState(0);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
-  const requestKey = `${slug}:${revision}`;
+  const report = query.report;
+  const requestKey = `${slug}:${report ?? 'default'}:${revision}`;
   const loading = settledRequest !== requestKey;
 
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetchWorkspace(slug, controller.signal)
+    void fetchWorkspace(slug, controller.signal, report ? { report } : {})
       .then((result) => {
         setWorkspace(result);
         setRequestError(null);
@@ -33,7 +34,7 @@ export function useWorkspaceData(slug: WorkspaceSlug) {
       });
 
     return () => controller.abort();
-  }, [requestKey, slug]);
+  }, [report, requestKey, slug]);
 
   const activeWorkspace = workspace?.slug === slug ? workspace : null;
 

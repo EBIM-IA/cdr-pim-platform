@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
-import type { PreviewImportInput } from '@cdr/contracts';
+import type { ApplicationVehicleType, PreviewImportInput } from '@cdr/contracts';
 import {
   type Clock,
   ConflictError,
@@ -129,19 +129,20 @@ export class PreviewImportBatchUseCase {
   ): Promise<ImportRow[]> {
     if (target === 'category') return [...rows];
     const seen = new Set<string>();
-    const groups = new Map<
-      string,
-      Promise<{ id: Uuid; code: string; automotive?: boolean } | null>
-    >();
+    type RelationGroup = {
+      id: Uuid;
+      code: string;
+      automotive?: boolean;
+      vehicleType?: ApplicationVehicleType | null;
+    };
+    const groups = new Map<string, Promise<RelationGroup | null>>();
     const result: ImportRow[] = [];
     for (const row of rows) {
       const errors = [...row.errors];
+      let data = row.data;
       if (row.valid) {
         const unifiedCode = text(row.data.unifiedCode).toUpperCase();
-        const group = await memoized<
-          string,
-          { id: Uuid; code: string; automotive?: boolean } | null
-        >(groups, unifiedCode, () => {
+        const group = await memoized<string, RelationGroup | null>(groups, unifiedCode, () => {
           if (target === 'applications') return this.applications.findGroupByCode(unifiedCode);
           if (target === 'homologs') return this.homologs.findGroupByCode(unifiedCode);
           return this.oemCodes.findGroupByCode(unifiedCode);
@@ -150,16 +151,30 @@ export class PreviewImportBatchUseCase {
         if (target === 'oem' && group && !group.automotive) {
           errors.push('Los códigos OEM solo se permiten en grupos automotrices');
         }
+        if (target === 'applications' && group) {
+          const suppliedType = text(row.data.vehicleType).toUpperCase();
+          if (!group.vehicleType) {
+            errors.push(
+              'No se pudo determinar si el grupo es AUTOMOTRIZ o INDUSTRIAL desde sus productos',
+            );
+          } else if (suppliedType && suppliedType !== group.vehicleType) {
+            errors.push(
+              `vehicleType debe coincidir con el contexto ${group.vehicleType} del grupo`,
+            );
+          } else {
+            data = { ...row.data, vehicleType: group.vehicleType };
+          }
+        }
         const key =
           target === 'applications'
-            ? applicationKey(row.data)
+            ? applicationKey(data)
             : target === 'homologs'
               ? homologKey(row.data)
               : oemKey(row.data);
         if (seen.has(key)) errors.push('Fila duplicada dentro del archivo');
         else seen.add(key);
       }
-      result.push({ ...row, valid: errors.length === 0, errors });
+      result.push({ ...row, data, valid: errors.length === 0, errors });
     }
     return result;
   }
@@ -487,8 +502,14 @@ function applicationFields(data: ImportRecord) {
     vehicleType: text(data.vehicleType) || null,
     make: text(data.make) || null,
     model: text(data.model) || null,
+    bodyStyle: text(data.bodyStyle) || null,
+    fuel: text(data.fuel) || null,
+    traction: text(data.traction) || null,
+    displacement: text(data.displacement) || null,
     yearFrom: number(data.yearFrom),
     yearTo: number(data.yearTo),
+    area: text(data.area) || null,
+    subarea: text(data.subarea) || null,
     engine: text(data.engine) || null,
     notes: text(data.notes) || null,
   };
@@ -506,8 +527,14 @@ function applicationKey(data: {
   readonly vehicleType?: unknown;
   readonly make?: unknown;
   readonly model?: unknown;
+  readonly bodyStyle?: unknown;
+  readonly fuel?: unknown;
+  readonly traction?: unknown;
+  readonly displacement?: unknown;
   readonly yearFrom?: unknown;
   readonly yearTo?: unknown;
+  readonly area?: unknown;
+  readonly subarea?: unknown;
   readonly engine?: unknown;
 }): string {
   return [
@@ -515,8 +542,14 @@ function applicationKey(data: {
     data.vehicleType,
     data.make,
     data.model,
+    data.bodyStyle,
+    data.fuel,
+    data.traction,
+    data.displacement,
     data.yearFrom,
     data.yearTo,
+    data.area,
+    data.subarea,
     data.engine,
   ]
     .map(normalized)

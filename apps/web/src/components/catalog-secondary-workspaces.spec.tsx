@@ -91,8 +91,14 @@ const application: GroupApplicationDto = {
   vehicleType: 'AUTOMOTRIZ',
   make: 'Toyota',
   model: 'Corolla',
+  bodyStyle: 'SEDAN',
+  fuel: 'GSL',
+  traction: '4X2',
+  displacement: '1.8L',
   yearFrom: 2015,
   yearTo: 2020,
+  area: 'MOTOR',
+  subarea: 'ADMISIÓN',
   engine: '1.8',
   notes: null,
   active: true,
@@ -107,6 +113,9 @@ const secondApplication: GroupApplicationDto = {
   id: 'app-2',
   make: 'Ford',
   model: 'Fiesta',
+  bodyStyle: 'HB',
+  fuel: 'GASOLINA',
+  area: 'RUEDA',
   yearFrom: 2012,
   yearTo: 2018,
 };
@@ -175,6 +184,11 @@ describe('catálogo secundario aprobado', () => {
     fireEvent.click(screen.getByRole('button', { name: /Todas las aplicaciones/ }));
     expect(screen.getByLabelText('Tipo')).toBeVisible();
     expect(screen.getByLabelText('Marca / industria')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Buscar aplicaciones'), {
+      target: { value: 'SEDAN' },
+    });
+    expect(screen.getByLabelText('Seleccionar aplicación Toyota Corolla')).toBeVisible();
+    expect(screen.queryByLabelText('Seleccionar aplicación Ford Fiesta')).not.toBeInTheDocument();
   });
 
   it('edita una celda de aplicación contra el backend', async () => {
@@ -194,6 +208,23 @@ describe('catálogo secundario aprobado', () => {
     );
   });
 
+  it('edita inline los campos explícitos de la aplicación PIM', async () => {
+    render(<ApplicationsWorkspace canWrite />);
+
+    await screen.findAllByText('UNI-6205');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Editar Tipo de UNI-6205' })[0]!);
+    const input = screen.getByRole('textbox', { name: 'Editar Tipo' });
+    fireEvent.change(input, { target: { value: 'SUV' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(mocks.updateApplication).toHaveBeenCalledWith('app-1', {
+        expectedUpdatedAt: application.updatedAt,
+        bodyStyle: 'SUV',
+      }),
+    );
+  });
+
   it('crea una aplicación como fila inline y desactiva una selección', async () => {
     render(<ApplicationsWorkspace canWrite />);
 
@@ -205,8 +236,20 @@ describe('catálogo secundario aprobado', () => {
     fireEvent.change(screen.getByLabelText('Nuevo modelo de aplicación'), {
       target: { value: 'Yaris' },
     });
-    fireEvent.change(screen.getByLabelText('Nuevo tipo de aplicación'), {
+    fireEvent.change(screen.getByLabelText('Nuevo contexto de aplicación'), {
       target: { value: 'AUTOMOTRIZ' },
+    });
+    fireEvent.change(screen.getByLabelText('Nuevo tipo de carrocería'), {
+      target: { value: 'SEDAN' },
+    });
+    fireEvent.change(screen.getByLabelText('Nuevo combustible'), {
+      target: { value: 'GSL' },
+    });
+    fireEvent.change(screen.getByLabelText('Nueva tracción'), { target: { value: '4X2' } });
+    fireEvent.change(screen.getByLabelText('Nuevo cilindraje'), { target: { value: '1.5L' } });
+    fireEvent.change(screen.getByLabelText('Nueva área'), { target: { value: 'MOTOR' } });
+    fireEvent.change(screen.getByLabelText('Nueva subárea'), {
+      target: { value: 'ADMISIÓN' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar nueva aplicación' }));
 
@@ -216,8 +259,14 @@ describe('catálogo secundario aprobado', () => {
         vehicleType: 'AUTOMOTRIZ',
         make: 'Toyota',
         model: 'Yaris',
+        bodyStyle: 'SEDAN',
+        fuel: 'GSL',
+        traction: '4X2',
+        displacement: '1.5L',
         yearFrom: undefined,
         yearTo: undefined,
+        area: 'MOTOR',
+        subarea: 'ADMISIÓN',
         engine: '',
         notes: '',
       }),

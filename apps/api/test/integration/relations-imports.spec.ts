@@ -3,6 +3,7 @@ import { ConflictError, assertUuid } from '@cdr/shared';
 
 import { GroupApplication } from '../../src/modules/applications/domain/entities/group-application';
 import { DrizzleGroupApplicationRepository } from '../../src/modules/applications/infrastructure/persistence/drizzle-group-application.repository';
+import { DrizzleApplicationSearchReadModel } from '../../src/modules/applications/infrastructure/persistence/drizzle-application-search-read-model';
 import { DrizzleExternalHomologRepository } from '../../src/modules/equivalences/infrastructure/persistence/drizzle-external-homolog.repository';
 import {
   ExternalHomolog,
@@ -53,6 +54,12 @@ describe('group relationships and imports persistence', () => {
           vehicleType: 'AUTOMOTRIZ',
           make: 'Toyota',
           model: 'Hilux',
+          bodyStyle: 'PICKUP',
+          fuel: 'DIESEL',
+          traction: '4X4',
+          displacement: '2.8L',
+          area: 'MOTOR',
+          subarea: 'INYECCIÓN',
         },
         now,
       ),
@@ -66,8 +73,24 @@ describe('group relationships and imports persistence', () => {
 
     const rows = await repository.list({ productId, includeInactive: false });
     expect(rows.map((row) => row.toSnapshot())).toEqual([
-      expect.objectContaining({ unifiedCode: 'D1672', make: 'Toyota', model: 'Hilux' }),
+      expect.objectContaining({
+        unifiedCode: 'D1672',
+        make: 'Toyota',
+        model: 'Hilux',
+        bodyStyle: 'PICKUP',
+        fuel: 'DIESEL',
+        traction: '4X4',
+        displacement: '2.8L',
+        area: 'MOTOR',
+        subarea: 'INYECCIÓN',
+      }),
     ]);
+    await expect(repository.findGroupByCode('D1672')).resolves.toMatchObject({
+      vehicleType: 'AUTOMOTRIZ',
+    });
+    await expect(
+      new DrizzleApplicationSearchReadModel(database.db).findActiveProductIds('inyección', 10),
+    ).resolves.toEqual([productId]);
   });
 
   it('commits manual application and homolog mutations atomically with audit and rejects stale versions', async () => {
@@ -79,6 +102,8 @@ describe('group relationships and imports persistence', () => {
         vehicleType: 'AUTOMOTRIZ',
         make: 'Toyota',
         model: 'Hilux',
+        bodyStyle: 'PICKUP',
+        fuel: 'DIESEL',
       },
       now,
     );
@@ -97,6 +122,8 @@ describe('group relationships and imports persistence', () => {
             vehicleType: 'AUTOMOTRIZ',
             make: 'Toyota',
             model: 'Hilux',
+            bodyStyle: 'PICKUP',
+            fuel: 'DIESEL',
           },
           now,
         ),
@@ -112,7 +139,10 @@ describe('group relationships and imports persistence', () => {
     const applicationId = application.toSnapshot().id;
     const editedApplication = await applications.findById(applicationId);
     expect(editedApplication).not.toBeNull();
-    editedApplication!.update({ model: 'Fortuner' }, new Date('2026-10-05T10:01:00.000Z'));
+    editedApplication!.update(
+      { model: 'Fortuner', bodyStyle: 'SUV', traction: '4X4' },
+      new Date('2026-10-05T10:01:00.000Z'),
+    );
     await expect(
       applications.updateWithAudit(editedApplication!, now, {
         action: 'updated',
@@ -133,6 +163,10 @@ describe('group relationships and imports persistence', () => {
       occurredAt: new Date('2026-10-05T10:01:00.000Z'),
     });
     expect(updatedApplication.kind).toBe('updated');
+    expect((await applications.findById(applicationId))?.toSnapshot()).toMatchObject({
+      bodyStyle: 'SUV',
+      traction: '4X4',
+    });
     const staleApplication = GroupApplication.rehydrate(editedApplication!.toSnapshot());
     staleApplication.update({ model: 'Tacoma' }, new Date('2026-10-05T10:02:00.000Z'));
     await expect(

@@ -16,7 +16,7 @@ describe('GetProductAttributeSheetUseCase', () => {
     const getProductSheet = vi.fn().mockResolvedValue({
       schema: {
         category: { id: id(), slug: 'rodamientos', name: 'Rodamientos' },
-        template: { id: id(), name: 'Plantilla', version: 1 },
+        template: { id: id(), variantKey: '22.1', name: 'Plantilla', version: 1 },
         attributes: [
           {
             id: exportedId,

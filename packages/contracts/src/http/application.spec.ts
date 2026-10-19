@@ -14,8 +14,22 @@ describe('group application contracts', () => {
         vehicleType: ' automotriz ',
         make: 'Toyota',
         model: 'Hilux',
+        bodyStyle: ' HB ',
+        fuel: ' GSL ',
+        traction: ' 4X2 ',
+        displacement: ' 1.6L ',
+        area: ' RUEDA POSTERIOR ',
+        subarea: ' MANZANA 5 PERNOS CON ABS ',
       }),
-    ).toMatchObject({ vehicleType: 'AUTOMOTRIZ' });
+    ).toMatchObject({
+      vehicleType: 'AUTOMOTRIZ',
+      bodyStyle: 'HB',
+      fuel: 'GSL',
+      traction: '4X2',
+      displacement: '1.6L',
+      area: 'RUEDA POSTERIOR',
+      subarea: 'MANZANA 5 PERNOS CON ABS',
+    });
 
     expect(
       createGroupApplicationSchema.safeParse({
@@ -44,6 +58,10 @@ describe('group application contracts', () => {
     expect(updateGroupApplicationSchema.parse({ expectedUpdatedAt, yearFrom: null })).toEqual({
       expectedUpdatedAt,
       yearFrom: null,
+    });
+    expect(updateGroupApplicationSchema.parse({ expectedUpdatedAt, bodyStyle: null })).toEqual({
+      expectedUpdatedAt,
+      bodyStyle: null,
     });
     expect(
       updateGroupApplicationSchema.safeParse({ expectedUpdatedAt, vehicleType: 'OTRO' }).success,

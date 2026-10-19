@@ -45,34 +45,46 @@ function withRelations(
 }
 
 describe('demo seed definition', () => {
-  it('contains all 77 source-backed workbook products without illustrative rows', () => {
+  it('contains all 97 source-backed workbook products without illustrative rows', () => {
     const skus = DEMO_PRODUCT_SEEDS.map((seed) => seed.sku);
 
-    expect(skus).toHaveLength(77);
-    expect(new Set(skus).size).toBe(77);
+    expect(skus).toHaveLength(97);
+    expect(new Set(skus).size).toBe(97);
     expect(skus).toContain('CDR-0000010489');
     expect(skus).toContain('D1672');
     expect(DEMO_PRODUCT_SEEDS.every((seed) => seed.status === 'in_review')).toBe(true);
   });
 
-  it('keeps the 32 defined categories active and the four pending templates inactive', () => {
-    expect(DEMO_CATEGORY_SEEDS).toHaveLength(36);
-    expect(DEMO_TEMPLATE_SEEDS).toHaveLength(32);
-    expect(DEMO_CATEGORY_SEEDS.filter((category) => category.active)).toHaveLength(32);
+  it('keeps the complete three-level taxonomy and activates defined leaves with their ancestors', () => {
+    expect(DEMO_CATEGORY_SEEDS).toHaveLength(351);
+    expect(DEMO_TEMPLATE_SEEDS).toHaveLength(52);
+    expect(DEMO_CATEGORY_SEEDS.filter((category) => category.active)).toHaveLength(78);
+    const pendingCategories = DEMO_CATEGORY_SEEDS.filter((category) => !category.active);
+    expect(pendingCategories).toHaveLength(273);
+    expect(pendingCategories.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['CONVERTIDOR DE OXIDO', 'REDUCTOR']),
+    );
     expect(
-      DEMO_CATEGORY_SEEDS.filter((category) => !category.active).map(({ name }) => name),
-    ).toEqual([
-      'Fitro de combustible (cilindrico)',
-      'Fitro de combustible (estandar)',
-      'Rodamientos cónicos',
-      'KIT DE DISTRIBUCION',
-    ]);
+      [1, 2, 3].map(
+        (level) => DEMO_CATEGORY_SEEDS.filter((category) => category.level === level).length,
+      ),
+    ).toEqual([15, 78, 258]);
+    const categoriesBySlug = new Map(
+      DEMO_CATEGORY_SEEDS.map((category) => [category.slug, category]),
+    );
+    for (const category of DEMO_CATEGORY_SEEDS) {
+      const parent = category.parentSlug ? categoriesBySlug.get(category.parentSlug) : undefined;
+      expect(category.level === 1 ? parent : parent?.level).toBe(
+        category.level === 1 ? undefined : category.level - 1,
+      );
+      expect(category.path).toBe(parent ? `${parent.path} > ${category.name}` : category.name);
+    }
     expect(
       DEMO_CATEGORY_SEEDS.filter((category) => Object.keys(category.sourcePriority).length > 0),
-    ).toHaveLength(20);
+    ).toHaveLength(44);
     expect(
       DEMO_CATEGORY_SEEDS.filter((category) => Object.keys(category.sourcePriority).length === 0),
-    ).toHaveLength(16);
+    ).toHaveLength(307);
   });
 
   it('retains the five workbook asset types without inventing uploaded product files', () => {
@@ -87,18 +99,18 @@ describe('demo seed definition', () => {
       DEMO_TEMPLATE_ASSET_REQUIREMENTS.flatMap((template) => template.assets).filter(
         (asset) => asset.required,
       ),
-    ).toHaveLength(11);
+    ).toHaveLength(28);
   });
 
   it('validates generated counts, typed values and relation references', () => {
     expect(() => assertClientTemplateManifest(CLIENT_TEMPLATE_MANIFEST)).not.toThrow();
     expect(CLIENT_TEMPLATE_MANIFEST.source).toMatchObject({
-      fileName: 'PLANTILLAS PIM(1) (1).xlsx',
-      sheetCount: 36,
-      templateCount: 32,
-      productCount: 77,
+      fileName: 'PLANTILLAS PIM(2).xlsx',
+      sheetCount: 60,
+      templateCount: 52,
+      productCount: 97,
     });
-    expect(CLIENT_TEMPLATE_MANIFEST.definitions).toHaveLength(251);
+    expect(CLIENT_TEMPLATE_MANIFEST.definitions).toHaveLength(294);
     expect(CLIENT_TEMPLATE_MANIFEST.relations).toMatchObject({
       oem: expect.arrayContaining([expect.objectContaining({ codigo_unificador: 'R177.19' })]),
       homologs: expect.arrayContaining([expect.objectContaining({ codigo_unificador: 'R177.19' })]),
@@ -126,7 +138,7 @@ describe('demo seed definition', () => {
     expect(() =>
       assertClientTemplateManifest({
         ...CLIENT_TEMPLATE_MANIFEST,
-        source: { ...CLIENT_TEMPLATE_MANIFEST.source, productCount: 76 },
+        source: { ...CLIENT_TEMPLATE_MANIFEST.source, productCount: 96 },
       }),
     ).toThrow(/product count/);
   });

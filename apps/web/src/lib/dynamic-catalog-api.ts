@@ -72,9 +72,12 @@ export function fetchCatalogCategories(signal?: AbortSignal): Promise<CatalogCat
 
 export function fetchCatalogSchema(
   categoryId: string,
+  selector: { readonly templateId?: string; readonly variantKey?: string },
   signal?: AbortSignal,
 ): Promise<CatalogGridSchemaDto> {
   const query = new URLSearchParams({ categoryId });
+  if (selector.templateId) query.set('templateId', selector.templateId);
+  if (selector.variantKey) query.set('variantKey', selector.variantKey);
   return request(`/schema?${query.toString()}`, catalogGridSchemaSchema, { signal });
 }
 
@@ -87,6 +90,8 @@ export function fetchCatalogGrid(
     page: String(query.page),
     pageSize: String(query.pageSize),
   });
+  if (query.templateId) params.set('templateId', query.templateId);
+  if (query.variantKey) params.set('variantKey', query.variantKey);
   if (query.q) params.set('q', query.q);
   for (const filter of query.filter) params.append('filter', filter);
   return request(`/grid?${params.toString()}`, catalogGridResultSchema, { signal });

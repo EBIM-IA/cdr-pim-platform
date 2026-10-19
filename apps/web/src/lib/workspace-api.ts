@@ -1,4 +1,9 @@
-import { workspaceSchema, type WorkspaceDto, type WorkspaceSlug } from '@cdr/contracts';
+import {
+  workspaceSchema,
+  type WorkspaceDto,
+  type WorkspaceQuery,
+  type WorkspaceSlug,
+} from '@cdr/contracts';
 
 import { authenticatedBffFetch } from '@/lib/bff-client';
 
@@ -27,12 +32,19 @@ async function readJson(response: Response): Promise<unknown> {
 export async function fetchWorkspace(
   slug: WorkspaceSlug,
   signal?: AbortSignal,
+  query: WorkspaceQuery = {},
 ): Promise<WorkspaceDto> {
-  const response = await authenticatedBffFetch(`/api/workspaces/${encodeURIComponent(slug)}`, {
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-    signal,
-  });
+  const params = new URLSearchParams();
+  if (query.report) params.set('report', query.report);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await authenticatedBffFetch(
+    `/api/workspaces/${encodeURIComponent(slug)}${suffix}`,
+    {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+      signal,
+    },
+  );
   const parsed = workspaceSchema.safeParse(await readJson(response));
   if (!parsed.success || parsed.data.slug !== slug) {
     throw new WorkspaceApiError('La respuesta del módulo no coincide con el contrato compartido.');

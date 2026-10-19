@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
+import type { WorkspaceDto, WorkspaceQuery, WorkspaceSlug } from '@cdr/contracts';
 import { ForbiddenError } from '@cdr/shared';
 
 import {
@@ -16,7 +16,11 @@ import {
 export class GetWorkspaceUseCase {
   constructor(@Inject(WORKSPACE_READ_MODEL) private readonly readModel: WorkspaceReadModelPort) {}
 
-  execute(slug: WorkspaceSlug, actor: AuthenticatedActor): Promise<WorkspaceDto> {
+  execute(
+    slug: WorkspaceSlug,
+    actor: AuthenticatedActor,
+    query: WorkspaceQuery = {},
+  ): Promise<WorkspaceDto> {
     const required = WORKSPACE_CAPABILITIES[slug];
     if (!actorHasCapability(actor, required)) {
       throw new ForbiddenError('Insufficient capability to access workspace', {
@@ -24,7 +28,7 @@ export class GetWorkspaceUseCase {
         required: [required],
       });
     }
-    return this.readModel.read(slug, actor);
+    return this.readModel.read(slug, actor, query);
   }
 }
 

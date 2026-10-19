@@ -10,8 +10,14 @@ export interface GroupApplicationSnapshot {
   readonly vehicleType: ApplicationVehicleType | null;
   readonly make: string | null;
   readonly model: string | null;
+  readonly bodyStyle: string | null;
+  readonly fuel: string | null;
+  readonly traction: string | null;
+  readonly displacement: string | null;
   readonly yearFrom: number | null;
   readonly yearTo: number | null;
+  readonly area: string | null;
+  readonly subarea: string | null;
   readonly engine: string | null;
   readonly notes: string | null;
   readonly active: boolean;
@@ -25,8 +31,14 @@ export interface EditableApplicationFields {
   readonly vehicleType: string | null;
   readonly make: string | null;
   readonly model: string | null;
+  readonly bodyStyle: string | null;
+  readonly fuel: string | null;
+  readonly traction: string | null;
+  readonly displacement: string | null;
   readonly yearFrom: number | null;
   readonly yearTo: number | null;
+  readonly area: string | null;
+  readonly subarea: string | null;
   readonly engine: string | null;
   readonly notes: string | null;
 }
@@ -77,8 +89,14 @@ export class GroupApplication {
       vehicleType: input.vehicleType === undefined ? this.state.vehicleType : input.vehicleType,
       make: input.make === undefined ? this.state.make : input.make,
       model: input.model === undefined ? this.state.model : input.model,
+      bodyStyle: input.bodyStyle === undefined ? this.state.bodyStyle : input.bodyStyle,
+      fuel: input.fuel === undefined ? this.state.fuel : input.fuel,
+      traction: input.traction === undefined ? this.state.traction : input.traction,
+      displacement: input.displacement === undefined ? this.state.displacement : input.displacement,
       yearFrom: input.yearFrom === undefined ? this.state.yearFrom : input.yearFrom,
       yearTo: input.yearTo === undefined ? this.state.yearTo : input.yearTo,
+      area: input.area === undefined ? this.state.area : input.area,
+      subarea: input.subarea === undefined ? this.state.subarea : input.subarea,
       engine: input.engine === undefined ? this.state.engine : input.engine,
       notes: input.notes === undefined ? this.state.notes : input.notes,
     });
@@ -130,8 +148,14 @@ function normalizeFields(input: Partial<EditableApplicationFields>): NormalizedA
     vehicleType: applicationType(input.vehicleType),
     make: requiredText(input.make ?? '', 'make', 160),
     model: requiredText(input.model ?? '', 'model', 200),
+    bodyStyle: nullableText(input.bodyStyle, 'bodyStyle', 200),
+    fuel: nullableText(input.fuel, 'fuel', 200),
+    traction: nullableText(input.traction, 'traction', 200),
+    displacement: nullableText(input.displacement, 'displacement', 200),
     yearFrom: input.yearFrom ?? null,
     yearTo: input.yearTo ?? null,
+    area: nullableText(input.area, 'area', 200),
+    subarea: nullableText(input.subarea, 'subarea', 200),
     engine: nullableText(input.engine, 'engine', 200),
     notes: nullableText(input.notes, 'notes', 2_000),
   };

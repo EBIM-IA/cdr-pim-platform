@@ -12,6 +12,7 @@ const sheet: ProductAttributeSheetDto = {
     },
     template: {
       id: '22222222-2222-4222-8222-222222222222',
+      variantKey: '22.1',
       name: 'Plantilla de rodamientos',
       version: 3,
     },

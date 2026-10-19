@@ -72,6 +72,7 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
       name: 'Rodamientos',
       path: 'Rodamientos',
       templateId: '44444444-4444-4444-8444-444444444444',
+      templateVariantKey: '22.1',
       templateName: 'Rodamientos',
       templateVersion: 1,
     },

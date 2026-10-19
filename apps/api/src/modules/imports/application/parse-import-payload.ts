@@ -32,16 +32,41 @@ const aliases: Record<PreviewImportInput['target'], Readonly<Record<string, stri
   },
   applications: {
     codigo_unificador: 'unifiedCode',
+    'Código Unificador': 'unifiedCode',
+    'Codigo Unificador': 'unifiedCode',
     tipo_aplicacion: 'vehicleType',
     tipo_vehiculo: 'vehicleType',
     marca_industria: 'make',
+    marca_vehiculo: 'make',
+    'Marca Vehiculo': 'make',
+    'Marca Vehículo': 'make',
     marca: 'make',
     modelo_equipo: 'model',
+    Modelo: 'model',
     modelo: 'model',
+    Tipo: 'bodyStyle',
+    tipo: 'bodyStyle',
+    Combustible: 'fuel',
+    combustible: 'fuel',
+    Tracción: 'traction',
+    Traccion: 'traction',
+    traccion: 'traction',
+    Cilindraje: 'displacement',
+    cilindraje: 'displacement',
     anio_desde: 'yearFrom',
     ano_desde: 'yearFrom',
+    'Año Desde': 'yearFrom',
+    'Ano Desde': 'yearFrom',
     anio_hasta: 'yearTo',
     ano_hasta: 'yearTo',
+    'Año Hasta': 'yearTo',
+    'Ano Hasta': 'yearTo',
+    Área: 'area',
+    Area: 'area',
+    area: 'area',
+    Subárea: 'subarea',
+    Subarea: 'subarea',
+    subarea: 'subarea',
     motor: 'engine',
     observacion: 'notes',
     observaciones: 'notes',
@@ -181,12 +206,21 @@ function validateRecord(target: PreviewImportInput['target'], record: ImportReco
   }
   if (target === 'applications') {
     validateRequiredText(record, 'unifiedCode', 120, errors);
-    validateRequiredText(record, 'vehicleType', 120, errors);
     validateRequiredText(record, 'make', 160, errors);
     validateRequiredText(record, 'model', 200, errors);
+    validateOptionalText(record, 'bodyStyle', 200, errors);
+    validateOptionalText(record, 'fuel', 200, errors);
+    validateOptionalText(record, 'traction', 200, errors);
+    validateOptionalText(record, 'displacement', 200, errors);
+    validateOptionalText(record, 'area', 200, errors);
+    validateOptionalText(record, 'subarea', 200, errors);
     validateOptionalText(record, 'engine', 200, errors);
     validateOptionalText(record, 'notes', 2_000, errors);
-    if (record.vehicleType !== undefined && !normalizeVehicleType(record.vehicleType)) {
+    if (
+      record.vehicleType !== undefined &&
+      asText(record.vehicleType) !== '' &&
+      !normalizeVehicleType(record.vehicleType)
+    ) {
       errors.push('vehicleType must be AUTOMOTRIZ or INDUSTRIAL');
     }
     validateOptionalYear(record, 'yearFrom', errors);

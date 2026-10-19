@@ -13,8 +13,12 @@ import {
 describe('dynamic catalog contracts', () => {
   it('normalises one or many attribute filters', () => {
     const categoryId = '11111111-1111-4111-8111-111111111111';
-    expect(catalogGridQuerySchema.parse({ categoryId, filter: 'diametro:gte:25' })).toMatchObject({
+    const templateId = '22222222-2222-4222-8222-222222222222';
+    expect(
+      catalogGridQuerySchema.parse({ categoryId, templateId, filter: 'diametro:gte:25' }),
+    ).toMatchObject({
       categoryId,
+      templateId,
       filter: ['diametro:gte:25'],
       page: 1,
       pageSize: 25,
@@ -22,9 +26,14 @@ describe('dynamic catalog contracts', () => {
     expect(
       catalogGridQuerySchema.parse({
         categoryId,
+        variantKey: '22.1',
         filter: ['diametro:gte:25', 'marca:eq:FAG'],
       }).filter,
     ).toEqual(['diametro:gte:25', 'marca:eq:FAG']);
+    expect(() => catalogGridQuerySchema.parse({ categoryId })).toThrow();
+    expect(() =>
+      catalogGridQuerySchema.parse({ categoryId, templateId, variantKey: '22.1' }),
+    ).toThrow();
   });
 
   it('supports a paginated workbook across every template or one category', () => {
@@ -52,6 +61,7 @@ describe('dynamic catalog contracts', () => {
       category: { id: '22222222-2222-4222-8222-222222222222', name: 'Rodamientos' },
       template: {
         id: '33333333-3333-4333-8333-333333333333',
+        variantKey: '22.1',
         name: 'Rodamientos',
         version: 1,
       },

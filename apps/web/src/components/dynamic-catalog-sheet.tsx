@@ -233,7 +233,7 @@ function AttributeEditor({
 
 export function DynamicCatalogSheet() {
   const [categories, setCategories] = useState<CatalogCategorySummaryDto[]>([]);
-  const [categoryId, setCategoryId] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [schema, setSchema] = useState<CatalogGridSchemaDto | null>(null);
   const [products, setProducts] = useState<CatalogGridProductDto[]>([]);
   const [total, setTotal] = useState(0);
@@ -261,8 +261,10 @@ export function DynamicCatalogSheet() {
     void fetchCatalogCategories(controller.signal)
       .then((result) => {
         setCategories(result);
-        setCategoryId((current) =>
-          result.some((category) => category.id === current) ? current : (result[0]?.id ?? ''),
+        setSelectedTemplateId((current) =>
+          result.some((category) => category.templateId === current)
+            ? current
+            : (result[0]?.templateId ?? ''),
         );
       })
       .catch((error: unknown) => {
@@ -289,8 +291,13 @@ export function DynamicCatalogSheet() {
     return () => window.clearTimeout(timeout);
   }, [filters, search]);
 
+  const selectedCategory = useMemo(
+    () => categories.find((category) => category.templateId === selectedTemplateId),
+    [categories, selectedTemplateId],
+  );
+
   useEffect(() => {
-    if (!categoryId) {
+    if (!selectedCategory) {
       setSchema(null);
       return;
     }
@@ -298,7 +305,11 @@ export function DynamicCatalogSheet() {
     setSchemaLoading(true);
     setSchemaError(null);
     setSchema(null);
-    void fetchCatalogSchema(categoryId, controller.signal)
+    void fetchCatalogSchema(
+      selectedCategory.id,
+      { templateId: selectedCategory.templateId },
+      controller.signal,
+    )
       .then(setSchema)
       .catch((error: unknown) => {
         if (error instanceof Error && error.name === 'AbortError') return;
@@ -306,7 +317,7 @@ export function DynamicCatalogSheet() {
       })
       .finally(() => setSchemaLoading(false));
     return () => controller.abort();
-  }, [categoryId, revision]);
+  }, [revision, selectedCategory]);
 
   const serializedFilters = useMemo(
     () => serializeCatalogFilters(schema?.columns ?? [], debouncedFilters),
@@ -315,7 +326,7 @@ export function DynamicCatalogSheet() {
   const filterKey = JSON.stringify(serializedFilters);
 
   useEffect(() => {
-    if (!categoryId || !schema) {
+    if (!selectedCategory || !schema) {
       setProducts([]);
       setTotal(0);
       return;
@@ -325,7 +336,8 @@ export function DynamicCatalogSheet() {
     setGridError(null);
     void fetchCatalogGrid(
       {
-        categoryId,
+        categoryId: selectedCategory.id,
+        templateId: selectedCategory.templateId,
         page,
         pageSize,
         q: debouncedSearch || undefined,
@@ -345,10 +357,10 @@ export function DynamicCatalogSheet() {
       })
       .finally(() => setGridLoading(false));
     return () => controller.abort();
-  }, [categoryId, debouncedSearch, filterKey, page, pageSize, revision, schema]);
+  }, [debouncedSearch, filterKey, page, pageSize, revision, schema, selectedCategory]);
 
-  const selectCategory = (nextCategoryId: string) => {
-    setCategoryId(nextCategoryId);
+  const selectCategory = (nextTemplateId: string) => {
+    setSelectedTemplateId(nextTemplateId);
     setFilters({});
     setDebouncedFilters({});
     setSearch('');
@@ -436,12 +448,12 @@ export function DynamicCatalogSheet() {
         <div className="grid gap-3 lg:grid-cols-[minmax(240px,0.75fr)_minmax(280px,1.25fr)_auto] lg:items-end">
           <Select
             label="Categoría y plantilla"
-            value={categoryId}
+            value={selectedTemplateId}
             onChange={(event) => selectCategory(event.target.value)}
           >
             {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name} · v{category.templateVersion}
+              <option key={category.templateId} value={category.templateId}>
+                {category.name} · {category.templateVariantKey} · v{category.templateVersion}
               </option>
             ))}
           </Select>

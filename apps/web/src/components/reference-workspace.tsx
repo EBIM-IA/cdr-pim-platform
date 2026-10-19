@@ -1,6 +1,6 @@
 'use client';
 
-import type { WorkspaceDto, WorkspaceMetric, WorkspaceRow } from '@cdr/contracts';
+import type { ReportFormat, WorkspaceDto, WorkspaceMetric, WorkspaceRow } from '@cdr/contracts';
 import {
   Activity,
   AlertTriangle,
@@ -213,11 +213,36 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
   reports: [
     {
       id: 'reports',
-      label: 'Reportes',
-      title: 'Reportes',
+      label: 'Resumen',
+      title: 'Resumen de reportes',
       description:
         'Tabla lineal de agregados vivos, con filtros y exportación de las filas visibles.',
       icon: BarChart3,
+      mode: 'reports',
+    },
+    {
+      id: 'attribute-report',
+      label: 'Reporte atributos',
+      title: 'REPORTE ATRIBUTOS',
+      description: 'Historial real de cambios de atributos registrado por la auditoría.',
+      icon: ListChecks,
+      mode: 'reports',
+    },
+    {
+      id: 'general-report',
+      label: 'Reporte general',
+      title: 'REPORTE GENERAL (RESULTADOS)',
+      description:
+        'Estado vigente por SKU; las columnas históricas quedan vacías cuando no existe baseline.',
+      icon: Database,
+      mode: 'reports',
+    },
+    {
+      id: 'period-report',
+      label: 'Resultados de período',
+      title: 'REPORTE RESULTADOS DE PERIODO',
+      description: 'Productos únicos con cambios auditados, agregados por mes calendario UTC.',
+      icon: Clock3,
       mode: 'reports',
     },
     {
@@ -460,14 +485,24 @@ function selectedFromLocation(views: readonly WorkspaceView[]): string {
   return views.some((view) => view.id === requested) ? (requested ?? '') : (views[0]?.id ?? '');
 }
 
+function reportFormatForView(view: string | undefined): ReportFormat {
+  if (view === 'attribute-report') return 'attribute_changes';
+  if (view === 'general-report') return 'general_results';
+  if (view === 'period-report') return 'period_results';
+  return 'summary';
+}
+
 export function ReferenceWorkspace({ definition }: { definition: ModuleDefinition }) {
   const views = workspaceViews[definition.slug] ?? [];
   const [selected, setSelected] = useState(views[0]?.id ?? '');
-  const { workspace, loading, error, reload } = useWorkspaceData(definition.slug);
+  const active = views.find((view) => view.id === selected) ?? views[0];
+  const { workspace, loading, error, reload } = useWorkspaceData(
+    definition.slug,
+    definition.slug === 'reports' ? { report: reportFormatForView(active?.id) } : {},
+  );
 
   useEffect(() => setSelected(selectedFromLocation(views)), [views]);
 
-  const active = views.find((view) => view.id === selected) ?? views[0];
   if (!active) return null;
 
   const operationsSlug = (

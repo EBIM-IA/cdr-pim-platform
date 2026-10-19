@@ -207,10 +207,11 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
     notices: [],
     actions: [
       {
-        id: 'create-client-report-format',
-        label: 'Nuevo formato desde plantilla del cliente',
-        availability: 'blocked',
-        reason: 'Aún no se recibieron los Excel definitivos.',
+        id: 'refresh',
+        label: 'Actualizar datos',
+        availability: 'supported',
+        method: 'GET',
+        endpoint: '/api/v1/workspaces/reports?report=summary',
       },
     ],
   };
@@ -252,10 +253,12 @@ describe('OperationsSecondaryWorkspace', () => {
     const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
     renderView('reports', 'reports');
 
-    expect(screen.getByRole('heading', { name: 'Reporte Operativo del PIM' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Reportes' })).toBeVisible();
     expect(screen.getByText('draft')).toBeVisible();
     expect(screen.getByText('FAG')).toBeVisible();
-    expect(screen.getByRole('button', { name: /Nuevo Formato desde Plantilla/ })).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: /Nuevo Formato desde Plantilla/ }),
+    ).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Filtrar por sección' }), {
       target: { value: 'Marca' },
@@ -275,6 +278,54 @@ describe('OperationsSecondaryWorkspace', () => {
     expect(tabularExport.downloadXlsx).toHaveBeenCalledOnce();
     expect(print).toHaveBeenCalledOnce();
     expect(document.querySelector('#cdr-report-print-area')).toBeInTheDocument();
+  });
+
+  it('presenta el reporte general con columnas históricas vacías y exportación propia', () => {
+    const report: WorkspaceDto = {
+      ...workspace('reports'),
+      columns: [
+        { key: 'sku', label: 'Código artículo', type: 'text' },
+        { key: 'previousApplications', label: 'Aplicaciones anteriores', type: 'number' },
+        { key: 'currentApplications', label: 'Aplicaciones actuales', type: 'number' },
+      ],
+      rows: [
+        {
+          id: 'product-1',
+          values: {
+            sku: 'SKU-REAL-1',
+            previousApplications: null,
+            currentApplications: 3,
+          },
+        },
+      ],
+      totalRows: 1,
+      notices: [
+        {
+          id: 'general-report-no-baseline',
+          severity: 'warning',
+          title: 'Baseline histórico no disponible',
+          message: 'Las columnas anteriores se entregan vacías.',
+        },
+      ],
+    };
+    render(
+      <OperationsSecondaryWorkspace workspace={report} slug="reports" view="general-report" />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'REPORTE GENERAL (RESULTADOS)' })).toBeVisible();
+    expect(screen.getByText('Baseline histórico no disponible')).toBeVisible();
+    expect(screen.getByText('SKU-REAL-1')).toBeVisible();
+    expect(screen.getByText('—')).toBeVisible();
+    expect(screen.queryByRole('combobox', { name: 'Filtrar por sección' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Excel' }));
+    expect(tabularExport.downloadXlsx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: ['Código artículo', 'Aplicaciones anteriores', 'Aplicaciones actuales'],
+        rows: [['SKU-REAL-1', '', 3]],
+      }),
+      'reporte-general-resultados',
+    );
   });
 
   it('mantiene la consulta de imágenes deshabilitada sin contrato', () => {

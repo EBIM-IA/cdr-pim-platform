@@ -20,6 +20,23 @@ export const workspaceSlugSchema = z.enum([
 export type WorkspaceSlug = z.infer<typeof workspaceSlugSchema>;
 
 /**
+ * The client workbook defines three concrete report layouts. `summary` preserves the
+ * pre-existing operational aggregate so dashboards and bookmarked views keep working.
+ */
+export const reportFormatSchema = z.enum([
+  'summary',
+  'attribute_changes',
+  'general_results',
+  'period_results',
+]);
+export type ReportFormat = z.infer<typeof reportFormatSchema>;
+
+export const workspaceQuerySchema = z.object({
+  report: reportFormatSchema.optional(),
+});
+export type WorkspaceQuery = z.infer<typeof workspaceQuerySchema>;
+
+/**
  * `operational` means the advertised read capability is live. `partial` means that the
  * response contains live data but one or more business capabilities are deliberately
  * unavailable. `blocked` means the required persistence or confirmed rules do not exist.

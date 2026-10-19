@@ -11,14 +11,16 @@ export type ClientAttributeSourceAuthority = 'pim' | 'erp' | 'supplier' | 'calcu
 export type ClientAttributeValue = string | number | boolean;
 
 export interface ClientTemplateManifest {
-  readonly version: number;
+  readonly version: 2;
   readonly source: {
     readonly fileName: string;
     readonly sha256: string;
     readonly sheetCount: number;
     readonly templateCount: number;
     readonly productCount: number;
+    readonly diagnosticCount: number;
   };
+  readonly diagnostics: readonly ClientManifestDiagnostic[];
   readonly categories: readonly ClientManifestCategory[];
   readonly definitions: readonly ClientManifestDefinition[];
   readonly templates: readonly ClientManifestTemplate[];
@@ -26,20 +28,41 @@ export interface ClientTemplateManifest {
     readonly oem: readonly ClientManifestOemRelation[];
     readonly homologs: readonly ClientManifestHomologRelation[];
     readonly applications: readonly ClientManifestApplicationRelation[];
+    readonly unifiedCodes: readonly ClientManifestUnifiedCodeRelation[];
   };
+}
+
+export interface ClientManifestDiagnostic {
+  readonly severity: 'warning' | 'error';
+  readonly code: string;
+  readonly message: string;
+  readonly sheet?: string;
+  readonly location?: string;
+  readonly count?: number;
+  readonly details?: readonly string[];
 }
 
 export interface ClientManifestCategory {
   readonly excelRow: number;
-  readonly number: string | null;
+  readonly sourceRows: readonly number[];
+  readonly categoryNumber: string | null;
   readonly name: string;
   readonly slug: string;
+  readonly level: 1 | 2 | 3;
+  readonly parentSlug: string | null;
+  readonly categoryPath: readonly string[];
   readonly application: string | null;
   readonly sourcePriority: Readonly<
     Partial<Record<'tecdoc' | 'fabricante' | 'archivo' | 'manual', number>>
   >;
+  readonly observation: string | null;
   readonly defined: boolean;
-  readonly templateSheet: string | null;
+  readonly templateVariants?: readonly {
+    readonly variantKey: string;
+    readonly templateSheet: string;
+    readonly slug: string;
+    readonly name: string;
+  }[];
 }
 
 export interface ClientManifestDefinition {
@@ -73,6 +96,10 @@ export interface ClientManifestTemplate {
   readonly sheet: string;
   readonly slug: string;
   readonly name: string;
+  readonly variantKey: string;
+  readonly categoryNumber: string;
+  readonly categorySlug: string;
+  readonly categoryPath: readonly string[];
   readonly application: string | null;
   readonly headerRow: number;
   readonly assets: readonly {
@@ -89,7 +116,9 @@ export interface ClientManifestProduct {
   readonly providerCode: string;
   readonly unifiedCode: string;
   readonly name: string;
-  readonly line: string;
+  readonly categoryPrincipal: string;
+  readonly categorySecondLevel: string;
+  readonly categoryThirdLevel: string;
   readonly application: string;
   readonly brand: string;
   readonly values: Readonly<Record<string, ClientAttributeValue>>;
@@ -99,22 +128,49 @@ export interface ClientManifestOemRelation {
   readonly codigo_unificador: string;
   readonly codigo_oem: string | number;
   readonly marca: string;
+  readonly estado?: string;
+  readonly sku_asociados?: string;
+  readonly fuente?: string;
 }
 
 export interface ClientManifestHomologRelation {
   readonly codigo_unificador: string;
   readonly codigo_homologo: string | number;
   readonly marca_homologo: string;
+  readonly estado?: string;
+  readonly sku_asociados?: string;
+  readonly fuente?: string;
 }
 
 export interface ClientManifestApplicationRelation {
   readonly codigo_unificador: string;
   readonly marca_vehiculo: string;
   readonly modelo: string;
+  readonly tipo?: string;
+  readonly combustible?: string;
+  readonly traccion?: string;
+  readonly cilindraje?: string | number;
   readonly ano_desde?: number;
   readonly ano_hasta?: number;
   readonly area?: string;
   readonly subarea?: string;
+  readonly estado?: string;
+  readonly sku_asociados?: string;
+  readonly fuente?: string;
+}
+
+export interface ClientManifestUnifiedCodeRelation {
+  readonly codigo_unificador: string;
+  readonly codigo_articulo?: string | number;
+  readonly codigo_proveedor?: string | number;
+  readonly marca?: string;
+  readonly categoria_principal?: string;
+  readonly categoria_segundo_nivel?: string;
+  readonly categoria_tercer_nivel?: string;
+  readonly estado_sku?: string;
+  readonly grupo?: string | number;
+  readonly homologos?: string | number;
+  readonly oem?: string | number;
 }
 
 const PRODUCT_FIELD_LIMITS = {
@@ -146,7 +202,7 @@ export const CLIENT_TEMPLATE_MANIFEST =
 
 /** Fails fast when a regenerated manifest loses referential or type integrity. */
 export function assertClientTemplateManifest(manifest: ClientTemplateManifest): void {
-  if (manifest.version !== 1)
+  if (manifest.version !== 2)
     throw new Error(`Unsupported client template manifest v${manifest.version}`);
   if (!/^[a-f0-9]{64}$/.test(manifest.source.sha256)) {
     throw new Error('Client template manifest source SHA-256 is invalid');
@@ -156,6 +212,9 @@ export function assertClientTemplateManifest(manifest: ClientTemplateManifest): 
   }
   if (manifest.source.templateCount !== manifest.templates.length) {
     throw new Error('Client template manifest template count does not match its payload');
+  }
+  if (manifest.source.diagnosticCount !== manifest.diagnostics.length) {
+    throw new Error('Client template manifest diagnostic count does not match its payload');
   }
 
   assertUnique(
@@ -171,6 +230,10 @@ export function assertClientTemplateManifest(manifest: ClientTemplateManifest): 
     manifest.templates.map((template) => template.sheet),
   );
   assertUnique(
+    'template category/variant keys',
+    manifest.templates.map((template) => `${template.categorySlug}:${template.variantKey}`),
+  );
+  assertUnique(
     'attribute definition keys',
     manifest.definitions.map((definition) => definition.key),
   );
@@ -179,6 +242,15 @@ export function assertClientTemplateManifest(manifest: ClientTemplateManifest): 
     manifest.definitions.map((definition) => [definition.key, definition]),
   );
   const categories = new Map(manifest.categories.map((category) => [category.slug, category]));
+  const categoriesByPath = new Map(
+    manifest.categories.map((category) => [category.categoryPath.join('\u0000'), category]),
+  );
+  const parentCategorySlugs = new Set(
+    manifest.categories
+      .map((category) => category.parentSlug)
+      .filter((parentSlug): parentSlug is string => parentSlug !== null),
+  );
+  const templatesBySlug = new Map(manifest.templates.map((template) => [template.slug, template]));
   const allProducts = manifest.templates.flatMap((template) => template.products);
   const unifiedCodes = new Set(allProducts.map((product) => product.unifiedCode));
 
@@ -191,8 +263,45 @@ export function assertClientTemplateManifest(manifest: ClientTemplateManifest): 
   }
 
   for (const category of manifest.categories) {
-    if (category.defined !== (category.templateSheet !== null)) {
-      throw new Error(`Category ${category.slug} has an inconsistent template state`);
+    if (category.sourceRows.length === 0 || category.sourceRows[0] !== category.excelRow) {
+      throw new Error(`Category ${category.slug} has invalid source rows`);
+    }
+    if (
+      category.categoryPath.length !== category.level ||
+      category.name !== category.categoryPath.at(-1)
+    ) {
+      throw new Error(`Category ${category.slug} has an invalid category path`);
+    }
+    const expectedParent =
+      category.level === 1
+        ? null
+        : categoriesByPath.get(category.categoryPath.slice(0, -1).join('\u0000'))?.slug;
+    if (category.parentSlug !== expectedParent) {
+      throw new Error(`Category ${category.slug} has an invalid parent category`);
+    }
+    const isLeaf = !parentCategorySlugs.has(category.slug);
+    if (isLeaf) {
+      if (!category.templateVariants || category.defined !== category.templateVariants.length > 0) {
+        throw new Error(`Category ${category.slug} has an inconsistent template state`);
+      }
+      assertUnique(
+        `variant keys in category ${category.slug}`,
+        category.templateVariants.map((variant) => variant.variantKey),
+      );
+      for (const variant of category.templateVariants) {
+        const template = templatesBySlug.get(variant.slug);
+        if (
+          !template ||
+          template.categorySlug !== category.slug ||
+          template.variantKey !== variant.variantKey ||
+          template.sheet !== variant.templateSheet ||
+          template.name !== variant.name
+        ) {
+          throw new Error(`Category ${category.slug} references an invalid template variant`);
+        }
+      }
+    } else if (category.defined || category.templateVariants !== undefined) {
+      throw new Error(`Non-leaf category ${category.slug} cannot define template variants`);
     }
     const priorities = Object.values(category.sourcePriority);
     if (
@@ -204,8 +313,17 @@ export function assertClientTemplateManifest(manifest: ClientTemplateManifest): 
   }
 
   for (const template of manifest.templates) {
-    const category = categories.get(template.slug);
-    if (!category?.defined || category.templateSheet !== template.sheet) {
+    const category = categories.get(template.categorySlug);
+    const linkedVariant = category?.templateVariants?.find(
+      (variant) => variant.variantKey === template.variantKey,
+    );
+    if (
+      !category?.defined ||
+      category.categoryNumber !== template.categoryNumber ||
+      linkedVariant?.templateSheet !== template.sheet ||
+      linkedVariant.slug !== template.slug ||
+      JSON.stringify(category.categoryPath) !== JSON.stringify(template.categoryPath)
+    ) {
       throw new Error(`Template ${template.slug} is not linked to its defined category`);
     }
     assertUnique(

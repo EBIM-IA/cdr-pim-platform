@@ -19,6 +19,7 @@ import {
   type UpdatedProductAttributeDto,
   type UpdatedProductAttributesBatchDto,
   type WorkspaceDto,
+  type WorkspaceQuery,
   type WorkspaceSlug,
   apiErrorSchema,
   catalogCategoryListSchema,
@@ -104,8 +105,13 @@ export class ApiClient {
     return this.get('/catalog/categories', catalogCategoryListSchema);
   }
 
-  getCatalogGridSchema(categoryId: string): Promise<CatalogGridSchemaDto> {
+  getCatalogGridSchema(
+    categoryId: string,
+    selector: { readonly templateId?: string; readonly variantKey?: string },
+  ): Promise<CatalogGridSchemaDto> {
     const query = new URLSearchParams({ categoryId });
+    if (selector.templateId) query.set('templateId', selector.templateId);
+    if (selector.variantKey) query.set('variantKey', selector.variantKey);
     return this.get(`/catalog/schema?${query.toString()}`, catalogGridSchemaSchema);
   }
 
@@ -115,6 +121,8 @@ export class ApiClient {
       page: String(query.page),
       pageSize: String(query.pageSize),
     });
+    if (query.templateId) params.set('templateId', query.templateId);
+    if (query.variantKey) params.set('variantKey', query.variantKey);
     if (query.q) params.set('q', query.q);
     for (const filter of query.filter) params.append('filter', filter);
     return this.get(`/catalog/grid?${params.toString()}`, catalogGridResultSchema);
@@ -181,8 +189,11 @@ export class ApiClient {
     );
   }
 
-  getWorkspace(slug: WorkspaceSlug): Promise<WorkspaceDto> {
-    return this.get(`/workspaces/${encodeURIComponent(slug)}`, workspaceSchema);
+  getWorkspace(slug: WorkspaceSlug, query: WorkspaceQuery = {}): Promise<WorkspaceDto> {
+    const params = new URLSearchParams();
+    if (query.report) params.set('report', query.report);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return this.get(`/workspaces/${encodeURIComponent(slug)}${suffix}`, workspaceSchema);
   }
 
   private async get<T extends ZodTypeAny>(

@@ -25,7 +25,10 @@ export async function GET(request: NextRequest) {
   try {
     return securePrivateResponse(
       NextResponse.json(
-        await createServerApiClient({ accessToken }).getCatalogGridSchema(parsed.data.categoryId),
+        await createServerApiClient({ accessToken }).getCatalogGridSchema(parsed.data.categoryId, {
+          templateId: parsed.data.templateId,
+          variantKey: parsed.data.variantKey,
+        }),
       ),
     );
   } catch (error) {

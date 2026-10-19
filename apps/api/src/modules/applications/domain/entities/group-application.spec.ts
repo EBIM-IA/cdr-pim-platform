@@ -15,6 +15,12 @@ describe('GroupApplication', () => {
         vehicleType: ' automotriz ',
         make: ' Toyota ',
         model: 'Hilux',
+        bodyStyle: ' HB ',
+        fuel: ' GSL ',
+        traction: ' 4X2 ',
+        displacement: ' 1.6L ',
+        area: ' RUEDA POSTERIOR ',
+        subarea: ' MANZANA 5 PERNOS CON ABS ',
       },
       now,
     );
@@ -24,6 +30,12 @@ describe('GroupApplication', () => {
       vehicleType: 'AUTOMOTRIZ',
       make: 'Toyota',
       model: 'Hilux',
+      bodyStyle: 'HB',
+      fuel: 'GSL',
+      traction: '4X2',
+      displacement: '1.6L',
+      area: 'RUEDA POSTERIOR',
+      subarea: 'MANZANA 5 PERNOS CON ABS',
       active: true,
     });
   });
@@ -56,11 +68,16 @@ describe('GroupApplication', () => {
       },
       now,
     );
-    application.update({ notes: '4x4' }, new Date('2026-10-05T11:00:00.000Z'));
+    application.update(
+      { notes: '4x4', fuel: 'DIESEL', bodyStyle: null },
+      new Date('2026-10-05T11:00:00.000Z'),
+    );
     expect(application.toSnapshot()).toMatchObject({
       make: 'Toyota',
       model: 'Hilux',
       notes: '4x4',
+      fuel: 'DIESEL',
+      bodyStyle: null,
     });
   });
 

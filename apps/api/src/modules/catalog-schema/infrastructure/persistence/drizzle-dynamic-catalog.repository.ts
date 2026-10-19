@@ -32,6 +32,7 @@ import type {
   AttributeUpdateRequest,
   CatalogAttributeFilter,
   CatalogGridOptions,
+  CatalogTemplateSelector,
   CatalogWorkbookOptions,
   CatalogWorkbookResult,
   DynamicCatalogRepositoryPort,
@@ -67,6 +68,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         name: catalogCategories.name,
         path: catalogCategories.path,
         templateId: attributeTemplates.id,
+        templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
       })
@@ -84,12 +86,13 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           eq(templateAttributeRoleAccess.canView, true),
         ),
       )
-      .orderBy(catalogCategories.path);
+      .orderBy(catalogCategories.path, attributeTemplates.variantKey);
     return rows.map((row) => ({ ...row, id: row.id as Uuid, templateId: row.templateId as Uuid }));
   }
 
   async getActiveSchema(
     categoryId: Uuid,
+    selector: CatalogTemplateSelector,
     roles: readonly string[],
   ): Promise<DynamicCatalogSchema | null> {
     if (roles.length === 0) return null;
@@ -99,6 +102,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         categorySlug: catalogCategories.slug,
         categoryName: catalogCategories.name,
         templateId: attributeTemplates.id,
+        templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
       })
@@ -109,6 +113,9 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           eq(catalogCategories.id, categoryId),
           eq(catalogCategories.active, true),
           eq(attributeTemplates.status, 'active'),
+          'templateId' in selector
+            ? eq(attributeTemplates.id, selector.templateId)
+            : eq(attributeTemplates.variantKey, selector.variantKey),
         ),
       )
       .limit(1);
@@ -181,6 +188,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       },
       template: {
         id: header.templateId as Uuid,
+        variantKey: header.templateVariantKey,
         name: header.templateName,
         version: header.templateVersion,
       },
@@ -202,6 +210,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         brand: products.brand,
         status: products.status,
         categoryId: attributeTemplates.categoryId,
+        templateId: attributeTemplates.id,
       })
       .from(products)
       .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
@@ -213,7 +222,11 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       .limit(1);
     const row = rows[0];
     if (!row) return null;
-    const schema = await this.getActiveSchema(row.categoryId as Uuid, roles);
+    const schema = await this.getActiveSchema(
+      row.categoryId as Uuid,
+      { templateId: row.templateId as Uuid },
+      roles,
+    );
     if (!schema) return null;
     const cells = await this.loadCells([productId], schema.attributes);
     return {
@@ -232,11 +245,11 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
   async listGrid(
     options: CatalogGridOptions,
   ): Promise<{ items: CatalogGridProduct[]; total: number }> {
-    const schema = await this.getActiveSchema(options.categoryId, options.roles);
+    const schema = await this.getActiveSchema(options.categoryId, options.selector, options.roles);
     if (!schema) return { items: [], total: 0 };
 
     const filters: SQL[] = [
-      eq(attributeTemplates.categoryId, options.categoryId),
+      eq(attributeTemplates.id, schema.template.id),
       eq(attributeTemplates.status, 'active'),
     ];
     if (options.q) {
@@ -433,6 +446,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         categoryId: catalogCategories.id,
         categoryName: catalogCategories.name,
         templateId: attributeTemplates.id,
+        templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
         completeness: workbookCompletenessSql(),
@@ -601,6 +615,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         category: { id: row.categoryId as Uuid, name: row.categoryName },
         template: {
           id: row.templateId as Uuid,
+          variantKey: row.templateVariantKey,
           name: row.templateName,
           version: row.templateVersion,
         },

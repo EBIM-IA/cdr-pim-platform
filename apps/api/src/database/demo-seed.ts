@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { type Uuid, assertUuid } from '@cdr/shared';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
 import {
   CLIENT_TEMPLATE_MANIFEST,
@@ -40,7 +40,7 @@ import {
  * workbook itself is not needed by the API container: the generated manifest records its SHA-256
  * and keeps spreadsheet parsing outside the runtime.
  */
-const CLIENT_WORKBOOK_EFFECTIVE_AT = '2026-10-07T20:08:33.000Z';
+const CLIENT_WORKBOOK_EFFECTIVE_AT = '2026-10-19T16:03:02.000Z';
 
 export const DEMO_PRODUCT_SEEDS = CLIENT_TEMPLATE_MANIFEST.templates.flatMap((template) =>
   template.products.map((product) => ({
@@ -53,19 +53,42 @@ export const DEMO_PRODUCT_SEEDS = CLIENT_TEMPLATE_MANIFEST.templates.flatMap((te
     // The workbook does not contain an approved commercial-description field.
     description: null,
     sourceUpdatedAt: CLIENT_WORKBOOK_EFFECTIVE_AT,
-    categorySlug: template.slug,
+    categorySlug: template.categorySlug,
+    templateVariantKey: manifestTemplateVariantKey(template),
     values: product.values,
   })),
 );
 
-/** Pending categories are persisted inactive until the client supplies their template. */
-export const DEMO_CATEGORY_SEEDS = CLIENT_TEMPLATE_MANIFEST.categories.map((category) => ({
-  slug: category.slug,
-  name: category.name,
-  active: category.defined,
-  application: category.application,
-  sourcePriority: category.sourcePriority,
-}));
+const MANIFEST_CATEGORY_BY_SLUG = new Map(
+  CLIENT_TEMPLATE_MANIFEST.categories.map((category) => [category.slug, category]),
+);
+const ACTIVE_MANIFEST_CATEGORY_SLUGS = new Set<string>();
+for (const category of CLIENT_TEMPLATE_MANIFEST.categories) {
+  if (!category.defined) continue;
+  let current: typeof category | undefined = category;
+  while (current) {
+    ACTIVE_MANIFEST_CATEGORY_SLUGS.add(current.slug);
+    current = current.parentSlug ? MANIFEST_CATEGORY_BY_SLUG.get(current.parentSlug) : undefined;
+  }
+}
+const nextPositionByParentSlug = new Map<string | null, number>();
+
+/** Template-backed leaves and their ancestors are active; untouched taxonomy branches stay pending. */
+export const DEMO_CATEGORY_SEEDS = CLIENT_TEMPLATE_MANIFEST.categories.map((category) => {
+  const position = nextPositionByParentSlug.get(category.parentSlug) ?? 0;
+  nextPositionByParentSlug.set(category.parentSlug, position + 1);
+  return {
+    slug: category.slug,
+    name: category.name,
+    level: category.level,
+    parentSlug: category.parentSlug,
+    path: category.categoryPath.join(' > '),
+    position,
+    active: ACTIVE_MANIFEST_CATEGORY_SLUGS.has(category.slug),
+    application: category.application,
+    sourcePriority: category.sourcePriority,
+  };
+});
 
 export const DEMO_ATTRIBUTE_SEEDS = CLIENT_TEMPLATE_MANIFEST.definitions;
 export const DEMO_TEMPLATE_SEEDS = CLIENT_TEMPLATE_MANIFEST.templates;
@@ -76,10 +99,36 @@ export const DEMO_TEMPLATE_SEEDS = CLIENT_TEMPLATE_MANIFEST.templates;
  */
 export const DEMO_TEMPLATE_ASSET_REQUIREMENTS = CLIENT_TEMPLATE_MANIFEST.templates.map(
   (template) => ({
-    categorySlug: template.slug,
+    categorySlug: template.categorySlug,
+    templateVariantKey: manifestTemplateVariantKey(template),
     assets: template.assets,
   }),
 );
+
+function manifestTemplateVariantKey(template: { readonly variantKey: string }): string {
+  const variantKey = template.variantKey.trim();
+  if (!variantKey) throw new Error('Template variant key cannot be blank');
+  return variantKey;
+}
+
+function demoTemplateKey(categoryId: string, variantKey: string): string {
+  return `${categoryId}:${variantKey}`;
+}
+
+function demoTemplateId(template: {
+  readonly categorySlug: string;
+  readonly variantKey: string;
+}): Uuid {
+  const sameCategoryVariants = CLIENT_TEMPLATE_MANIFEST.templates.filter(
+    (candidate) => candidate.categorySlug === template.categorySlug,
+  ).length;
+  return deterministicDemoUuid(
+    'attribute-template',
+    sameCategoryVariants > 1
+      ? `${template.categorySlug}:${manifestTemplateVariantKey(template)}:1`
+      : `${template.categorySlug}:1`,
+  );
+}
 
 const DEMO_GROUP_SEEDS = uniqueBy(
   DEMO_PRODUCT_SEEDS.map((seed) => ({ code: seed.unifiedCode, name: seed.unifiedCode })),
@@ -94,6 +143,78 @@ const LEGACY_DEMO_CATEGORY_SLUGS = [
   'grasas',
   'retenedores-metricos',
   'rodamientos-rigidos-de-bolas',
+] as const;
+const PIM1_DEMO_CATEGORY_SLUGS = [
+  'pastillas-de-freno',
+  'grasa-automotriz',
+  'rodamientos-de-bolas-autoalineables',
+  'rodamientos-de-bolas-doble-hilera-de-contacto-angular',
+  'aceite-de-motor',
+  'zapatas',
+  'retenedores',
+  'banda-de-distribucion',
+  'banda-de-accesorios',
+  'cruceta',
+  'disco-de-freno',
+  'tambor-de-freno',
+  'liquido-de-freno',
+  'rodamiento-de-rigido-de-bolas',
+  'bolas-de-acero',
+  'refrigerantes',
+  'rodamiento-de-bolas-axial',
+  'rodamiento-de-rodillos-cilindricos',
+  'rodamiento-de-rodillos-esfericos',
+  'arandelas-de-fijacion',
+  'filtro-de-aceite',
+  'filtor-de-aire-rectangular',
+  'filtro-de-aire-cilindrico',
+  'filtro-de-combustible-elemento',
+  'fitro-de-combustible-cilindrico',
+  'fitro-de-combustible-estandar',
+  'rodamientos-conicos',
+  'aceite-de-transmision-manual-diferencial',
+  'bujias',
+  'baterias',
+  'silicon',
+  'manzana-de-rueda',
+  'aceite-de-transmision-automatica',
+  'amortiguador',
+  'kit-de-distribucion',
+  'kit-de-embrague',
+] as const;
+const PIM1_DEMO_TEMPLATE_SLUGS = [
+  'kit-de-embrague',
+  'amortiguador',
+  'aceite-de-transmision-automatica',
+  'manzana-de-rueda',
+  'silicon',
+  'baterias',
+  'bujias',
+  'aceite-de-transmision-manual-diferencial',
+  'filtro-de-combustible-elemento',
+  'filtro-de-aire-cilindrico',
+  'filtor-de-aire-rectangular',
+  'filtro-de-aceite',
+  'pastillas-de-freno',
+  'grasa-automotriz',
+  'rodamientos-de-bolas-autoalineables',
+  'rodamientos-de-bolas-doble-hilera-de-contacto-angular',
+  'aceite-de-motor',
+  'zapatas',
+  'retenedores',
+  'banda-de-distribucion',
+  'banda-de-accesorios',
+  'cruceta',
+  'disco-de-freno',
+  'tambor-de-freno',
+  'liquido-de-freno',
+  'rodamiento-de-rigido-de-bolas',
+  'bolas-de-acero',
+  'refrigerantes',
+  'rodamiento-de-bolas-axial',
+  'rodamiento-de-rodillos-cilindricos',
+  'rodamiento-de-rodillos-esfericos',
+  'arandelas-de-fijacion',
 ] as const;
 
 export type DemoSeedEnvironment = 'local' | 'test';
@@ -363,15 +484,34 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
             vehicleType: applicationTypeForGroup(relation.codigo_unificador),
             make: relation.marca_vehiculo,
             model: relation.modelo,
+            bodyStyle: relation.tipo ?? null,
+            fuel: relation.combustible ?? null,
+            traction: relation.traccion ?? null,
+            displacement: relation.cilindraje === undefined ? null : String(relation.cilindraje),
             yearFrom: relation.ano_desde ?? null,
             yearTo: relation.ano_hasta ?? null,
+            area: relation.area ?? null,
+            subarea: relation.subarea ?? null,
             engine: null,
-            notes: relationNotes(relation.area, relation.subarea),
+            notes: null,
             active: true,
             source: 'import',
           })),
         )
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: groupApplications.id,
+          set: {
+            bodyStyle: sql.raw('excluded.body_style'),
+            fuel: sql.raw('excluded.fuel'),
+            traction: sql.raw('excluded.traction'),
+            displacement: sql.raw('excluded.displacement'),
+            area: sql.raw('excluded.area'),
+            subarea: sql.raw('excluded.subarea'),
+            notes: null,
+            source: 'import',
+            updatedAt: sql`now()`,
+          },
+        });
     }
 
     if (CLIENT_TEMPLATE_MANIFEST.relations.homologs.length > 0) {
@@ -415,44 +555,74 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
         .onConflictDoNothing();
     }
 
-    // Persist all 36 BUSQUEDA categories. The four entries without a supplied template remain
-    // inactive (visible to administration with includeInactive) instead of receiving invented
-    // schemas.
-    await tx
-      .insert(catalogCategories)
-      .values(
-        DEMO_CATEGORY_SEEDS.map((category, position) => ({
-          id: deterministicDemoUuid('category', category.slug),
-          parentId: null,
-          slug: category.slug,
-          name: category.name,
-          path: category.slug,
-          application: category.application,
-          sourcePriority: category.sourcePriority,
-          position,
-          active: category.active,
-        })),
-      )
-      .onConflictDoUpdate({
-        target: catalogCategories.slug,
-        set: {
-          name: sql.raw('excluded.name'),
-          path: sql.raw('excluded.path'),
-          application: sql.raw('excluded.application'),
-          sourcePriority: sql.raw('excluded.source_priority'),
-          position: sql.raw('excluded.position'),
-          active: sql.raw('excluded.active'),
-          updatedAt: sql`now()`,
-        },
-        // A category created independently with the same slug is not seed-owned.
-        setWhere: sql`${catalogCategories.id} = excluded.id AND (
-          ${catalogCategories.name}, ${catalogCategories.path}, ${catalogCategories.application},
-          ${catalogCategories.sourcePriority}, ${catalogCategories.position}, ${catalogCategories.active}
-        ) IS DISTINCT FROM (
-          excluded.name, excluded.path, excluded.application, excluded.source_priority,
-          excluded.position, excluded.active
-        )`,
-      });
+    // Persist the complete three-level CATEGORIAS-BUSQUEDA taxonomy. Leaves without a supplied
+    // template and branches without a defined descendant remain visible only when inactive
+    // categories are requested; no synthetic schemas are created for them.
+    const categoryIdBySlug = new Map<string, string>();
+    for (const level of [1, 2, 3] as const) {
+      const levelSeeds = DEMO_CATEGORY_SEEDS.filter((category) => category.level === level);
+      for (const category of levelSeeds) {
+        if (category.parentSlug && !categoryIdBySlug.has(category.parentSlug)) {
+          throw new Error(
+            `Missing level ${level - 1} parent category for ${category.slug}: ${category.parentSlug}`,
+          );
+        }
+      }
+      await tx
+        .insert(catalogCategories)
+        .values(
+          levelSeeds.map((category) => ({
+            id: deterministicDemoUuid('category', category.slug),
+            parentId: category.parentSlug
+              ? (categoryIdBySlug.get(category.parentSlug) as string)
+              : null,
+            slug: category.slug,
+            name: category.name,
+            path: category.path,
+            application: category.application,
+            sourcePriority: category.sourcePriority,
+            position: category.position,
+            active: category.active,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: catalogCategories.slug,
+          set: {
+            parentId: sql.raw('excluded.parent_id'),
+            name: sql.raw('excluded.name'),
+            path: sql.raw('excluded.path'),
+            application: sql.raw('excluded.application'),
+            sourcePriority: sql.raw('excluded.source_priority'),
+            position: sql.raw('excluded.position'),
+            active: sql.raw('excluded.active'),
+            updatedAt: sql`now()`,
+          },
+          // A category created independently with the same slug is not seed-owned.
+          setWhere: sql`${catalogCategories.id} = excluded.id AND (
+            ${catalogCategories.parentId}, ${catalogCategories.name}, ${catalogCategories.path},
+            ${catalogCategories.application}, ${catalogCategories.sourcePriority},
+            ${catalogCategories.position}, ${catalogCategories.active}
+          ) IS DISTINCT FROM (
+            excluded.parent_id, excluded.name, excluded.path, excluded.application,
+            excluded.source_priority, excluded.position, excluded.active
+          )`,
+        });
+      const levelRows = await tx
+        .select({ id: catalogCategories.id, slug: catalogCategories.slug })
+        .from(catalogCategories)
+        .where(
+          inArray(
+            catalogCategories.slug,
+            levelSeeds.map((category) => category.slug),
+          ),
+        );
+      for (const row of levelRows) categoryIdBySlug.set(row.slug, row.id);
+      requireAllNaturalKeys(
+        `level ${level} categories`,
+        levelSeeds.map((category) => category.slug),
+        categoryIdBySlug,
+      );
+    }
     for (const slug of LEGACY_DEMO_CATEGORY_SLUGS) {
       await tx
         .update(catalogCategories)
@@ -465,16 +635,35 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
           ),
         );
     }
-    const categoryRows = await tx
-      .select({ id: catalogCategories.id, slug: catalogCategories.slug })
-      .from(catalogCategories)
+    // PIM(2) replaced the PIM(1) taxonomy wholesale. Clean up only rows whose UUIDs prove
+    // seed ownership: an independently-created category/template is never deactivated by slug.
+    for (const slug of PIM1_DEMO_CATEGORY_SLUGS) {
+      await tx
+        .update(catalogCategories)
+        .set({ active: false, updatedAt: new Date() })
+        .where(
+          and(
+            eq(catalogCategories.id, deterministicDemoUuid('category', slug)),
+            eq(catalogCategories.slug, slug),
+            eq(catalogCategories.active, true),
+          ),
+        );
+    }
+    await tx
+      .update(attributeTemplates)
+      .set({ status: 'retired', updatedAt: new Date() })
       .where(
-        inArray(
-          catalogCategories.slug,
-          DEMO_CATEGORY_SEEDS.map((category) => category.slug),
+        and(
+          inArray(
+            attributeTemplates.id,
+            PIM1_DEMO_TEMPLATE_SLUGS.map((slug) =>
+              deterministicDemoUuid('attribute-template', `${slug}:1`),
+            ),
+          ),
+          eq(attributeTemplates.variantKey, 'legacy'),
+          ne(attributeTemplates.status, 'retired'),
         ),
       );
-    const categoryIdBySlug = new Map(categoryRows.map((row) => [row.slug, row.id]));
     requireAllNaturalKeys(
       'categories',
       DEMO_CATEGORY_SEEDS.map((category) => category.slug),
@@ -543,19 +732,36 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
       definitionIdByKey,
     );
 
+    for (const template of DEMO_TEMPLATE_SEEDS) {
+      const id = demoTemplateId(template);
+      await tx
+        .update(attributeTemplates)
+        .set({
+          categoryId: categoryIdBySlug.get(template.categorySlug) as string,
+          variantKey: manifestTemplateVariantKey(template),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(attributeTemplates.id, id), eq(attributeTemplates.variantKey, 'legacy')));
+    }
+
     await tx
       .insert(attributeTemplates)
       .values(
         DEMO_TEMPLATE_SEEDS.map((template) => ({
-          id: deterministicDemoUuid('attribute-template', `${template.slug}:1`),
-          categoryId: categoryIdBySlug.get(template.slug) as string,
+          id: demoTemplateId(template),
+          categoryId: categoryIdBySlug.get(template.categorySlug) as string,
+          variantKey: manifestTemplateVariantKey(template),
           name: template.name,
           version: 1,
           status: 'active',
         })),
       )
       .onConflictDoUpdate({
-        target: [attributeTemplates.categoryId, attributeTemplates.version],
+        target: [
+          attributeTemplates.categoryId,
+          attributeTemplates.variantKey,
+          attributeTemplates.version,
+        ],
         set: {
           name: sql.raw('excluded.name'),
           status: sql.raw('excluded.status'),
@@ -566,36 +772,51 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
         ) IS DISTINCT FROM (excluded.name, excluded.status)`,
       });
     const templateRows = await tx
-      .select({ id: attributeTemplates.id, categoryId: attributeTemplates.categoryId })
+      .select({
+        id: attributeTemplates.id,
+        categoryId: attributeTemplates.categoryId,
+        variantKey: attributeTemplates.variantKey,
+      })
       .from(attributeTemplates)
       .where(
         and(
           inArray(
             attributeTemplates.categoryId,
-            DEMO_TEMPLATE_SEEDS.map((template) => categoryIdBySlug.get(template.slug) as string),
+            DEMO_TEMPLATE_SEEDS.map(
+              (template) => categoryIdBySlug.get(template.categorySlug) as string,
+            ),
           ),
           eq(attributeTemplates.version, 1),
         ),
       );
-    const templateIdByCategoryId = new Map(templateRows.map((row) => [row.categoryId, row.id]));
+    const templateIdByKey = new Map(
+      templateRows.map((row) => [demoTemplateKey(row.categoryId, row.variantKey), row.id]),
+    );
     requireAllNaturalKeys(
       'attribute templates',
-      DEMO_TEMPLATE_SEEDS.map((template) => categoryIdBySlug.get(template.slug) as string),
-      templateIdByCategoryId,
+      DEMO_TEMPLATE_SEEDS.map((template) =>
+        demoTemplateKey(
+          categoryIdBySlug.get(template.categorySlug) as string,
+          manifestTemplateVariantKey(template),
+        ),
+      ),
+      templateIdByKey,
     );
     const seedOwnedTemplateIds = new Set(
       DEMO_TEMPLATE_SEEDS.map((template) => {
-        const categoryId = categoryIdBySlug.get(template.slug) as string;
-        const templateId = templateIdByCategoryId.get(categoryId) as string;
-        return templateId === deterministicDemoUuid('attribute-template', `${template.slug}:1`)
-          ? templateId
-          : null;
+        const categoryId = categoryIdBySlug.get(template.categorySlug) as string;
+        const templateId = templateIdByKey.get(
+          demoTemplateKey(categoryId, manifestTemplateVariantKey(template)),
+        ) as string;
+        return templateId === demoTemplateId(template) ? templateId : null;
       }).filter((templateId): templateId is string => templateId !== null),
     );
 
     const assetRequirements = DEMO_TEMPLATE_ASSET_REQUIREMENTS.flatMap((template) => {
       const categoryId = categoryIdBySlug.get(template.categorySlug) as string;
-      const templateId = templateIdByCategoryId.get(categoryId) as string;
+      const templateId = templateIdByKey.get(
+        demoTemplateKey(categoryId, template.templateVariantKey),
+      ) as string;
       return template.assets.map((asset) => ({
         templateId,
         typeCode: asset.type,
@@ -665,8 +886,10 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
     }
 
     const templateAssignments = DEMO_TEMPLATE_SEEDS.flatMap((template) => {
-      const categoryId = categoryIdBySlug.get(template.slug) as string;
-      const templateId = templateIdByCategoryId.get(categoryId) as string;
+      const categoryId = categoryIdBySlug.get(template.categorySlug) as string;
+      const templateId = templateIdByKey.get(
+        demoTemplateKey(categoryId, manifestTemplateVariantKey(template)),
+      ) as string;
       return template.attributes.map((attribute, position) => ({
         templateId,
         attributeDefinitionId: definitionIdByKey.get(attribute.key) as string,
@@ -765,8 +988,10 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
     }
 
     const roleAccess = DEMO_TEMPLATE_SEEDS.flatMap((template) => {
-      const categoryId = categoryIdBySlug.get(template.slug) as string;
-      const templateId = templateIdByCategoryId.get(categoryId) as string;
+      const categoryId = categoryIdBySlug.get(template.categorySlug) as string;
+      const templateId = templateIdByKey.get(
+        demoTemplateKey(categoryId, manifestTemplateVariantKey(template)),
+      ) as string;
       return template.attributes.flatMap((attribute) =>
         CLIENT_TEMPLATE_ROLES.map((role) => ({
           templateId,
@@ -812,8 +1037,8 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
 
     const productTemplates = DEMO_PRODUCT_SEEDS.map((seed) => ({
       productId: productIdBySku.get(seed.sku) as string,
-      templateId: templateIdByCategoryId.get(
-        categoryIdBySlug.get(seed.categorySlug) as string,
+      templateId: templateIdByKey.get(
+        demoTemplateKey(categoryIdBySlug.get(seed.categorySlug) as string, seed.templateVariantKey),
       ) as string,
       seedOwned: productIdBySku.get(seed.sku) === deterministicDemoUuid('product', seed.sku),
     }));
@@ -935,13 +1160,6 @@ function applicationTypeForGroup(unifiedCode: string): string | null {
     .map((seed) => seed.values.tipo_aplicacion)
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
   return applications[0] ?? null;
-}
-
-function relationNotes(area: string | undefined, subarea: string | undefined): string | null {
-  const parts = [area ? `Área: ${area}` : null, subarea ? `Subárea: ${subarea}` : null].filter(
-    (value): value is string => value !== null,
-  );
-  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function toStoredAttributeValue(

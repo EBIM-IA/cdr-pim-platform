@@ -1,12 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { ApplicationVehicleType } from '@cdr/contracts';
 import { ConflictError, type Uuid } from '@cdr/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
 import { recordAuditWithinTransaction } from '../../../../shared/persistence/record-audit-within-transaction';
 import { AuditAction, createAuditEntry } from '../../../audit/domain/entities/audit-entry';
 import type { AuditWriteContext } from '../../../audit/domain/ports/audit.port';
+import {
+  attributeDefinitions,
+  productAttributeValues,
+} from '../../../catalog-schema/infrastructure/persistence/catalog-schema.tables';
 import {
   GroupApplication,
   type GroupApplicationSnapshot,
@@ -27,13 +32,52 @@ import { groupApplications, type GroupApplicationRow } from './applications.tabl
 export class DrizzleGroupApplicationRepository implements GroupApplicationRepositoryPort {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  async findGroupByCode(code: string): Promise<{ id: Uuid; code: string } | null> {
+  async findGroupByCode(
+    code: string,
+  ): Promise<{ id: Uuid; code: string; vehicleType: ApplicationVehicleType | null } | null> {
     const [row] = await this.db
       .select({ id: equivalenceGroups.id, code: equivalenceGroups.code })
       .from(equivalenceGroups)
       .where(eq(equivalenceGroups.code, code.trim().toUpperCase()))
       .limit(1);
-    return row ? { id: row.id as Uuid, code: row.code } : null;
+    if (!row) return null;
+    return {
+      id: row.id as Uuid,
+      code: row.code,
+      vehicleType: await this.resolveGroupVehicleType(row.id as Uuid),
+    };
+  }
+
+  private async resolveGroupVehicleType(groupId: Uuid): Promise<ApplicationVehicleType | null> {
+    const applicationRows = await this.db
+      .select({ value: groupApplications.vehicleType })
+      .from(groupApplications)
+      .where(and(eq(groupApplications.groupId, groupId), eq(groupApplications.active, true)));
+    const fromApplications = singleVehicleType(applicationRows.map(({ value }) => value));
+    if (fromApplications) return fromApplications;
+
+    const attributeRows = await this.db
+      .select({ value: productAttributeValues.valueText })
+      .from(equivalenceGroupMembers)
+      .innerJoin(
+        productAttributeValues,
+        eq(equivalenceGroupMembers.productId, productAttributeValues.productId),
+      )
+      .innerJoin(
+        attributeDefinitions,
+        eq(productAttributeValues.attributeDefinitionId, attributeDefinitions.id),
+      )
+      .where(
+        and(
+          eq(equivalenceGroupMembers.groupId, groupId),
+          inArray(attributeDefinitions.key, [
+            'tipo_aplicacion',
+            'tipo_de_aplicacion',
+            'application_type',
+          ]),
+        ),
+      );
+    return singleVehicleType(attributeRows.map(({ value }) => value));
   }
 
   async findById(id: Uuid): Promise<GroupApplication | null> {
@@ -176,8 +220,14 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
             vehicleType: snapshot.vehicleType,
             make: snapshot.make,
             model: snapshot.model,
+            bodyStyle: snapshot.bodyStyle,
+            fuel: snapshot.fuel,
+            traction: snapshot.traction,
+            displacement: snapshot.displacement,
             yearFrom: snapshot.yearFrom,
             yearTo: snapshot.yearTo,
+            area: snapshot.area,
+            subarea: snapshot.subarea,
             engine: snapshot.engine,
             notes: snapshot.notes,
             active: snapshot.active,
@@ -192,8 +242,14 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
               vehicleType: snapshot.vehicleType,
               make: snapshot.make,
               model: snapshot.model,
+              bodyStyle: snapshot.bodyStyle,
+              fuel: snapshot.fuel,
+              traction: snapshot.traction,
+              displacement: snapshot.displacement,
               yearFrom: snapshot.yearFrom,
               yearTo: snapshot.yearTo,
+              area: snapshot.area,
+              subarea: snapshot.subarea,
               engine: snapshot.engine,
               notes: snapshot.notes,
               active: snapshot.active,
@@ -232,8 +288,14 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
       vehicleType: row.vehicleType as GroupApplicationSnapshot['vehicleType'],
       make: row.make,
       model: row.model,
+      bodyStyle: row.bodyStyle,
+      fuel: row.fuel,
+      traction: row.traction,
+      displacement: row.displacement,
       yearFrom: row.yearFrom,
       yearTo: row.yearTo,
+      area: row.area,
+      subarea: row.subarea,
       engine: row.engine,
       notes: row.notes,
       active: row.active,
@@ -262,8 +324,14 @@ function toMutableRow(snapshot: GroupApplicationSnapshot) {
     vehicleType: snapshot.vehicleType,
     make: snapshot.make,
     model: snapshot.model,
+    bodyStyle: snapshot.bodyStyle,
+    fuel: snapshot.fuel,
+    traction: snapshot.traction,
+    displacement: snapshot.displacement,
     yearFrom: snapshot.yearFrom,
     yearTo: snapshot.yearTo,
+    area: snapshot.area,
+    subarea: snapshot.subarea,
     engine: snapshot.engine,
     notes: snapshot.notes,
     active: snapshot.active,
@@ -281,8 +349,14 @@ function applicationChanges(
     'vehicleType',
     'make',
     'model',
+    'bodyStyle',
+    'fuel',
+    'traction',
+    'displacement',
     'yearFrom',
     'yearTo',
+    'area',
+    'subarea',
     'engine',
     'notes',
     'active',
@@ -320,4 +394,16 @@ function importedChanges(
       .filter((field) => !ignored.has(field) && previous[field] !== current[field])
       .map((field) => [field, { before: previous[field], after: current[field] }]),
   );
+}
+
+function singleVehicleType(values: readonly (string | null)[]): ApplicationVehicleType | null {
+  const types = new Set(
+    values
+      .map((value) => value?.trim().toUpperCase())
+      .filter(
+        (value): value is ApplicationVehicleType =>
+          value === 'AUTOMOTRIZ' || value === 'INDUSTRIAL',
+      ),
+  );
+  return types.size === 1 ? ([...types][0] ?? null) : null;
 }

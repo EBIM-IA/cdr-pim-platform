@@ -86,6 +86,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         id: attributeTemplates.id,
         categoryId: attributeTemplates.categoryId,
         categoryName: catalogCategories.name,
+        variantKey: attributeTemplates.variantKey,
         name: attributeTemplates.name,
         version: attributeTemplates.version,
         status: attributeTemplates.status,
@@ -95,7 +96,11 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
       .from(attributeTemplates)
       .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(categoryId ? eq(attributeTemplates.categoryId, categoryId) : undefined)
-      .orderBy(catalogCategories.path, asc(attributeTemplates.version));
+      .orderBy(
+        catalogCategories.path,
+        asc(attributeTemplates.variantKey),
+        asc(attributeTemplates.version),
+      );
     return rows.map(toTemplate);
   }
 
@@ -105,6 +110,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         id: attributeTemplates.id,
         categoryId: attributeTemplates.categoryId,
         categoryName: catalogCategories.name,
+        variantKey: attributeTemplates.variantKey,
         name: attributeTemplates.name,
         version: attributeTemplates.version,
         status: attributeTemplates.status,
@@ -337,6 +343,7 @@ function toTemplate(row: {
   id: string;
   categoryId: string;
   categoryName: string;
+  variantKey: string;
   name: string;
   version: number;
   status: string;
