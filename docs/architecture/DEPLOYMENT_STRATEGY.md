@@ -29,7 +29,7 @@ graph LR
     pr[Pull request] -->|CI: lint · typecheck · test · build · audit| main[merge to main]
     main --> build["docker build<br/>--platform linux/amd64"]
     build --> ecr["ECR<br/>tag: full git SHA<br/>provenance + SBOM"]
-    ecr --> qas["QAS<br/>deploy by digest"]
+    ecr -->|automatic| qas["QAS<br/>deploy by digest"]
     qas --> uat[UAT sign-off]
     uat --> prd["PRD<br/><b>same digest</b>, manual approval"]
 ```
@@ -83,11 +83,24 @@ corrupted image.
 
 ## Pipelines
 
-| Workflow                | Trigger                      | Does                                                                                                                                                                                   |
-| ----------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                | PR, push to `main`           | install → format:check → lint → typecheck → unit + architecture tests → integration tests (PostgreSQL service container) → build → `pnpm audit` → gitleaks → Docker build check        |
-| `build-and-publish.yml` | push to `main`, release tag  | Builds `linux/amd64` once per main commit with provenance/SBOM; a validated release tag only aliases the existing OCI index                                                            |
-| `promote.yml`           | manual (`workflow_dispatch`) | Validates a full commit SHA before OIDC, resolves immutable digests and deploys to QAS/PRD. **PRD fails closed unless its GitHub Environment has a reviewer and prevents self-review** |
+| Workflow                | Trigger                                                 | Does                                                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`                | PR, push to `main`                                      | install → format:check → lint → typecheck → unit + architecture tests → integration tests (PostgreSQL service container) → build → `pnpm audit` → gitleaks → Docker build check        |
+| `build-and-publish.yml` | push to `main`, release tag                             | Builds `linux/amd64` once per main commit with provenance/SBOM, then deploys that commit to QAS through `promote.yml`; a validated release tag only aliases the existing OCI index     |
+| `promote.yml`           | manual (`workflow_dispatch`), or called for QAS (above) | Validates a full commit SHA before OIDC, resolves immutable digests and deploys to QAS/PRD. **PRD fails closed unless its GitHub Environment has a reviewer and prevents self-review** |
+
+### QAS follows `main`; PRD is promoted by hand
+
+Every commit that reaches `main` (already gated by the required CI checks) is deployed to QAS
+as soon as its three images are in ECR, migrations included. Only QAS can be reached this
+way: `promote.yml` rejects any non-manual promotion that is not for QAS, and PRD keeps its
+reviewer-gated `workflow_dispatch`. Promotions to the same environment run one at a time; a
+newer pending one supersedes an older pending one.
+
+To pause the automatic QAS deployment (a UAT freeze, an incident), add a required reviewer
+to the `qas` GitHub Environment: each run then waits for an approval instead of deploying.
+Remove the reviewer to resume. A manual `Promote` to QAS keeps working either way, and is
+also how a previous commit is rolled back.
 
 `build-and-publish.yml` and `promote.yml` authenticate to AWS via **OIDC** — no long-lived
 access keys in GitHub secrets. Every third-party Action is pinned to a full commit SHA, and

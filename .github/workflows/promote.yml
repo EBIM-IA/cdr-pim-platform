@@ -7,10 +7,28 @@
 # corresponding ECR tags to immutable digests, registers new ECS task definition revisions
 # pointing at those digests, and updates the services. Before any AWS credential is
 # requested, PRD verifies that its GitHub Environment requires an independent reviewer.
+#
+# Two ways in: by hand (workflow_dispatch, QAS or PRD), or from build-and-publish.yml, which
+# calls it after every main commit to keep QAS on the tip of main. A call can only reach QAS;
+# PRD is always a manual, reviewed promotion.
 # =============================================================================
 name: Promote
 
 on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (only qas is accepted from a call)
+        required: true
+        type: string
+      image_tag:
+        description: Full git commit SHA published by build-and-publish
+        required: true
+        type: string
+      run_migrations:
+        description: Run database migrations before updating the services
+        required: true
+        type: boolean
   workflow_dispatch:
     inputs:
       environment:
@@ -46,6 +64,7 @@ jobs:
       - id: validate
         name: Require an immutable SHA and known environment
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
           REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
@@ -56,6 +75,12 @@ jobs:
           fi
           if [[ "$REQUESTED_ENVIRONMENT" != 'qas' && "$REQUESTED_ENVIRONMENT" != 'prd' ]]; then
             echo '::error::environment must be qas or prd.'
+            exit 1
+          fi
+          # Inside a called workflow, event_name is the caller's event (push), never
+          # workflow_dispatch: an automatic promotion must not reach PRD.
+          if [[ "$EVENT_NAME" != 'workflow_dispatch' && "$REQUESTED_ENVIRONMENT" != 'qas' ]]; then
+            echo '::error::Only QAS is promoted automatically; PRD requires a manual promotion.'
             exit 1
           fi
           printf 'environment=%s\n' "$REQUESTED_ENVIRONMENT" >> "$GITHUB_OUTPUT"
@@ -95,6 +120,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ needs.validate-input.outputs.environment }}
+    # One promotion per environment at a time: two quick merges must not run migrations or
+    # update the services concurrently. A newer pending promotion supersedes an older one.
+    concurrency:
+      group: promote-${{ needs.validate-input.outputs.environment }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
