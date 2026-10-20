@@ -3,6 +3,7 @@
 import type {
   AuditChangeDto,
   CatalogAttributeValue,
+  CatalogCategorySummaryDto,
   CatalogGridColumnDto,
   ExternalHomologDto,
   GroupOemCodeDto,
@@ -43,9 +44,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { CatalogApiError, fetchProduct } from '@/lib/catalog-api';
 import {
   DynamicCatalogApiError,
+  fetchCatalogCategories,
   fetchProductAttributeSheet,
   fetchProductTechnicalSheet,
   patchProductAttributes,
+  reassignProductTemplate,
 } from '@/lib/dynamic-catalog-api';
 import {
   listApplications,
@@ -1241,15 +1244,20 @@ function HistoryPanel({
 export function ProductDetailView({
   productId,
   canWriteAssets = false,
+  canReassignTemplate = false,
 }: {
   productId: string;
   canWriteAssets?: boolean;
+  canReassignTemplate?: boolean;
 }) {
   const [product, setProduct] = useState<Product | null>(null);
   const [attributeSheet, setAttributeSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [attributeSheetError, setAttributeSheetError] = useState<string | null>(null);
   const [technicalSheet, setTechnicalSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [technicalSheetError, setTechnicalSheetError] = useState<string | null>(null);
+  const [templateOptions, setTemplateOptions] = useState<CatalogCategorySummaryDto[]>([]);
+  const [templateOptionsError, setTemplateOptionsError] = useState<string | null>(null);
+  const [assigningTemplate, setAssigningTemplate] = useState(false);
   const [applications, setApplications] = useState<GroupApplicationDto[]>([]);
   const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [applicationsLoading, setApplicationsLoading] = useState(false);
@@ -1302,6 +1310,21 @@ export function ProductDetailView({
       `${window.location.pathname}${query ? `?${query}` : ''}`,
     );
   }, [attributeSheet]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCatalogCategories(controller.signal)
+      .then((categories) => {
+        setTemplateOptions(categories);
+        setTemplateOptionsError(null);
+      })
+      .catch((requestError: unknown) => {
+        if (requestError instanceof Error && requestError.name === 'AbortError') return;
+        setTemplateOptions([]);
+        setTemplateOptionsError('No fue posible consultar las variantes de esta categoría.');
+      });
+    return () => controller.abort();
+  }, [revision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1450,6 +1473,33 @@ export function ProductDetailView({
     setRevision((value) => value + 1);
   };
 
+  const changeTemplate = async (templateId: string) => {
+    const currentTemplateId = attributeSheet?.schema.template.id;
+    if (!currentTemplateId || templateId === currentTemplateId || !canReassignTemplate) return;
+    setAssigningTemplate(true);
+    setTemplateOptionsError(null);
+    try {
+      const result = await reassignProductTemplate(productId, {
+        templateId,
+        expectedTemplateId: currentTemplateId,
+      });
+      setSaveNotice(
+        `Variante ${result.template.variantKey} · ${result.template.name} asignada al producto.`,
+      );
+      reload();
+    } catch (requestError) {
+      setTemplateOptionsError(
+        requestError instanceof DynamicCatalogApiError && requestError.status === 409
+          ? 'Otra persona cambió la plantilla del producto. Recarga la ficha antes de intentarlo nuevamente.'
+          : requestError instanceof Error
+            ? requestError.message
+            : 'No fue posible asignar la variante de plantilla.',
+      );
+    } finally {
+      setAssigningTemplate(false);
+    }
+  };
+
   const panel = useMemo(() => {
     if (!product) return null;
     if (activeTab === 'applications') {
@@ -1545,8 +1595,11 @@ export function ProductDetailView({
 
   const categoryName = attributeSheet?.schema.category.name ?? product.category;
   const templateLabel = attributeSheet
-    ? `${attributeSheet.schema.template.name} · v${attributeSheet.schema.template.version}`
+    ? `${attributeSheet.schema.template.name} · ${attributeSheet.schema.template.variantKey} · v${attributeSheet.schema.template.version}`
     : product.templateKey;
+  const categoryTemplateOptions = attributeSheet
+    ? templateOptions.filter((option) => option.id === attributeSheet.schema.category.id)
+    : [];
   const firstApplication = applications[0];
   const applicationSummary = firstApplication
     ? [firstApplication.vehicleType, firstApplication.make, firstApplication.model]
@@ -1638,6 +1691,34 @@ export function ProductDetailView({
             </StatusBadge>
             {templateLabel ? <StatusBadge tone="neutral">{templateLabel}</StatusBadge> : null}
           </div>
+          {attributeSheet && categoryTemplateOptions.length > 1 ? (
+            <div className="mt-4 max-w-xl">
+              <Select
+                label="Subtipo de plantilla"
+                value={attributeSheet.schema.template.id}
+                disabled={!canReassignTemplate || assigningTemplate}
+                onChange={(event) => void changeTemplate(event.target.value)}
+              >
+                {categoryTemplateOptions.map((option) => (
+                  <option key={option.templateId} value={option.templateId}>
+                    {option.templateVariantKey} · {option.templateName} · v{option.templateVersion}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">
+                {categoryTemplateOptions.length} variantes pertenecen a «
+                {attributeSheet.schema.category.name}» y conservan la misma categoría del ERP.
+                {!canReassignTemplate
+                  ? ' Tu rol puede consultarlas, pero no reasignar el producto.'
+                  : ''}
+              </p>
+            </div>
+          ) : null}
+          {templateOptionsError ? (
+            <p className="mt-3 max-w-xl text-xs text-red-700" role="alert">
+              {templateOptionsError}
+            </p>
+          ) : null}
           <p className="mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
             {product.sku}
           </p>

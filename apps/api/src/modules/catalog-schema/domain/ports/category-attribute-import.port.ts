@@ -25,6 +25,12 @@ export interface CategoryImportCellPlan {
 export interface CategoryImportRowPlan {
   readonly productId: Uuid;
   readonly sku: string;
+  /**
+   * Present in previews created by the variant-aware importer. Legacy durable previews did
+   * not persist it; confirmation resolves their product's single current assignment and still
+   * revalidates category, template state, permissions and optimistic versions atomically.
+   */
+  readonly templateId?: Uuid;
   readonly cells: readonly CategoryImportCellPlan[];
 }
 
@@ -46,6 +52,7 @@ export interface ApplyCategoryImportRowResult {
 export interface CategoryAttributeImportPort {
   prepare(input: {
     readonly categorySlug: string;
+    readonly templateId?: Uuid;
     readonly rows: readonly CategoryImportSourceRow[];
     readonly roles: readonly string[];
   }): Promise<readonly PreparedCategoryImportRow[]>;
@@ -53,6 +60,7 @@ export interface CategoryAttributeImportPort {
   applyRow(input: {
     readonly categorySlug: string;
     readonly plan: CategoryImportRowPlan;
+    readonly previewedAt: Date;
     readonly roles: readonly string[];
     readonly actorId: string;
     readonly batchId: Uuid;

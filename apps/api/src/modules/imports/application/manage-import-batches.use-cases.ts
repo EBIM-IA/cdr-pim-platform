@@ -77,6 +77,9 @@ export class PreviewImportBatchUseCase {
           target: input.target,
           format: input.format,
           categoryCode: input.categoryCode ?? null,
+          // Preserve the historical serialization when no variant was supplied. Durable
+          // idempotency keys created before template-specific imports must keep matching.
+          ...(input.templateId ? { templateId: input.templateId } : {}),
           rows: parsedRows.map((row) => row.data),
         }),
       )
@@ -85,7 +88,12 @@ export class PreviewImportBatchUseCase {
     if (existing) return assertSamePayload(existing, payloadHash);
     const rows =
       input.target === 'category'
-        ? await this.prepareCategoryRows(input.categoryCode as string, parsedRows, actor)
+        ? await this.prepareCategoryRows(
+            input.categoryCode as string,
+            input.templateId,
+            parsedRows,
+            actor,
+          )
         : await this.validateBusinessRules(input.target, parsedRows);
 
     const preview = ImportBatch.preview(
@@ -105,11 +113,13 @@ export class PreviewImportBatchUseCase {
 
   private async prepareCategoryRows(
     categorySlug: string,
+    templateId: string | undefined,
     rows: readonly ImportRow[],
     actor: AuthenticatedActor,
   ): Promise<ImportRow[]> {
     const prepared = await this.categoryAttributes.prepare({
       categorySlug,
+      ...(templateId ? { templateId: assertUuid(templateId, 'templateId') } : {}),
       rows,
       roles: businessRoles(actor),
     });
@@ -271,6 +281,7 @@ export class ConfirmImportBatchUseCase {
       const result = await this.categoryAttributes.applyRow({
         categorySlug,
         plan,
+        previewedAt: snapshot.createdAt,
         roles: businessRoles(actor),
         actorId: actor.id,
         batchId: snapshot.id,
@@ -606,9 +617,14 @@ function parseCategoryPlan(metadata: unknown): CategoryImportRowPlan | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
   const value = metadata as Record<string, unknown>;
   if (typeof value.productId !== 'string' || typeof value.sku !== 'string') return null;
+  if (value.templateId !== undefined && typeof value.templateId !== 'string') return null;
   if (!Array.isArray(value.cells)) return null;
   try {
     const productId = assertUuid(value.productId, 'categoryImport.productId');
+    const templateId =
+      typeof value.templateId === 'string'
+        ? assertUuid(value.templateId, 'categoryImport.templateId')
+        : undefined;
     const seen = new Set<string>();
     const cells = value.cells.map((candidate) => {
       if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
@@ -633,7 +649,7 @@ function parseCategoryPlan(metadata: unknown): CategoryImportRowPlan | null {
         expectedVersion: cell.expectedVersion,
       };
     });
-    return { productId, sku: value.sku, cells };
+    return { productId, sku: value.sku, ...(templateId ? { templateId } : {}), cells };
   } catch {
     return null;
   }

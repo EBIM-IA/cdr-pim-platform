@@ -67,6 +67,7 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
 
   async prepare(input: {
     readonly categorySlug: string;
+    readonly templateId?: Uuid;
     readonly rows: readonly {
       rowNumber: number;
       data: CategoryImportRecord;
@@ -75,7 +76,11 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
     }[];
     readonly roles: readonly string[];
   }): Promise<readonly PreparedCategoryImportRow[]> {
-    const context = await this.loadTemplateContext(input.categorySlug, input.roles);
+    const context = await this.loadTemplateContext(
+      input.categorySlug,
+      input.roles,
+      input.templateId,
+    );
     const definitions = new Map(
       [...context.columns.values()]
         .filter(
@@ -195,7 +200,9 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
       }
       const product = matches.length === 1 ? matches[0] : undefined;
       const plan: CategoryImportRowPlan | null =
-        product && errors.length === 0 ? { productId: product.id, sku: product.sku, cells } : null;
+        product && errors.length === 0
+          ? { productId: product.id, sku: product.sku, templateId: context.templateId, cells }
+          : null;
       return {
         rowNumber: row.rowNumber,
         valid: plan !== null,
@@ -210,6 +217,7 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
   async applyRow(input: {
     readonly categorySlug: string;
     readonly plan: CategoryImportRowPlan;
+    readonly previewedAt: Date;
     readonly roles: readonly string[];
     readonly actorId: string;
     readonly batchId: Uuid;
@@ -222,6 +230,7 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
         .select({
           sku: products.sku,
           templateId: attributeTemplates.id,
+          assignedAt: productTemplateAssignments.assignedAt,
         })
         .from(products)
         .innerJoin(
@@ -237,6 +246,9 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
           and(
             eq(products.id, input.plan.productId),
             eq(products.sku, input.plan.sku),
+            ...(input.plan.templateId
+              ? [eq(productTemplateAssignments.templateId, input.plan.templateId)]
+              : []),
             eq(catalogCategories.slug, input.categorySlug),
             eq(catalogCategories.active, true),
             eq(attributeTemplates.status, 'active'),
@@ -247,6 +259,11 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
       const header = headers[0];
       if (!header) {
         return denied('El SKU ya no está asignado a la plantilla activa de la categoría');
+      }
+      if (!input.plan.templateId && header.assignedAt > input.previewedAt) {
+        return denied(
+          'La variante de plantilla del SKU cambió después de la vista previa; genera una nueva vista previa',
+        );
       }
 
       const requestedKeys = [...new Set(input.plan.cells.map((cell) => cell.attributeKey))];
@@ -445,7 +462,11 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
     });
   }
 
-  private async loadTemplateContext(categorySlug: string, roles: readonly string[]) {
+  private async loadTemplateContext(
+    categorySlug: string,
+    roles: readonly string[],
+    templateId?: Uuid,
+  ) {
     if (roles.length === 0) throw new NotFoundError('Active category template', categorySlug);
     const headers = await this.db
       .select({ templateId: attributeTemplates.id })
@@ -456,6 +477,7 @@ export class DrizzleCategoryAttributeImportAdapter implements CategoryAttributeI
           eq(catalogCategories.slug, categorySlug),
           eq(catalogCategories.active, true),
           eq(attributeTemplates.status, 'active'),
+          ...(templateId ? [eq(attributeTemplates.id, templateId)] : []),
         ),
       )
       .limit(2);

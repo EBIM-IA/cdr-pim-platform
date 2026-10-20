@@ -218,7 +218,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
     const normalized = templateQuery.trim().toLocaleLowerCase('es');
     if (!normalized) return templates;
     return templates.filter((item) =>
-      [item.name, item.categoryName, item.status].some((value) =>
+      [item.name, item.categoryName, item.variantKey, item.status].some((value) =>
         value.toLocaleLowerCase('es').includes(normalized),
       ),
     );
@@ -312,7 +312,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             : 'Gobierna el comportamiento operativo de cada atributo y consulta la matriz de permisos vigente.'
         }
         actions={[
-          'Filtra por categoría y elige una versión de plantilla para revisar todos sus atributos.',
+          'Filtra por categoría y elige una variante y versión de plantilla para revisar todos sus atributos.',
           canManageTemplate
             ? 'Configura vigencia, obligatoriedad, replicación, búsqueda, ficha técnica, posición y permisos por rol.'
             : 'Consulta reglas y permisos vigentes; sólo Administración puede modificar la plantilla.',
@@ -351,7 +351,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                 className="pl-9 normal-case tracking-normal"
                 value={templateQuery}
                 onChange={(event) => setTemplateQuery(event.target.value)}
-                placeholder="Nombre, categoría o estado"
+                placeholder="Nombre, categoría, variante o estado"
               />
             </span>
           </label>
@@ -378,7 +378,8 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                 <span className="min-w-0">
                   <strong className="block truncate text-xs">{item.name}</strong>
                   <small className="block truncate text-[10px] text-muted-foreground">
-                    {item.categoryName} · v{item.version} · {item.status}
+                    {item.categoryName} · variante {item.variantKey} · v{item.version} ·{' '}
+                    {item.status}
                   </small>
                 </span>
               </button>
@@ -401,6 +402,9 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                 <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
                   <span className="rounded bg-slate-100 px-2 py-1">
                     Categoría: {template.categoryName}
+                  </span>
+                  <span className="rounded bg-orange-50 px-2 py-1 text-orange-800">
+                    Variante: {template.variantKey}
                   </span>
                   <span className="rounded bg-slate-100 px-2 py-1">Estado: {template.status}</span>
                 </div>
@@ -488,7 +492,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             ))}
           </Select>
           <Select
-            label="Versión de plantilla"
+            label="Variante y versión de plantilla"
             value={templateId}
             disabled={loadingList || templates.length === 0}
             onChange={(event) => {
@@ -499,7 +503,8 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             {templates.length === 0 ? <option value="">Sin plantillas</option> : null}
             {templates.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.categoryName} · {item.name} v{item.version} · {item.status}
+                {item.categoryName} · {item.variantKey} · {item.name} v{item.version} ·{' '}
+                {item.status}
               </option>
             ))}
           </Select>

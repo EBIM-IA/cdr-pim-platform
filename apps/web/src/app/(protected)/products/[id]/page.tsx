@@ -19,6 +19,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
       key={id}
       productId={id}
       canWriteAssets={actor?.capabilities.includes('catalog:write') ?? false}
+      canReassignTemplate={actor?.capabilities.includes('attributes:write') ?? false}
     />
   );
 }

@@ -35,6 +35,7 @@ export const previewImportSchema = z
       .max(120)
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'categoryCode must be a lowercase category slug')
       .optional(),
+    templateId: uuidSchema.optional(),
     csv: z.string().max(2_000_000).optional(),
     records: z.array(safeImportRecordSchema).max(10_000).optional(),
   })
@@ -54,6 +55,13 @@ export const previewImportSchema = z
         code: z.ZodIssueCode.custom,
         path: ['categoryCode'],
         message: 'categoryCode is required for category imports',
+      });
+    }
+    if (value.target !== 'category' && value.templateId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['templateId'],
+        message: 'templateId is only valid for category imports',
       });
     }
   });

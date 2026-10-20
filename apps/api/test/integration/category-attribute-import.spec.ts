@@ -1,4 +1,4 @@
-import { newUuid } from '@cdr/shared';
+import { assertUuid, newUuid } from '@cdr/shared';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -45,6 +45,153 @@ describe('category attribute imports', () => {
     ).rejects.toThrow('multiple active template variants');
   });
 
+  it('previews a category with multiple variants when templateId selects one explicitly', async () => {
+    const [fixture] = await database.sql<
+      { categorySlug: string; templateId: string; sku: string }[]
+    >`
+      SELECT category.slug AS "categorySlug", template.id AS "templateId", product.sku
+      FROM products product
+      JOIN product_template_assignments assignment ON assignment.product_id = product.id
+      JOIN attribute_templates template ON template.id = assignment.template_id
+      JOIN catalog_categories category ON category.id = template.category_id
+      WHERE template.status = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM attribute_templates sibling
+          WHERE sibling.category_id = template.category_id
+            AND sibling.status = 'active'
+            AND sibling.id <> template.id
+        )
+      ORDER BY product.sku
+      LIMIT 1
+    `;
+    expect(fixture).toBeTruthy();
+    await expect(
+      adapter.prepare({
+        categorySlug: fixture!.categorySlug,
+        templateId: assertUuid(fixture!.templateId),
+        roles,
+        rows: [{ rowNumber: 1, data: { sku: fixture!.sku }, errors: [] }],
+      }),
+    ).resolves.toMatchObject([
+      {
+        valid: true,
+        plan: { sku: fixture!.sku, templateId: fixture!.templateId },
+      },
+    ]);
+  });
+
+  it('confirms a legacy plan from the product assignment without guessing among variants', async () => {
+    const fixture = await findMultiVariantImportFixture(database);
+    const importedValue = 'Valor de lote anterior al selector';
+    const [prepared] = await adapter.prepare({
+      categorySlug: fixture.categorySlug,
+      templateId: assertUuid(fixture.templateId),
+      roles,
+      rows: [
+        {
+          rowNumber: 1,
+          data: { sku: fixture.sku, [fixture.attributeKey]: importedValue },
+          errors: [],
+        },
+      ],
+    });
+    expect(prepared?.plan).toBeTruthy();
+    const currentPlan = prepared!.plan!;
+    const legacyPlan = {
+      productId: currentPlan.productId,
+      sku: currentPlan.sku,
+      cells: currentPlan.cells,
+    };
+    const previewedAt = new Date(new Date(fixture.assignedAt).getTime() + 1_000);
+
+    await expect(
+      adapter.applyRow({
+        categorySlug: fixture.categorySlug,
+        plan: legacyPlan,
+        previewedAt,
+        roles,
+        actorId: 'buyer-legacy',
+        batchId: newUuid(),
+        correlationId: 'category-import-legacy-variant',
+        now: previewedAt,
+      }),
+    ).resolves.toEqual({ applied: true, errors: [] });
+
+    const [stored] = await database.db
+      .select()
+      .from(productAttributeValues)
+      .where(
+        and(
+          eq(productAttributeValues.productId, fixture.productId),
+          eq(productAttributeValues.attributeDefinitionId, fixture.definitionId),
+        ),
+      );
+    expect(stored).toMatchObject({ valueText: importedValue, source: 'import' });
+  });
+
+  it('rejects a legacy plan when the product variant changed after preview', async () => {
+    const fixture = await findMultiVariantImportFixture(database);
+    const [prepared] = await adapter.prepare({
+      categorySlug: fixture.categorySlug,
+      templateId: assertUuid(fixture.templateId),
+      roles,
+      rows: [
+        {
+          rowNumber: 1,
+          data: { sku: fixture.sku, [fixture.attributeKey]: 'No debe aplicarse' },
+          errors: [],
+        },
+      ],
+    });
+    const currentPlan = prepared!.plan!;
+    const legacyPlan = {
+      productId: currentPlan.productId,
+      sku: currentPlan.sku,
+      cells: currentPlan.cells,
+    };
+    const previewedAt = new Date(new Date(fixture.assignedAt).getTime() + 1_000);
+    const [sibling] = await database.sql<{ id: string }[]>`
+      SELECT sibling.id
+      FROM attribute_templates current
+      JOIN attribute_templates sibling
+        ON sibling.category_id = current.category_id
+        AND sibling.status = 'active'
+        AND sibling.id <> current.id
+      WHERE current.id = ${fixture.templateId}
+      ORDER BY sibling.variant_key
+      LIMIT 1
+    `;
+    expect(sibling).toBeTruthy();
+    const reassignedAt = new Date(previewedAt.getTime() + 1_000);
+    await database.db
+      .update(productTemplateAssignments)
+      .set({ templateId: assertUuid(sibling!.id), assignedAt: reassignedAt })
+      .where(eq(productTemplateAssignments.productId, currentPlan.productId));
+
+    await expect(
+      adapter.applyRow({
+        categorySlug: fixture.categorySlug,
+        plan: legacyPlan,
+        previewedAt,
+        roles,
+        actorId: 'buyer-legacy',
+        batchId: newUuid(),
+        correlationId: 'category-import-legacy-stale-template',
+        now: reassignedAt,
+      }),
+    ).resolves.toEqual({
+      applied: false,
+      errors: [expect.stringContaining('cambió después de la vista previa')],
+    });
+
+    const audit = await database.db
+      .select()
+      .from(auditEntries)
+      .where(eq(auditEntries.correlationId, 'category-import-legacy-stale-template'));
+    expect(audit).toHaveLength(0);
+  });
+
   it('previews only active PIM-owned importable columns and persists source + audit atomically', async () => {
     const fixture = await findImportFixture(database);
     const importedValue = 'Nuevo valor desde archivo';
@@ -72,6 +219,7 @@ describe('category attribute imports', () => {
     const result = await adapter.applyRow({
       categorySlug: fixture.categorySlug,
       plan,
+      previewedAt: now,
       roles,
       actorId: 'buyer-1',
       batchId: newUuid(),
@@ -186,7 +334,7 @@ describe('category attribute imports', () => {
       valid: true,
       errors: [],
       warnings: [expect.stringContaining('columna_ajena')],
-      plan: { sku: fixture.sku, cells: [] },
+      plan: { sku: fixture.sku, templateId: fixture.templateId, cells: [] },
     });
   });
 
@@ -234,6 +382,7 @@ describe('category attribute imports', () => {
     const result = await adapter.applyRow({
       categorySlug: fixture.categorySlug,
       plan,
+      previewedAt: now,
       roles,
       actorId: 'buyer-1',
       batchId: newUuid(),
@@ -293,6 +442,7 @@ describe('category attribute imports', () => {
     await adapter.applyRow({
       categorySlug: fixture.categorySlug,
       plan: prepared!.plan!,
+      previewedAt: now,
       roles,
       actorId: 'buyer-1',
       batchId: newUuid(),
@@ -325,6 +475,7 @@ describe('category attribute imports', () => {
     await adapter.applyRow({
       categorySlug: fixture.categorySlug,
       plan: clearPrepared!.plan!,
+      previewedAt: now,
       roles,
       actorId: 'buyer-1',
       batchId: newUuid(),
@@ -352,6 +503,54 @@ interface ImportFixture {
   readonly sku: string;
   readonly definitionId: string;
   readonly attributeKey: string;
+}
+
+interface MultiVariantImportFixture extends ImportFixture {
+  readonly assignedAt: string;
+}
+
+async function findMultiVariantImportFixture(
+  database: TestDatabase,
+): Promise<MultiVariantImportFixture> {
+  const [resolved] = await database.sql<MultiVariantImportFixture[]>`
+    SELECT
+      category.slug AS "categorySlug",
+      template.id AS "templateId",
+      product.id AS "productId",
+      product.sku,
+      assignment.assigned_at AS "assignedAt",
+      definition.id AS "definitionId",
+      definition.key AS "attributeKey"
+    FROM products product
+    JOIN product_template_assignments assignment ON assignment.product_id = product.id
+    JOIN attribute_templates template
+      ON template.id = assignment.template_id AND template.status = 'active'
+    JOIN catalog_categories category
+      ON category.id = template.category_id AND category.active = true
+    JOIN template_attribute_assignments template_attribute
+      ON template_attribute.template_id = template.id AND template_attribute.active = true
+    JOIN attribute_definitions definition
+      ON definition.id = template_attribute.attribute_definition_id
+      AND definition.active = true
+      AND definition.source_authority = 'pim'
+      AND definition.data_type = 'text'
+    JOIN template_attribute_role_access access
+      ON access.template_id = template_attribute.template_id
+      AND access.attribute_definition_id = template_attribute.attribute_definition_id
+      AND access.role = 'COMPRAS'
+      AND access.can_import = true
+    WHERE EXISTS (
+      SELECT 1
+      FROM attribute_templates sibling
+      WHERE sibling.category_id = template.category_id
+        AND sibling.status = 'active'
+        AND sibling.id <> template.id
+    )
+    ORDER BY category.path, template.variant_key, product.sku, template_attribute.position
+    LIMIT 1
+  `;
+  expect(resolved).toBeTruthy();
+  return resolved!;
 }
 
 async function findImportFixture(

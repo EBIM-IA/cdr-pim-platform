@@ -1,7 +1,11 @@
-import type { AdminCatalogCategoryDto } from '@cdr/contracts';
+import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { filterCategoryTreeRows, orderCategoryTree } from '@/components/categories-admin-workspace';
+import {
+  filterCategoryTreeRows,
+  orderCategoryTree,
+  templatesForCategory,
+} from '@/components/categories-admin-workspace';
 
 const updatedAt = '2026-10-15T12:00:00.000Z';
 const categories: AdminCatalogCategoryDto[] = [
@@ -74,5 +78,45 @@ describe('category tree projection', () => {
         ({ category }) => category.name,
       ),
     ).toEqual(['Rodamientos de Bolas', 'Rígidos']);
+  });
+
+  it('keeps every template variant without turning it into another category level', () => {
+    const categoryId = categories[2]!.id;
+    const template = (
+      id: string,
+      variantKey: string,
+      version: number,
+      status: AdminTemplateDto['status'],
+    ): AdminTemplateDto => ({
+      id,
+      categoryId,
+      categoryName: 'Rígidos',
+      variantKey,
+      name: `Plantilla ${variantKey}`,
+      version,
+      status,
+      createdAt: updatedAt,
+      updatedAt,
+    });
+    const variants = templatesForCategory(
+      [
+        template('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', '22.1', 1, 'retired'),
+        template('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', '22.1', 2, 'active'),
+        template('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1', '22.2', 1, 'active'),
+        template('dddddddd-dddd-4ddd-8ddd-ddddddddddd1', '22.3', 1, 'retired'),
+        template('dddddddd-dddd-4ddd-8ddd-ddddddddddd2', '22.3', 2, 'draft'),
+        {
+          ...template('cccccccc-cccc-4ccc-8ccc-ccccccccccc1', '99.1', 1, 'active'),
+          categoryId: categories[1]!.id,
+        },
+      ],
+      categoryId,
+    );
+
+    expect(variants.map(({ variantKey, version }) => [variantKey, version])).toEqual([
+      ['22.1', 2],
+      ['22.2', 1],
+      ['22.3', 2],
+    ]);
   });
 });

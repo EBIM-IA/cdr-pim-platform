@@ -6,7 +6,9 @@ import { fetchProduct } from '@/lib/catalog-api';
 import {
   fetchProductAttributeSheet,
   fetchProductTechnicalSheet,
+  fetchCatalogCategories,
   patchProductAttributes,
+  reassignProductTemplate,
 } from '@/lib/dynamic-catalog-api';
 import {
   listApplications,
@@ -40,7 +42,9 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
   },
   fetchProductAttributeSheet: vi.fn(),
   fetchProductTechnicalSheet: vi.fn(),
+  fetchCatalogCategories: vi.fn(),
   patchProductAttributes: vi.fn(),
+  reassignProductTemplate: vi.fn(),
 }));
 vi.mock('@/lib/operational-api', () => ({
   listApplications: vi.fn(),
@@ -145,9 +149,33 @@ beforeEach(() => {
   vi.mocked(fetchProduct).mockResolvedValue(product);
   vi.mocked(fetchProductAttributeSheet).mockResolvedValue(sheet);
   vi.mocked(fetchProductTechnicalSheet).mockResolvedValue(sheet);
+  vi.mocked(fetchCatalogCategories).mockResolvedValue([
+    {
+      id: sheet.schema.category.id,
+      slug: sheet.schema.category.slug,
+      name: sheet.schema.category.name,
+      path: sheet.schema.category.slug,
+      templateId: sheet.schema.template.id,
+      templateVariantKey: sheet.schema.template.variantKey,
+      templateName: sheet.schema.template.name,
+      templateVersion: sheet.schema.template.version,
+    },
+  ]);
   vi.mocked(patchProductAttributes).mockResolvedValue({
     productId: product.id,
     attributes: [],
+  });
+  vi.mocked(reassignProductTemplate).mockResolvedValue({
+    productId: product.id,
+    category: sheet.schema.category,
+    previousTemplateId: sheet.schema.template.id,
+    template: {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      variantKey: '15.2',
+      name: 'Plantilla pastillas cerámicas',
+      version: 1,
+    },
+    assignedAt: '2026-10-07T10:00:00.000Z',
   });
   vi.mocked(listApplications).mockResolvedValue([
     {
@@ -370,5 +398,44 @@ describe('ProductDetailView operational data', () => {
         'Cambios guardados y heredados a 1 SKU del mismo código unificador.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('reassigns an explicit template variant without changing the product category', async () => {
+    const alternativeTemplateId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    vi.mocked(fetchCatalogCategories).mockResolvedValue([
+      {
+        id: sheet.schema.category.id,
+        slug: sheet.schema.category.slug,
+        name: sheet.schema.category.name,
+        path: sheet.schema.category.slug,
+        templateId: sheet.schema.template.id,
+        templateVariantKey: sheet.schema.template.variantKey,
+        templateName: sheet.schema.template.name,
+        templateVersion: sheet.schema.template.version,
+      },
+      {
+        id: sheet.schema.category.id,
+        slug: sheet.schema.category.slug,
+        name: sheet.schema.category.name,
+        path: sheet.schema.category.slug,
+        templateId: alternativeTemplateId,
+        templateVariantKey: '15.2',
+        templateName: 'Plantilla pastillas cerámicas',
+        templateVersion: 1,
+      },
+    ]);
+
+    render(<ProductDetailView productId={product.id} canReassignTemplate />);
+
+    const selector = await screen.findByRole('combobox', { name: 'Subtipo de plantilla' });
+    fireEvent.change(selector, { target: { value: alternativeTemplateId } });
+
+    await waitFor(() => {
+      expect(reassignProductTemplate).toHaveBeenCalledWith(product.id, {
+        templateId: alternativeTemplateId,
+        expectedTemplateId: sheet.schema.template.id,
+      });
+    });
+    expect(await screen.findByText(/Variante 15\.2/)).toBeInTheDocument();
   });
 });

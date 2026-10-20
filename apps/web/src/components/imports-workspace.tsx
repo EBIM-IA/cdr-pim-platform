@@ -2,6 +2,7 @@
 
 import {
   previewImportSchema,
+  type CatalogCategorySummaryDto,
   type ImportBatchDto,
   type ImportFormat,
   type ImportTarget,
@@ -258,9 +259,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [target, setTarget] = useState<ImportTarget>('applications');
   const [format, setFormat] = useState<ImportFormat>('csv');
   const [categoryCode, setCategoryCode] = useState('');
-  const [categoryOptions, setCategoryOptions] = useState<
-    { id: string; slug: string; name: string }[]
-  >([]);
+  const [templateId, setTemplateId] = useState('');
+  const [categoryOptions, setCategoryOptions] = useState<CatalogCategorySummaryDto[]>([]);
   const [payload, setPayload] = useState(csvExamples.applications);
   const [fileName, setFileName] = useState('aplicaciones.csv');
   const [idempotencyKey, setIdempotencyKey] = useState(() => newKey('applications'));
@@ -276,6 +276,11 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
       .then((categories) => {
         setCategoryOptions(categories);
         setCategoryCode((current) => current || categories[0]?.slug || '');
+        setTemplateId((current) =>
+          categories.some((category) => category.templateId === current)
+            ? current
+            : (categories[0]?.templateId ?? ''),
+        );
       })
       .catch(() => setCategoryOptions([]));
     return () => controller.abort();
@@ -285,6 +290,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
 
   const columns = useMemo(() => sourceColumns(payload, format), [format, payload]);
   const rowEstimate = useMemo(() => localRowEstimate(payload, format), [format, payload]);
+  const categorySelectionReady =
+    target !== 'category' || (categoryCode.length > 0 && templateId.length > 0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -413,7 +420,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
       target,
       format,
       idempotencyKey,
-      ...(target === 'category' ? { categoryCode } : {}),
+      ...(target === 'category' ? { categoryCode, templateId } : {}),
       ...(format === 'csv' ? { csv: payload } : { records }),
     });
     if (!parsed.success) {
@@ -751,19 +758,28 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     <h3 className="font-semibold">Plantilla / destino</h3>
                     {target === 'category' ? (
                       <Select
-                        label="Categoría con plantilla activa"
+                        label="Categoría y variante de plantilla"
                         className="mt-4"
                         required
-                        value={categoryCode}
+                        value={templateId}
                         disabled={!canExecute || categoryOptions.length === 0}
-                        onChange={(event) => setCategoryCode(event.target.value)}
+                        onChange={(event) => {
+                          const selectedTemplateId = event.target.value;
+                          const selected = categoryOptions.find(
+                            (category) => category.templateId === selectedTemplateId,
+                          );
+                          setTemplateId(selectedTemplateId);
+                          setCategoryCode(selected?.slug ?? '');
+                          setBatch(null);
+                        }}
                       >
                         <option value="" disabled>
-                          Selecciona una categoría
+                          Selecciona una categoría y variante
                         </option>
                         {categoryOptions.map((category) => (
-                          <option key={category.id} value={category.slug}>
-                            {category.name}
+                          <option key={category.templateId} value={category.templateId}>
+                            {category.path} · {category.templateVariantKey} ·{' '}
+                            {category.templateName}
                           </option>
                         ))}
                       </Select>
@@ -774,7 +790,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       </p>
                     )}
                     <div className="mt-4 rounded-lg bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
-                      La API validará la identidad de cada fila en el paso Validación.
+                      La API validará la identidad de cada fila y que el SKU pertenezca a la
+                      variante elegida en el paso Validación.
                     </div>
                   </Card>
                 </div>
@@ -895,7 +912,12 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
               {step < 4 ? (
                 <Button
                   onClick={() => void nextStep()}
-                  disabled={!canExecute || loading || !payload.trim()}
+                  disabled={
+                    !canExecute ||
+                    loading ||
+                    !payload.trim() ||
+                    (step >= 1 && !categorySelectionReady)
+                  }
                 >
                   {loading ? 'Validando…' : 'Continuar'}{' '}
                   <ChevronRight className="size-4" aria-hidden="true" />

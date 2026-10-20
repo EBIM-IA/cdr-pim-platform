@@ -9,6 +9,8 @@ import {
   type CatalogWorkbookResultDto,
   type CatalogSchemaQuery,
   type ProductAttributeSheetDto,
+  type ReassignProductTemplateInput,
+  type ReassignedProductTemplateDto,
   type UpdateProductAttributeInput,
   type UpdateProductAttributesBatchInput,
   type UpdatedProductAttributeDto,
@@ -21,6 +23,8 @@ import {
   catalogWorkbookResultSchema,
   catalogSchemaQuerySchema,
   productAttributeSheetSchema,
+  reassignProductTemplateSchema,
+  reassignedProductTemplateSchema,
   updateProductAttributeSchema,
   updateProductAttributesBatchSchema,
   updatedProductAttributeSchema,
@@ -39,10 +43,12 @@ import { ListCatalogGridUseCase } from '../application/list-catalog-grid.use-cas
 import { ListCatalogWorkbookUseCase } from '../application/list-catalog-workbook.use-case';
 import { UpdateProductAttributeUseCase } from '../application/update-product-attribute.use-case';
 import { UpdateProductAttributesUseCase } from '../application/update-product-attributes.use-case';
+import { ReassignProductTemplateUseCase } from '../application/reassign-product-template.use-case';
 import {
   toGridProductDto,
   toGridSchemaDto,
   toProductAttributeSheetDto,
+  toReassignedProductTemplateDto,
   toUpdatedProductAttributeDto,
   toUpdatedProductAttributesBatchDto,
   toWorkbookResultDto,
@@ -60,6 +66,7 @@ export class DynamicCatalogController {
     private readonly getProductSheet: GetProductAttributeSheetUseCase,
     private readonly updateAttribute: UpdateProductAttributeUseCase,
     private readonly updateAttributes: UpdateProductAttributesUseCase,
+    private readonly reassignTemplate: ReassignProductTemplateUseCase,
   ) {}
 
   @Get('categories')
@@ -136,6 +143,22 @@ export class DynamicCatalogController {
   @ApiOkResponse({ schema: openApiSchema(productAttributeSheetSchema) })
   async technicalSheet(@Param('productId') productId: string): Promise<ProductAttributeSheetDto> {
     return toProductAttributeSheetDto(await this.getProductSheet.executeTechnicalSheet(productId));
+  }
+
+  @Patch('products/:productId/template')
+  @RequireCapabilities(Capability.AttributesWrite)
+  @ApiOperation({
+    summary: 'Assign another active template variant from the same category to a product',
+  })
+  @ApiOkResponse({ schema: openApiSchema(reassignedProductTemplateSchema) })
+  async patchTemplate(
+    @Param('productId') productId: string,
+    @Body(new ZodValidationPipe(reassignProductTemplateSchema)) body: ReassignProductTemplateInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<ReassignedProductTemplateDto> {
+    return toReassignedProductTemplateDto(
+      await this.reassignTemplate.execute({ productId, ...body }, actor),
+    );
   }
 
   @Patch('products/:productId/attributes/:attributeKey')
