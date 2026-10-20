@@ -48,6 +48,35 @@ export interface CategoryTreeRow {
   readonly leaf: boolean;
 }
 
+/**
+ * Returns one operational version per template variant for a category. An active version wins;
+ * otherwise the most recent persisted version remains visible for diagnosis.
+ */
+export function templatesForCategory(
+  templates: readonly AdminTemplateDto[],
+  categoryId: string,
+): AdminTemplateDto[] {
+  const byVariant = new Map<string, AdminTemplateDto>();
+  templates
+    .filter((template) => template.categoryId === categoryId)
+    .forEach((candidate) => {
+      const current = byVariant.get(candidate.variantKey);
+      const candidateIsActive = candidate.status === 'active';
+      const currentIsActive = current?.status === 'active';
+      if (
+        !current ||
+        (candidateIsActive && !currentIsActive) ||
+        (candidateIsActive === currentIsActive && candidate.version > current.version)
+      ) {
+        byVariant.set(candidate.variantKey, candidate);
+      }
+    });
+
+  return [...byVariant.values()].sort((left, right) =>
+    left.variantKey.localeCompare(right.variantKey, 'es', { numeric: true }),
+  );
+}
+
 export function orderCategoryTree(
   categories: readonly AdminCatalogCategoryDto[],
 ): CategoryTreeRow[] {
@@ -185,10 +214,7 @@ export function CategoriesAdminWorkspace() {
         0),
     0,
   );
-  const templateFor = (categoryId: string) =>
-    templates.find(
-      (template) => template.categoryId === categoryId && template.status === 'active',
-    ) ?? templates.find((template) => template.categoryId === categoryId);
+  const categoryTemplates = (categoryId: string) => templatesForCategory(templates, categoryId);
 
   const beginEdit = (category: AdminCatalogCategoryDto) => {
     setEditingId(category.id);
@@ -272,7 +298,7 @@ export function CategoriesAdminWorkspace() {
     <>
       <PageHeader
         title="Árbol de Categorías"
-        description="Jerarquía del ERP y relación de cada categoría final con su plantilla PIM."
+        description="Jerarquía del ERP y relación de cada categoría final con sus variantes de plantilla PIM."
         actions={
           <>
             <Button
@@ -288,10 +314,10 @@ export function CategoriesAdminWorkspace() {
         }
       />
       <ScreenGuide
-        objective="Representa los niveles del ERP como un árbol; la plantilla y sus atributos pertenecen a la última categoría de cada rama."
+        objective="Representa los niveles del ERP como un árbol; una categoría final puede tener una o varias variantes de plantilla sin crear subcategorías artificiales."
         actions={[
           'Busca una categoría padre para incluir todas sus categorías descendientes.',
-          'Abre la plantilla de una categoría final o edita nombre, orden y vigencia.',
+          'Revisa las variantes de plantilla de una categoría final o edita nombre, orden y vigencia.',
           'Exporta el árbol vigente para validarlo con el cliente.',
         ]}
         dataSource="Las categorías, plantillas y asignaciones provienen de la API administrativa del catálogo; cada actualización usa control de concurrencia."
@@ -337,8 +363,9 @@ export function CategoriesAdminWorkspace() {
 
       <div className="mb-[18px] rounded-lg bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
         Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
-        interpreta como una sola categoría, no como un nodo duplicado. La plantilla solo se evalúa
-        en la categoría hoja.
+        interpreta como una sola categoría, no como un nodo duplicado. Si esa categoría tiene varios
+        subtipos, se muestran como variantes de plantilla y la asignación se realiza por producto,
+        sin agregar otro nivel al árbol.
       </div>
 
       {notice ? (
@@ -386,14 +413,27 @@ export function CategoriesAdminWorkspace() {
           <TableExportButtons
             filename="arbol-categorias"
             sheetName="Árbol de Categorías"
-            headers={['Nivel', 'Categoría', 'Slug', 'Ruta', 'Aplicación', 'Plantilla', 'Estado']}
+            headers={[
+              'Nivel',
+              'Categoría',
+              'Slug',
+              'Ruta',
+              'Aplicación',
+              'Variantes de plantilla',
+              'Estado',
+            ]}
             rows={visibleTreeRows.map(({ category, depth }) => [
               depth + 1,
               category.name,
               category.slug,
               category.path,
               category.application,
-              templateFor(category.id)?.name,
+              categoryTemplates(category.id)
+                .map(
+                  (template) =>
+                    `${template.variantKey} · ${template.name} · v${template.version} · ${template.status}`,
+                )
+                .join(' | '),
               category.active ? 'Activa' : 'Inactiva',
             ])}
           />
@@ -423,13 +463,14 @@ export function CategoriesAdminWorkspace() {
             <p className="mt-1 text-xs text-muted-foreground">
               {
                 visibleTreeRows.filter(
-                  ({ category, leaf }) => leaf && Boolean(templateFor(category.id)),
+                  ({ category, leaf }) => leaf && categoryTemplates(category.id).length > 0,
                 ).length
               }{' '}
               categorías finales definidas ·{' '}
               {
-                visibleTreeRows.filter(({ category, leaf }) => leaf && !templateFor(category.id))
-                  .length
+                visibleTreeRows.filter(
+                  ({ category, leaf }) => leaf && categoryTemplates(category.id).length === 0,
+                ).length
               }{' '}
               pendientes
             </p>
@@ -451,7 +492,7 @@ export function CategoriesAdminWorkspace() {
                     Aplicación
                   </th>
                   <th scope="col" className="px-4 py-3">
-                    Plantilla PIM
+                    Variantes PIM
                   </th>
                   <th scope="col" className="px-4 py-3">
                     Atributos
@@ -471,9 +512,15 @@ export function CategoriesAdminWorkspace() {
                 {[...visibleTreeRows].map(({ category, depth, leaf }) => {
                   const editing = editingId === category.id;
                   const saving = savingId === category.id;
-                  const template = templateFor(category.id);
-                  const activeAttributes =
-                    template?.attributes?.filter((attribute) => attribute.active) ?? [];
+                  const variants = categoryTemplates(category.id);
+                  const activeVariants = variants.filter(
+                    (template) => template.status === 'active',
+                  );
+                  const visibleVariants = activeVariants.length > 0 ? activeVariants : variants;
+                  const activeAttributes = visibleVariants.flatMap(
+                    (template) =>
+                      template.attributes?.filter((attribute) => attribute.active) ?? [],
+                  );
                   return (
                     <Fragment key={category.id}>
                       <tr className="hover:bg-orange-50/40">
@@ -540,14 +587,32 @@ export function CategoriesAdminWorkspace() {
                         </td>
                         <td className="px-4 py-3">
                           {leaf ? (
-                            <>
-                              <strong className="block">{template?.name ?? 'Sin plantilla'}</strong>
-                              <span className="text-xs text-muted-foreground">
-                                {template
-                                  ? `Versión ${template.version}`
-                                  : 'Pendiente de definición'}
-                              </span>
-                            </>
+                            variants.length > 0 ? (
+                              <div>
+                                <strong className="block">
+                                  {variants.length}{' '}
+                                  {variants.length === 1 ? 'variante' : 'variantes'}
+                                </strong>
+                                <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                  {variants.map((template) => (
+                                    <li key={template.id}>
+                                      <span className="font-mono text-[10px] text-primary">
+                                        {template.variantKey}
+                                      </span>{' '}
+                                      · {template.name} · v{template.version}
+                                      {template.status === 'active' ? '' : ` · ${template.status}`}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <>
+                                <strong className="block">Sin plantilla</strong>
+                                <span className="text-xs text-muted-foreground">
+                                  Pendiente de definición
+                                </span>
+                              </>
+                            )
                           ) : (
                             <span className="text-xs text-muted-foreground">
                               Solo categoría final
@@ -561,7 +626,7 @@ export function CategoriesAdminWorkspace() {
                         <td className="px-4 py-3">
                           <StatusBadge
                             tone={
-                              (!leaf || template?.status === 'active') && category.active
+                              (!leaf || activeVariants.length > 0) && category.active
                                 ? 'success'
                                 : 'warning'
                             }
@@ -570,7 +635,7 @@ export function CategoriesAdminWorkspace() {
                               ? 'Inactiva'
                               : !leaf
                                 ? 'Estructural'
-                                : template?.status === 'active'
+                                : activeVariants.length > 0
                                   ? 'Definida'
                                   : 'Pendiente'}
                           </StatusBadge>

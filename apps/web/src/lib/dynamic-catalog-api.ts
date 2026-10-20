@@ -6,6 +6,8 @@ import {
   type CatalogWorkbookResultDto,
   type CatalogCategorySummaryDto,
   type ProductAttributeSheetDto,
+  type ReassignProductTemplateInput,
+  type ReassignedProductTemplateDto,
   type UpdateProductAttributeInput,
   type UpdateProductAttributesBatchInput,
   type UpdatedProductAttributeDto,
@@ -15,6 +17,7 @@ import {
   catalogGridSchemaSchema,
   catalogWorkbookResultSchema,
   productAttributeSheetSchema,
+  reassignedProductTemplateSchema,
   updatedProductAttributeSchema,
   updatedProductAttributesBatchSchema,
 } from '@cdr/contracts';
@@ -134,6 +137,17 @@ export function fetchProductTechnicalSheet(
     `/products/${encodeURIComponent(productId)}/technical-sheet`,
     productAttributeSheetSchema,
     { signal },
+  );
+}
+
+export function reassignProductTemplate(
+  productId: string,
+  input: ReassignProductTemplateInput,
+): Promise<ReassignedProductTemplateDto> {
+  return request(
+    `/products/${encodeURIComponent(productId)}/template`,
+    reassignedProductTemplateSchema,
+    { method: 'PATCH', body: JSON.stringify(input) },
   );
 }
 

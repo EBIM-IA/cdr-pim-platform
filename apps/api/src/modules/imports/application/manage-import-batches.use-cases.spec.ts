@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { FixedClock, assertUuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +29,51 @@ const actor: AuthenticatedActor = {
 };
 
 describe('OEM imports', () => {
+  it('keeps legacy idempotency hashes valid when no template variant is supplied', async () => {
+    const payloadHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          target: 'oem',
+          format: 'json',
+          categoryCode: null,
+          rows: [{ unifiedCode: 'D1672', oemCode: 'OEM-1', brands: ['TOYOTA'] }],
+        }),
+      )
+      .digest('hex');
+    const legacy = ImportBatch.preview(
+      {
+        target: 'oem',
+        format: 'json',
+        idempotencyKey: 'legacy-idempotency-1',
+        payloadHash,
+        categoryCode: null,
+        createdBy: actor.id,
+        rows: [],
+      },
+      now,
+    );
+    const imports = new MemoryImportBatchRepository(legacy);
+
+    const repeated = await new PreviewImportBatchUseCase(
+      imports,
+      new FixedClock(now),
+      emptyApplications(),
+      emptyHomologs(),
+      createOemRepository(true),
+      emptyCategoryImports(),
+    ).execute(
+      {
+        target: 'oem',
+        format: 'json',
+        idempotencyKey: 'legacy-idempotency-1',
+        records: [{ codigo_unificador: 'D1672', codigo_oem: 'OEM-1', marcas: ['TOYOTA'] }],
+      },
+      actor,
+    );
+
+    expect(repeated.toSnapshot().id).toBe(legacy.toSnapshot().id);
+  });
+
   it('validates a group once per preview and confirms real OEM rows idempotently', async () => {
     const imports = new MemoryImportBatchRepository();
     const applications = emptyApplications();
@@ -183,6 +230,64 @@ describe('application imports', () => {
 });
 
 describe('category imports', () => {
+  it('confirms a durable legacy plan that predates template-specific previews', async () => {
+    const legacy = ImportBatch.preview(
+      {
+        target: 'category',
+        format: 'json',
+        idempotencyKey: 'legacy-category-confirmation-1',
+        payloadHash: 'legacy-category-hash',
+        categoryCode: 'pastillas-de-freno',
+        createdBy: actor.id,
+        rows: [
+          {
+            rowNumber: 1,
+            valid: true,
+            data: { sku: 'D1672', descripcion_tecnica: 'Ficha histórica' },
+            errors: [],
+            warnings: [],
+            metadata: {
+              productId: groupId,
+              sku: 'D1672',
+              cells: [
+                {
+                  attributeKey: 'descripcion_tecnica',
+                  value: 'Ficha histórica',
+                  expectedVersion: 0,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      now,
+    );
+    const imports = new MemoryImportBatchRepository(legacy);
+    const categoryImports = emptyCategoryImports();
+    const confirmed = await new ConfirmImportBatchUseCase(
+      imports,
+      new FixedClock(now),
+      emptyApplications(),
+      emptyHomologs(),
+      createOemRepository(true),
+      categoryImports,
+    ).execute(legacy.toSnapshot().id, actor);
+
+    expect(confirmed.toSnapshot().status).toBe('confirmed');
+    expect(categoryImports.applyRow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categorySlug: 'pastillas-de-freno',
+        previewedAt: now,
+        plan: expect.objectContaining({ productId: groupId, sku: 'D1672' }),
+      }),
+    );
+    expect(categoryImports.applyRow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: expect.not.objectContaining({ templateId: expect.anything() }),
+      }),
+    );
+  });
+
   it('confirms valid rows, preserves row-level conflicts and claims the batch once', async () => {
     const imports = new MemoryImportBatchRepository();
     const categoryImports: CategoryAttributeImportPort = {
@@ -194,6 +299,7 @@ describe('category imports', () => {
           plan: {
             productId: groupId,
             sku: String(row.data.sku),
+            templateId: groupId,
             cells: [
               {
                 attributeKey: 'descripcion_tecnica',
@@ -222,6 +328,7 @@ describe('category imports', () => {
       {
         target: 'category',
         categoryCode: 'pastillas-de-freno',
+        templateId: groupId,
         format: 'json',
         idempotencyKey: 'category-confirmation-1',
         records: [
@@ -258,8 +365,12 @@ describe('category imports', () => {
 });
 
 class MemoryImportBatchRepository implements ImportBatchRepositoryPort {
-  private batch: ImportBatch | null = null;
+  private batch: ImportBatch | null;
   claims = 0;
+
+  constructor(initial: ImportBatch | null = null) {
+    this.batch = initial;
+  }
 
   async findById(): Promise<ImportBatch | null> {
     return this.batch;

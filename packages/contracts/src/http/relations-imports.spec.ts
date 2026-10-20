@@ -41,6 +41,29 @@ describe('relation and import contracts', () => {
     ).toBe(false);
   });
 
+  it('accepts an explicit template variant only for category imports', () => {
+    const templateId = '22222222-2222-4222-8222-222222222222';
+    expect(
+      previewImportSchema.safeParse({
+        target: 'category',
+        format: 'json',
+        idempotencyKey: 'category-variant-1',
+        categoryCode: 'filtros-de-aire',
+        templateId,
+        records: [{ sku: 'FILTRO-1' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      previewImportSchema.safeParse({
+        target: 'oem',
+        format: 'json',
+        idempotencyKey: 'oem-template-1',
+        templateId,
+        records: [{ codigo_unificador: 'D1672', codigo_oem: 'OEM-1' }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('accepts OEM JSON imports with the approved Spanish aliases and brand arrays', () => {
     expect(
       previewImportSchema.parse({

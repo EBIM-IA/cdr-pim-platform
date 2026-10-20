@@ -3,11 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkspaceData } from '@/components/use-workspace-data';
+import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
 import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
 
 import { ImportsWorkspace } from './imports-workspace';
 
 vi.mock('@/components/use-workspace-data', () => ({ useWorkspaceData: vi.fn() }));
+vi.mock('@/lib/dynamic-catalog-api', () => ({ fetchCatalogCategories: vi.fn() }));
 vi.mock('@/lib/operational-api', () => ({
   confirmImport: vi.fn(),
   getImport: vi.fn(),
@@ -102,6 +104,28 @@ beforeEach(() => {
   vi.mocked(previewImport).mockResolvedValue(batch);
   vi.mocked(confirmImport).mockResolvedValue(confirmedBatch);
   vi.mocked(getImport).mockResolvedValue(batch);
+  vi.mocked(fetchCatalogCategories).mockResolvedValue([
+    {
+      id: '22222222-2222-4222-8222-222222222222',
+      slug: 'filtros-de-aire',
+      name: 'Filtros de aire',
+      path: 'Filtros / Aire',
+      templateId: '33333333-3333-4333-8333-333333333331',
+      templateVariantKey: '22.1',
+      templateName: 'Filtro de aire rectangular',
+      templateVersion: 1,
+    },
+    {
+      id: '22222222-2222-4222-8222-222222222222',
+      slug: 'filtros-de-aire',
+      name: 'Filtros de aire',
+      path: 'Filtros / Aire',
+      templateId: '33333333-3333-4333-8333-333333333332',
+      templateVariantKey: '22.2',
+      templateName: 'Filtro de aire cilíndrico',
+      templateVersion: 1,
+    },
+  ]);
 });
 
 afterEach(() => cleanup());
@@ -166,6 +190,32 @@ describe('ImportsWorkspace', () => {
     expect(screen.getByDisplayValue(/codigo_unificador,codigo_oem,marcas/)).toBeInTheDocument();
     expect(screen.getByDisplayValue(/04465-0K240/)).not.toHaveValue(
       expect.stringContaining('codigo_homologo'),
+    );
+  });
+
+  it('sends the explicit template variant for a category import', async () => {
+    render(<ImportsWorkspace canExecute />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Nueva importación/ }));
+    fireEvent.change(screen.getByLabelText('Destino'), { target: { value: 'category' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
+
+    const templateId = '33333333-3333-4333-8333-333333333332';
+    fireEvent.change(
+      await screen.findByRole('combobox', { name: 'Categoría y variante de plantilla' }),
+      { target: { value: templateId } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
+
+    await waitFor(() =>
+      expect(previewImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: 'category',
+          categoryCode: 'filtros-de-aire',
+          templateId,
+        }),
+      ),
     );
   });
 
