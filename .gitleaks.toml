@@ -1,0 +1,24 @@
+# gitleaks configuration. Starts from the default rule set; every allowlist below must name
+# the false positive it closes and stay scoped to one rule, one path and one value shape.
+# CI scans the whole history of every branch, so an allowlist also covers past commits.
+[extend]
+useDefault = true
+
+# The client template manifest stores attribute identifiers as  "key": "<snake_case>"
+# (e.g. "b2_distancia_solapa"), which generic-api-key reads as a credential.
+[[allowlists]]
+description = "Attribute keys in the generated client template manifest"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/api/src/database/client-template-manifest\.json$''']
+regexTarget = "match"
+regexes = ['''^key": "[a-z0-9_]+"$''']
+
+# Human-readable idempotency keys used as fixtures in unit tests.
+[[allowlists]]
+description = "Idempotency key fixtures in unit tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''\.spec\.ts$''']
+regexTarget = "match"
+regexes = ['''^idempotencyKey: '[a-z0-9-]+'$''']
