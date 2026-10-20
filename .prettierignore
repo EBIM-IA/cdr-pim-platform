@@ -1,8 +1,11 @@
 node_modules
 dist
 .next
+.next-dev
+.next-build
 .turbo
 coverage
 pnpm-lock.yaml
 apps/api/drizzle/meta
+apps/api/src/database/client-template-manifest.json
 CHANGELOG.md

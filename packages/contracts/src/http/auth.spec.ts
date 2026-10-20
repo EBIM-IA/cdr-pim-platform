@@ -19,7 +19,9 @@ describe('authentication contracts', () => {
     expect(
       loginResponseSchema.parse({ actor, accessToken: 'signed-token', expiresIn: '15m' }),
     ).toMatchObject({ actor, expiresIn: '15m' });
-    expect(authMeResponseSchema.parse({ actor })).toEqual({ actor });
+    expect(authMeResponseSchema.parse({ actor })).toEqual({
+      actor: { ...actor, capabilities: [] },
+    });
   });
 
   it('rejects unknown roles and malformed credentials', () => {

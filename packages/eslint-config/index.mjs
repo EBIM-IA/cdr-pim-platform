@@ -16,6 +16,8 @@ export const baseConfig = tseslint.config(
     ignores: [
       '**/dist/**',
       '**/.next/**',
+      '**/.next-dev/**',
+      '**/.next-build/**',
       '**/.turbo/**',
       '**/coverage/**',
       '**/node_modules/**',

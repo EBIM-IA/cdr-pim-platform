@@ -5,6 +5,10 @@ import {
   type EmbeddingProviderPort,
 } from '../../ai/domain/ports/embedding-provider.port';
 import {
+  PRODUCT_SEARCH_READ_MODEL,
+  type ProductSearchReadModelPort,
+} from '../domain/ports/product-search-read-model.port';
+import {
   PRODUCT_VECTOR_INDEX,
   type ProductVectorIndexPort,
   type VectorSearchHit,
@@ -28,20 +32,53 @@ export class SemanticSearchUseCase {
   constructor(
     @Inject(EMBEDDING_PROVIDER) private readonly embeddings: EmbeddingProviderPort,
     @Inject(PRODUCT_VECTOR_INDEX) private readonly index: ProductVectorIndexPort,
+    @Inject(PRODUCT_SEARCH_READ_MODEL)
+    private readonly deterministicSearch: ProductSearchReadModelPort,
   ) {}
 
-  async execute(query: string, limit: number): Promise<SemanticSearchResult> {
+  async execute(
+    query: string,
+    limit: number,
+    roles: readonly string[],
+  ): Promise<SemanticSearchResult> {
+    const [deterministicResult, semanticResult] = await Promise.allSettled([
+      this.deterministicSearch.findDeterministic({ query, roles, limit }),
+      this.searchVectorIndex(query, limit),
+    ]);
+
+    if (deterministicResult.status === 'rejected' && semanticResult.status === 'rejected') {
+      throw semanticResult.reason;
+    }
+
+    const deterministicHits =
+      deterministicResult.status === 'fulfilled' ? deterministicResult.value : [];
+    const semantic =
+      semanticResult.status === 'fulfilled'
+        ? semanticResult.value
+        : { model: this.embeddings.model, dimensions: this.embeddings.dimensions, hits: [] };
+    const hits = new Map<string, VectorSearchHit>();
+    for (const hit of deterministicHits) hits.set(hit.productId, hit);
+    for (const hit of semantic.hits) {
+      if (!hits.has(hit.productId)) hits.set(hit.productId, hit);
+    }
+
+    return {
+      model: semantic.model,
+      dimensions: semantic.dimensions,
+      hits: [...hits.values()].slice(0, limit),
+    };
+  }
+
+  private async searchVectorIndex(query: string, limit: number): Promise<SemanticSearchResult> {
     const [embedded] = await this.embeddings.embed([query]);
     if (!embedded) {
       return { model: this.embeddings.model, dimensions: this.embeddings.dimensions, hits: [] };
     }
-
     const hits = await this.index.searchSimilar({
       vector: embedded.vector,
       model: embedded.model,
       limit,
     });
-
     return { model: embedded.model, dimensions: embedded.dimensions, hits };
   }
 }

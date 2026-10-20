@@ -39,3 +39,20 @@ export interface ObjectStoragePort {
 }
 
 export const OBJECT_STORAGE = Symbol('ObjectStoragePort');
+
+const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/** Keep every adapter from interpreting traversal or ambiguous separators differently. */
+export function assertSafeObjectKey(key: string): void {
+  const segments = key.split('/');
+  if (
+    key.length === 0 ||
+    key.length > 1_024 ||
+    !SAFE_KEY.test(key) ||
+    key.includes('\\') ||
+    key.includes('//') ||
+    segments.some((segment) => segment === '.' || segment === '..' || segment.length === 0)
+  ) {
+    throw new Error('Unsafe object storage key');
+  }
+}

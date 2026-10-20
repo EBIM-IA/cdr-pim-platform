@@ -2,6 +2,8 @@
 **/.pnpm-store
 **/dist
 **/.next
+**/.next-dev
+**/.next-build
 **/.turbo
 **/coverage
 **/.env

@@ -16,19 +16,69 @@ because a future provider may be the best choice for one and not the others.
 ## Configuration, never code
 
 ```bash
-AI_PROVIDER=openai              # or `fake`
-AI_GENERATION_MODEL=gpt-4o-mini
+AI_EMBEDDING_PROVIDER=openai              # each capability defaults to `fake`
+AI_GENERATION_PROVIDER=openai
+AI_DOCUMENT_EXTRACTION_PROVIDER=openai
+AI_GENERATION_MODEL=gpt-6-luna
+AI_DOCUMENT_EXTRACTION_MODEL=gpt-6-luna
 AI_EMBEDDING_MODEL=text-embedding-3-small
 AI_EMBEDDING_DIMENSIONS=1536    # MUST equal the vector(N) column width
-OPENAI_API_KEY=...              # required only when AI_PROVIDER=openai
+AI_DOCUMENT_MAX_BYTES=5242880   # stricter than the general 20 MB asset limit
+OPENAI_TIMEOUT_MS=25000         # below the 45s browser BFF deadline
+OPENAI_MAX_RETRIES=0
+OPENAI_API_KEY=...              # required when any capability selects OpenAI
 ```
 
 No model name appears in application code. `import OpenAI` appears in exactly one folder
 (`modules/ai/infrastructure/openai/`), and the architecture test fails the build if it
 appears anywhere else.
 
-`AI_PROVIDER` defaults to `fake`, so a new developer and CI both get a working system with
-no key and no spend.
+Every capability defaults to `fake`, so a new developer and CI both get a working system with
+no key and no spend. `AI_PROVIDER` remains a deprecated compatibility alias for embeddings
+only. This is intentionally fail-closed: an operator who enables semantic embeddings does not
+implicitly authorize commercial catalogue text or private supplier documents to leave the system.
+
+The production recommendation is `gpt-6-luna` for focused extraction and catalogue copy,
+using low reasoning effort through the Responses API, and `text-embedding-3-small` with its
+native 1536 dimensions for semantic search. The names remain configurable so a deployment can
+pin another model after an evaluation without changing application code.
+
+The configured generation model must support the Responses API and Structured Outputs because
+document extraction uses `input_file`/`input_image` plus a strict JSON schema. The adapter applies
+low reasoning effort to GPT-5/6 and o-series models, and deterministic temperature control to
+classic models. For embeddings, the optional `dimensions` parameter is sent only to the
+`text-embedding-3-*` family; every response is still checked against
+`AI_EMBEDDING_DIMENSIONS` before it can reach PostgreSQL.
+
+## Secret handling
+
+`OPENAI_API_KEY` has no default and is never accepted from an HTTP request or stored in the
+database. For local development it belongs only in the ignored root `.env`; QAS/PRD inject it
+from AWS Secrets Manager. A key exposed in chat, a ticket or source control must be revoked and
+replaced before enabling any OpenAI capability.
+
+## Safe candidate endpoints
+
+Two authenticated API operations expose the provider without letting a model mutate the PIM:
+
+| Route                                              | Capability                             | Result                                          |
+| -------------------------------------------------- | -------------------------------------- | ----------------------------------------------- |
+| `POST /api/v1/ai/products/:id/commercial-proposal` | `catalog:read` + `ai-quality:execute`  | Commercial-copy candidate for human review      |
+| `POST /api/v1/ai/assets/:id/extraction-candidates` | `catalog:read` + `ai-document:extract` | Attribute candidates from an existing PDF/image |
+
+Both use the `ai` rate-limit profile. Responses always carry `persisted: false` and
+`requiresHumanReview: true`; accepting a candidate remains a separate, explicit catalogue action.
+The commercial proposal receives only the product core plus non-empty dynamic attributes already
+visible to the authenticated actor. The extraction route intersects the requested keys with the
+active template attributes that are visible and editable for that actor; an empty request means
+"all eligible keys", never unrestricted extraction. It rejects unsupported MIME types and
+oversized metadata before downloading, then verifies the stored byte length, SHA-256 and file
+signature before calling a provider. It accepts PDF/JPEG/PNG/WebP, caps output at 200 candidates,
+never returns the raw model transcript, and does not support DWG input.
+
+Successful generation and extraction calls append audit entries with actor, provider model,
+token counts when available, bounded counts and `persisted: false`. Prompts, document bytes,
+candidate values and generated copy are deliberately excluded from audit storage.
 
 ## Indexing pipeline
 
@@ -99,8 +149,11 @@ because retrofitting provenance onto attribute data later is painful.
 
 ## Not built yet
 
-- **Token accounting and budget guards.** `GenerationResult` carries token counts; nothing
-  aggregates them. This must exist before any bulk generation runs against a real key.
+- **Budget aggregation and guards.** Per-request usage is audited when the provider reports it,
+  but nothing aggregates spend or enforces tenant budgets. This must exist before bulk generation.
+- **End-to-end client disconnect cancellation.** Provider timeouts finish before the BFF deadline,
+  but the Nest/Express request abort signal is not yet threaded through every AI port. Rate limits,
+  byte limits and zero default retries bound the residual work.
 - **Prompt versioning.** Prompts are inline constants. When generation becomes a real
   feature, they need to be versioned and stored with their output.
 - **Relevance evaluation.** The fake proves the plumbing, not the search quality.

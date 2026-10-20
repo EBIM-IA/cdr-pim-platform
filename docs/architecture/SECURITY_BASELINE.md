@@ -68,7 +68,7 @@ whether an SSO integration is needed. It was not invented.
 - The access-token signing secret must be at least 32 characters — enforced by the
   configuration schema, which
   reports the _variable name_ and never the value on failure.
-- Access tokens carry the subject, email and current coarse roles. Their lifetime is short
+- Access tokens carry the subject, email and assigned roles. Their lifetime is short
   (`15m` by default and never more than one hour) because no revocation source exists in
   local mode.
 - Signing and verification pin `HS256`, issuer and audience; every token has a unique `jti`.
@@ -80,24 +80,28 @@ whether an SSO integration is needed. It was not invented.
 
 ## Roles
 
-`ADMIN > EDITOR > VIEWER`, ranked so a higher role satisfies a lower requirement.
-Deliberately coarse: the real permission matrix (who may publish, who may approve
-AI-generated copy, who may edit equivalences) is a functional decision still pending.
-Starting coarse and splitting later is cheaper than inventing permissions nobody asked for.
+Authorization is capability-based and business roles are not ranked. The current roles are
+`ADMINISTRADOR`, `COMPRAS` and `VENTAS`; each receives an explicit set of menu and action
+capabilities. `ADMIN`, `EDITOR` and `VIEWER` remain temporary aliases for local configuration
+and existing development tokens.
 
-Every protected HTTP route declares a minimum role; authentication alone is not enough:
+Every protected HTTP route declares capabilities; authentication alone is not enough:
 
-| Minimum role | Current operations                                                                  |
-| ------------ | ----------------------------------------------------------------------------------- |
-| `VIEWER`     | Read the current actor, products, semantic-search results and workspace projections |
-| `EDITOR`     | Create products, index/re-index products and enqueue product embedding work         |
-| `ADMIN`      | Run the worker skeleton/operations probe                                            |
+| Role            | Representative grants                                                          |
+| --------------- | ------------------------------------------------------------------------------ |
+| `VENTAS`        | Read catalog/applications/equivalences and execute publication workflows       |
+| `COMPRAS`       | Edit catalog attributes, applications/equivalences and execute imports/AI      |
+| `ADMINISTRADOR` | All capabilities, including audit, integrations, administration and operations |
+
+Routes should declare `@RequireCapabilities(...)`. `@RequireRole(...)` is retained only as a
+compatibility bridge and must not be used by new endpoints. Login and `/auth/me` return the
+server-derived capability list so the web client can hide menus and actions; the API remains
+the authoritative enforcement point.
 
 The metadata is enforced centrally by `RolesGuard`, including class-level defaults with
 method-level overrides. `@Public()` takes precedence so login and health remain reachable
-without an actor; an architecture regression test fixes both the public-route allowlist and
-the role assigned to every current controller operation. A protected route with no role
-metadata is rejected rather than silently authorized.
+without an actor. A protected route with neither capability nor legacy role metadata is
+rejected rather than silently authorized.
 
 ## Secrets
 

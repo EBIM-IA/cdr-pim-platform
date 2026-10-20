@@ -1,4 +1,5 @@
-import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
+import type { WorkspaceDto } from '@cdr/contracts';
+import { ForbiddenError } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
@@ -25,13 +26,22 @@ const projection: WorkspaceDto = {
 
 describe('GetWorkspaceUseCase', () => {
   it('delegates the requested slug and authenticated actor to the read model', async () => {
-    const read =
-      vi.fn<(slug: WorkspaceSlug, currentActor: AuthenticatedActor) => Promise<WorkspaceDto>>();
+    const read = vi.fn<WorkspaceReadModelPort['read']>();
     read.mockResolvedValue(projection);
     const port: WorkspaceReadModelPort = { read };
     const useCase = new GetWorkspaceUseCase(port);
 
-    await expect(useCase.execute('reports', actor)).resolves.toEqual(projection);
-    expect(read).toHaveBeenCalledWith('reports', actor);
+    await expect(
+      useCase.execute('reports', actor, { report: 'attribute_changes' }),
+    ).resolves.toEqual(projection);
+    expect(read).toHaveBeenCalledWith('reports', actor, { report: 'attribute_changes' });
+  });
+
+  it('rejects a direct workspace request when the actor lacks its menu capability', async () => {
+    const read = vi.fn<WorkspaceReadModelPort['read']>();
+    const useCase = new GetWorkspaceUseCase({ read });
+
+    expect(() => useCase.execute('imports', actor)).toThrow(ForbiddenError);
+    expect(read).not.toHaveBeenCalled();
   });
 });

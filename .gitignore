@@ -6,8 +6,15 @@ node_modules/
 dist/
 build/
 .next/
+.next-dev/
+.next-build/
+apps/web/next-env.d.ts
 out/
 *.tsbuildinfo
+
+# Python tooling used only to regenerate source manifests
+__pycache__/
+*.py[cod]
 
 # Turbo
 .turbo/

@@ -9,8 +9,8 @@ export interface DocumentExtractionRequest {
   readonly fileName: string;
   readonly mimeType: string;
   readonly content: Uint8Array;
-  /** Attribute keys the caller is interested in; the adapter may return fewer. */
-  readonly expectedAttributes?: readonly string[];
+  /** Non-empty server-authorized attribute keys; the adapter may return fewer. */
+  readonly expectedAttributes: readonly string[];
 }
 
 export interface ExtractedAttribute {
@@ -23,6 +23,8 @@ export interface ExtractedAttribute {
 export interface DocumentExtractionResult {
   readonly model: string;
   readonly attributes: ExtractedAttribute[];
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
   readonly rawText?: string;
 }
 

@@ -2,7 +2,7 @@ import { Reflector } from '@nestjs/core';
 import { ForbiddenError } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type AuthenticatedActor, Role } from '../../domain/entities/role';
+import { type AuthenticatedActor, Capability, Role } from '../../domain/entities/role';
 import { RolesGuard } from './roles.guard';
 
 function contextWith(actor?: AuthenticatedActor) {
@@ -13,11 +13,18 @@ function contextWith(actor?: AuthenticatedActor) {
   } as never;
 }
 
-function guardRequiring(role: Role | undefined, isPublic = false): RolesGuard {
+function guardRequiring(
+  role: Role | undefined,
+  isPublic = false,
+  capabilities?: readonly Capability[],
+): RolesGuard {
   const reflector = new Reflector();
   const lookup = vi.spyOn(reflector, 'getAllAndOverride');
   lookup.mockReturnValueOnce(isPublic);
-  if (!isPublic) lookup.mockReturnValueOnce(role);
+  if (!isPublic) {
+    lookup.mockReturnValueOnce(capabilities);
+    lookup.mockReturnValueOnce(role);
+  }
   return new RolesGuard(reflector);
 }
 
@@ -38,6 +45,19 @@ describe('RolesGuard', () => {
 
   it('allows an actor whose role outranks the requirement', () => {
     expect(guardRequiring(Role.Viewer).canActivate(contextWith(editor))).toBe(true);
+  });
+
+  it('enforces capabilities without treating roles as a hierarchy', () => {
+    expect(
+      guardRequiring(undefined, false, [Capability.CatalogWrite]).canActivate(
+        contextWith({ ...editor, roles: [Role.Purchasing] }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guardRequiring(undefined, false, [Capability.AuditRead]).canActivate(
+        contextWith({ ...editor, roles: [Role.Purchasing] }),
+      ),
+    ).toThrow(ForbiddenError);
   });
 
   it('rejects an actor whose role is insufficient', () => {

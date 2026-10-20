@@ -10,7 +10,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DependencyUnavailableError, NotFoundError } from '@cdr/shared';
 
-import type { ObjectStoragePort, PutObjectCommand, StoredObject } from './object-storage.port';
+import {
+  assertSafeObjectKey,
+  type ObjectStoragePort,
+  type PutObjectCommand,
+  type StoredObject,
+} from './object-storage.port';
 
 export interface S3StorageOptions {
   readonly bucket: string;
@@ -40,6 +45,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   async put(command: PutObjectCommand): Promise<StoredObject> {
+    assertSafeObjectKey(command.key);
     const checksum = createHash('sha256').update(command.content).digest('base64');
     try {
       const response = await this.client.send(
@@ -68,6 +74,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   async get(key: string): Promise<Uint8Array> {
+    assertSafeObjectKey(key);
     try {
       const response = await this.client.send(
         new GetObjectCommand({ Bucket: this.options.bucket, Key: key }),
@@ -81,6 +88,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   async delete(key: string): Promise<void> {
+    assertSafeObjectKey(key);
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.options.bucket, Key: key }));
     } catch (error) {
@@ -89,6 +97,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   async exists(key: string): Promise<boolean> {
+    assertSafeObjectKey(key);
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.options.bucket, Key: key }));
       return true;
@@ -99,6 +108,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   presignGet(key: string, ttlSeconds: number): Promise<string> {
+    assertSafeObjectKey(key);
     return getSignedUrl(
       this.client,
       new GetObjectCommand({ Bucket: this.options.bucket, Key: key }),
@@ -107,6 +117,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
   }
 
   presignPut(key: string, ttlSeconds: number, mimeType: string): Promise<string> {
+    assertSafeObjectKey(key);
     return getSignedUrl(
       this.client,
       new S3PutObjectCommand({

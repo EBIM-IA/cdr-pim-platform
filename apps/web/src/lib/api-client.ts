@@ -1,20 +1,39 @@
 import {
   API_PREFIX,
   type ApiError,
+  type CatalogGridQuery,
+  type CatalogGridResultDto,
+  type CatalogGridSchemaDto,
+  type CatalogWorkbookQuery,
+  type CatalogWorkbookResultDto,
+  type CatalogCategorySummaryDto,
   type LivenessResponse,
   type ProductDto,
   type ProductListDto,
   type ProductStatus,
   type ReadinessResponse,
   type SemanticSearchResponse,
+  type ProductAttributeSheetDto,
+  type UpdateProductAttributeInput,
+  type UpdateProductAttributesBatchInput,
+  type UpdatedProductAttributeDto,
+  type UpdatedProductAttributesBatchDto,
   type WorkspaceDto,
+  type WorkspaceQuery,
   type WorkspaceSlug,
   apiErrorSchema,
+  catalogCategoryListSchema,
+  catalogGridResultSchema,
+  catalogGridSchemaSchema,
+  catalogWorkbookResultSchema,
   livenessResponseSchema,
   productListSchema,
+  productAttributeSheetSchema,
   productSchema,
   readinessResponseSchema,
   semanticSearchResponseSchema,
+  updatedProductAttributeSchema,
+  updatedProductAttributesBatchSchema,
   workspaceSchema,
 } from '@cdr/contracts';
 import type { ZodTypeAny, z } from 'zod';
@@ -82,6 +101,87 @@ export class ApiClient {
     return this.get(`/products/${encodeURIComponent(id)}`, productSchema);
   }
 
+  listCatalogCategories(): Promise<CatalogCategorySummaryDto[]> {
+    return this.get('/catalog/categories', catalogCategoryListSchema);
+  }
+
+  getCatalogGridSchema(
+    categoryId: string,
+    selector: { readonly templateId?: string; readonly variantKey?: string },
+  ): Promise<CatalogGridSchemaDto> {
+    const query = new URLSearchParams({ categoryId });
+    if (selector.templateId) query.set('templateId', selector.templateId);
+    if (selector.variantKey) query.set('variantKey', selector.variantKey);
+    return this.get(`/catalog/schema?${query.toString()}`, catalogGridSchemaSchema);
+  }
+
+  listCatalogGrid(query: CatalogGridQuery): Promise<CatalogGridResultDto> {
+    const params = new URLSearchParams({
+      categoryId: query.categoryId,
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    });
+    if (query.templateId) params.set('templateId', query.templateId);
+    if (query.variantKey) params.set('variantKey', query.variantKey);
+    if (query.q) params.set('q', query.q);
+    for (const filter of query.filter) params.append('filter', filter);
+    return this.get(`/catalog/grid?${params.toString()}`, catalogGridResultSchema);
+  }
+
+  listCatalogWorkbook(query: CatalogWorkbookQuery): Promise<CatalogWorkbookResultDto> {
+    const params = new URLSearchParams({
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+    });
+    if (query.categoryId) params.set('categoryId', query.categoryId);
+    if (query.q) params.set('q', query.q);
+    if (query.brand) params.set('brand', query.brand);
+    if (query.status) params.set('status', query.status);
+    if (query.applicationType) params.set('applicationType', query.applicationType);
+    if (query.completeness) params.set('completeness', query.completeness);
+    for (const filter of query.filter) params.append('filter', filter);
+    for (const filter of query.columnFilter ?? []) params.append('columnFilter', filter);
+    if (query.sort) params.set('sort', query.sort);
+    return this.get(`/catalog/workbook?${params.toString()}`, catalogWorkbookResultSchema);
+  }
+
+  getProductAttributeSheet(productId: string): Promise<ProductAttributeSheetDto> {
+    return this.get(
+      `/catalog/products/${encodeURIComponent(productId)}`,
+      productAttributeSheetSchema,
+    );
+  }
+
+  getProductTechnicalSheet(productId: string): Promise<ProductAttributeSheetDto> {
+    return this.get(
+      `/catalog/products/${encodeURIComponent(productId)}/technical-sheet`,
+      productAttributeSheetSchema,
+    );
+  }
+
+  updateProductAttribute(
+    productId: string,
+    attributeKey: string,
+    input: UpdateProductAttributeInput,
+  ): Promise<UpdatedProductAttributeDto> {
+    return this.request(
+      `/catalog/products/${encodeURIComponent(productId)}/attributes/${encodeURIComponent(attributeKey)}`,
+      updatedProductAttributeSchema,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
+  updateProductAttributes(
+    productId: string,
+    input: UpdateProductAttributesBatchInput,
+  ): Promise<UpdatedProductAttributesBatchDto> {
+    return this.request(
+      `/catalog/products/${encodeURIComponent(productId)}/attributes`,
+      updatedProductAttributesBatchSchema,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    );
+  }
+
   semanticSearch(query: string, limit = 10): Promise<SemanticSearchResponse> {
     return this.get(
       `/search/semantic?q=${encodeURIComponent(query)}&limit=${limit}`,
@@ -89,8 +189,11 @@ export class ApiClient {
     );
   }
 
-  getWorkspace(slug: WorkspaceSlug): Promise<WorkspaceDto> {
-    return this.get(`/workspaces/${encodeURIComponent(slug)}`, workspaceSchema);
+  getWorkspace(slug: WorkspaceSlug, query: WorkspaceQuery = {}): Promise<WorkspaceDto> {
+    const params = new URLSearchParams();
+    if (query.report) params.set('report', query.report);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return this.get(`/workspaces/${encodeURIComponent(slug)}${suffix}`, workspaceSchema);
   }
 
   private async get<T extends ZodTypeAny>(
@@ -98,12 +201,23 @@ export class ApiClient {
     schema: T,
     acceptedStatuses: number[] = [200],
   ): Promise<z.infer<T>> {
+    return this.request(path, schema, { method: 'GET' }, acceptedStatuses);
+  }
+
+  private async request<T extends ZodTypeAny>(
+    path: string,
+    schema: T,
+    init: Pick<RequestInit, 'method' | 'body'>,
+    acceptedStatuses: number[] = [200],
+  ): Promise<z.infer<T>> {
     const correlationId = this.options.correlationId ?? crypto.randomUUID();
 
     const response = await fetch(`${this.options.baseUrl}${API_PREFIX}${path}`, {
+      ...init,
       headers: {
         accept: 'application/json',
         'x-correlation-id': correlationId,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(this.options.accessToken
           ? { authorization: `Bearer ${this.options.accessToken}` }
           : {}),

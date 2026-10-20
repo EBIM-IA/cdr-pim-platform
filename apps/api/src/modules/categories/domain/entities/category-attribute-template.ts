@@ -9,7 +9,8 @@ import type { Uuid } from '@cdr/shared';
  * either side, because the *same* attribute (e.g. "diámetro interior") is required for
  * bearings and irrelevant for lubricants.
  *
- * NOT PERSISTED YET — see `Category`.
+ * Legacy shape kept for compatibility. The persisted, versioned assignment — including
+ * replication and role access — lives in `catalog-schema`.
  */
 export interface CategoryAttributeTemplate {
   readonly categoryId: Uuid;

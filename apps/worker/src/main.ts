@@ -41,7 +41,7 @@ async function bootstrap(): Promise<void> {
   });
 
   const healthServer = startHealthServer(
-    env.PORT,
+    env.WORKER_PORT,
     {
       service: env.SERVICE_NAME,
       version: env.APP_VERSION,

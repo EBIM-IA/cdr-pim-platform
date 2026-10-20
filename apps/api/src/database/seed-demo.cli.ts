@@ -25,6 +25,7 @@ async function main(): Promise<void> {
         `identifiers +${result.identifiersInserted}`,
         `groups +${result.groupsInserted}`,
         `memberships +${result.membershipsInserted}`,
+        `embeddings +${result.embeddingsIndexed}`,
       ].join(' '),
     );
   } finally {

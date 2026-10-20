@@ -163,7 +163,7 @@ describe('AppModule bootstrap', () => {
     });
   });
 
-  it('returns 403 when an authenticated VIEWER attempts an EDITOR mutation', async () => {
+  it('returns 403 when an actor lacks the catalog write capability', async () => {
     const tokens = app.get<TokenServicePort>(TOKEN_SERVICE);
     const { accessToken } = await tokens.issue({
       id: 'bootstrap-viewer',
@@ -179,8 +179,8 @@ describe('AppModule bootstrap', () => {
 
     expect(response.body.error).toMatchObject({
       code: 'FORBIDDEN',
-      message: 'Insufficient role',
-      details: { required: 'EDITOR' },
+      message: 'Insufficient capability',
+      details: { required: ['catalog:write'] },
     });
   });
 

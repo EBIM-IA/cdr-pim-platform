@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AI_UPSTREAM_TIMEOUT_MS,
+  IMPORT_UPSTREAM_TIMEOUT_MS,
+  UPSTREAM_TIMEOUT_MS,
   applyBrowserSecurityHeaders,
   contentSecurityPolicy,
   securePrivateResponse,
@@ -69,5 +72,11 @@ describe('HTTP security helpers', () => {
     expect(signal.aborted).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(signal.aborted).toBe(true);
+  });
+
+  it('keeps the longer import timeout scoped away from the global default', () => {
+    expect(IMPORT_UPSTREAM_TIMEOUT_MS).toBe(60_000);
+    expect(AI_UPSTREAM_TIMEOUT_MS).toBe(45_000);
+    expect(UPSTREAM_TIMEOUT_MS).toBe(10_000);
   });
 });

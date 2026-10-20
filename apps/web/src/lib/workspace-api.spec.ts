@@ -38,6 +38,23 @@ describe('workspace BFF client', () => {
     );
   });
 
+  it('forwards the selected report projection', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(workspaceBody('reports')), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchWorkspace('reports', undefined, { report: 'period_results' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/reports?report=period_results',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+
   it('rejects a valid workspace belonging to a different route', async () => {
     vi.stubGlobal(
       'fetch',

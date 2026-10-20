@@ -1,4 +1,8 @@
+'use client';
+
 import { ChevronDown, CircleHelp } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 export function ScreenGuide({
   objective,
@@ -13,13 +17,38 @@ export function ScreenGuide({
   dataSource: string;
   limitation?: string;
 }) {
+  const pathname = usePathname();
+  const storageKey = `cdr:screen-guide:${pathname}`;
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored !== null) setOpen(stored === 'open');
+    } catch {
+      // Storage may be disabled; the guide remains available for the current render.
+    }
+  }, [storageKey]);
+
   return (
-    <details className="group -mt-2 mb-5 rounded-xl border border-orange-200 bg-orange-50/70 text-sm text-slate-700">
-      <summary className="flex cursor-pointer list-none items-start gap-3 rounded-xl px-4 py-3 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-        <CircleHelp aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+    <details
+      open={open}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        setOpen(nextOpen);
+        try {
+          window.localStorage.setItem(storageKey, nextOpen ? 'open' : 'closed');
+        } catch {
+          // Persisting this optional UI preference must never block the screen.
+        }
+      }}
+      className="group mb-4 rounded-lg border border-[#ffd1af] bg-[#fff8f2] text-xs text-slate-700"
+    >
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 rounded-lg px-3 py-2 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <CircleHelp aria-hidden="true" className="size-4 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 sm:flex sm:gap-2">
           <strong className="block shrink-0 text-cdr-ink">¿Qué es esta pantalla?</strong>
-          <span className="mt-0.5 block leading-relaxed text-muted-foreground sm:mt-0">
+          <span className="mt-0.5 hidden truncate leading-relaxed text-[#69727b] sm:mt-0 sm:block">
             {objective}
           </span>
         </span>
@@ -33,7 +62,8 @@ export function ScreenGuide({
         </span>
       </summary>
 
-      <div className="grid gap-5 border-t border-orange-200 px-4 pb-4 pt-4 sm:px-11 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-8">
+      <div className="grid gap-5 border-t border-[#ffe3cf] px-4 pb-4 pt-3 sm:px-10 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-8">
+        <p className="leading-relaxed text-[#69727b] sm:hidden">{objective}</p>
         <section aria-labelledby="screen-guide-actions">
           <h2
             id="screen-guide-actions"

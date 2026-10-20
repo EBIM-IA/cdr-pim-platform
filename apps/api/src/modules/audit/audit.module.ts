@@ -1,7 +1,11 @@
 import { Global, Module } from '@nestjs/common';
 
+import { ExportAuditChangesUseCase } from './application/export-audit-changes.use-case';
+import { ListAuditChangesUseCase } from './application/list-audit-changes.use-case';
+import { AUDIT_READ_PORT } from './domain/ports/audit-read.port';
 import { AUDIT_PORT } from './domain/ports/audit.port';
 import { PostgresAuditAdapter } from './infrastructure/persistence/postgres-audit.adapter';
+import { AuditController } from './presentation/audit.controller';
 
 /**
  * Global because auditing is a cross-cutting concern that any bounded context may need,
@@ -9,7 +13,14 @@ import { PostgresAuditAdapter } from './infrastructure/persistence/postgres-audi
  */
 @Global()
 @Module({
-  providers: [{ provide: AUDIT_PORT, useClass: PostgresAuditAdapter }],
-  exports: [AUDIT_PORT],
+  controllers: [AuditController],
+  providers: [
+    PostgresAuditAdapter,
+    { provide: AUDIT_PORT, useExisting: PostgresAuditAdapter },
+    { provide: AUDIT_READ_PORT, useExisting: PostgresAuditAdapter },
+    ListAuditChangesUseCase,
+    ExportAuditChangesUseCase,
+  ],
+  exports: [AUDIT_PORT, AUDIT_READ_PORT],
 })
 export class AuditModule {}

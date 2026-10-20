@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { workspaceSchema, workspaceSlugSchema } from './workspace';
+import {
+  reportFormatSchema,
+  workspaceQuerySchema,
+  workspaceSchema,
+  workspaceSlugSchema,
+} from './workspace';
 
 describe('workspace contract', () => {
   it('keeps the eleven web workspaces in one validated list', () => {
@@ -36,6 +41,19 @@ describe('workspace contract', () => {
 
     expect(parsed.slug).toBe('reports');
     expect(parsed.rows[0]?.values.products).toBe(3);
+  });
+
+  it('validates the four supported report projections', () => {
+    expect(reportFormatSchema.options).toEqual([
+      'summary',
+      'attribute_changes',
+      'general_results',
+      'period_results',
+    ]);
+    expect(workspaceQuerySchema.parse({ report: 'general_results' })).toEqual({
+      report: 'general_results',
+    });
+    expect(workspaceQuerySchema.safeParse({ report: 'invented' }).success).toBe(false);
   });
 
   it('requires a reason for blocked actions and an API endpoint for supported ones', () => {

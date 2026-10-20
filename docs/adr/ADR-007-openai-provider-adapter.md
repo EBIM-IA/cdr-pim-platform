@@ -29,17 +29,18 @@ not the others.
 
 - `import OpenAI` appears **only** in `apps/api/src/modules/ai/infrastructure/openai/`.
   The architecture test fails the build if it appears anywhere else.
-- **No model name is ever hardcoded.** `AI_PROVIDER`, `AI_GENERATION_MODEL`,
-  `AI_EMBEDDING_MODEL` and `AI_EMBEDDING_DIMENSIONS` are configuration.
+- **No model name is ever hardcoded.** Provider opt-ins are separate for embeddings,
+  generation and document extraction; model names and embedding dimensions are configuration.
 - Adapters translate vendor exceptions into `DependencyUnavailableError`, so an
   `APIConnectionError` never reaches a use case.
 - Every port has a **deterministic fake**. `FakeEmbeddingAdapter` is not a stub returning
   zeroes: it hashes token trigrams into a normalised bag-of-features, so semantically
   overlapping strings really are closer under cosine similarity. That is enough to exercise
   the entire pgvector pipeline in tests without a network call.
-- `AI_PROVIDER` defaults to `fake`, so a new developer and CI both get a working system with
-  no key and no cost. The configuration schema requires `OPENAI_API_KEY` only when
-  `AI_PROVIDER=openai`.
+- Every capability defaults to `fake`, so a new developer and CI both get a working system with
+  no key and no cost. The deprecated `AI_PROVIDER` alias affects embeddings only; generation and
+  private-document extraction require their own explicit provider opt-in. The configuration
+  schema requires `OPENAI_API_KEY` when any capability selects OpenAI.
 
 ## Alternatives considered
 

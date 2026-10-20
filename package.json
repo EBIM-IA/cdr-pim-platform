@@ -9,6 +9,8 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
+    "preinstall": "node scripts/verify-node-version.mjs",
+    "check:runtime": "node scripts/verify-node-version.mjs",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",

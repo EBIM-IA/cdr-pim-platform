@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { moduleDefinitions, moduleSlugs, type ModuleCapability } from '@/lib/module-definitions';
+import {
+  moduleDefinitions,
+  moduleMenuCapabilities,
+  moduleSlugs,
+  type ModuleCapability,
+} from '@/lib/module-definitions';
 
 const capabilityStatuses: ReadonlySet<ModuleCapability['status']> = new Set([
   'available',
@@ -15,6 +20,11 @@ describe('definiciones de módulos', () => {
   it('mantiene slugs únicos y una definición para cada uno', () => {
     expect(new Set(moduleSlugs).size).toBe(moduleSlugs.length);
     expect(Object.keys(moduleDefinitions).sort()).toEqual([...moduleSlugs].sort());
+  });
+
+  it('declara una capacidad de acceso directo para cada módulo', () => {
+    expect(Object.keys(moduleMenuCapabilities).sort()).toEqual([...moduleSlugs].sort());
+    expect(new Set(Object.values(moduleMenuCapabilities)).size).toBe(moduleSlugs.length);
   });
 
   it.each(moduleSlugs)('mantiene coherente el slug de %s', (slug) => {
@@ -50,9 +60,9 @@ describe('definiciones de módulos', () => {
     ).toBe(true);
   });
 
-  it('distingue reglas confirmadas de capacidades implementadas', () => {
+  it('distingue capacidades implementadas de reglas todavía confirmadas', () => {
     expect(moduleDefinitions.templates.capabilities).toContainEqual(
-      expect.objectContaining({ title: 'Replicables', status: 'confirmed' }),
+      expect.objectContaining({ title: 'Replicables', status: 'available' }),
     );
     expect(moduleDefinitions.applications.capabilities).toContainEqual(
       expect.objectContaining({ title: 'Alcance por código unificador', status: 'confirmed' }),
@@ -61,15 +71,13 @@ describe('definiciones de módulos', () => {
       expect.objectContaining({ title: 'Elegibilidad de homólogos', status: 'confirmed' }),
     );
     expect(moduleDefinitions.publication.capabilities).toContainEqual(
-      expect.objectContaining({ title: 'Publicabilidad por SKU', status: 'confirmed' }),
+      expect.objectContaining({ title: 'Publicabilidad por SKU', status: 'available' }),
     );
   });
 
-  it('identifica la proyección autenticada como fuente de cada módulo', () => {
+  it('identifica una fuente autenticada para cada módulo', () => {
     expect(
-      moduleSlugs.every((slug) =>
-        moduleDefinitions[slug].dataSource.includes('proyección autenticada'),
-      ),
+      moduleSlugs.every((slug) => /autenticad/iu.test(moduleDefinitions[slug].dataSource)),
     ).toBe(true);
   });
 });

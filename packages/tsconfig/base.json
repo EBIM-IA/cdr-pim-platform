@@ -25,5 +25,5 @@
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "exclude": ["node_modules", "dist", ".next", ".turbo", "coverage"]
+  "exclude": ["node_modules", "dist", ".next", ".next-dev", ".next-build", ".turbo", "coverage"]
 }

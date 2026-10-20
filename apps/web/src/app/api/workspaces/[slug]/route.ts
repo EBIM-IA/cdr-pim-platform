@@ -1,4 +1,4 @@
-import { workspaceSlugSchema } from '@cdr/contracts';
+import { workspaceQuerySchema, workspaceSlugSchema } from '@cdr/contracts';
 import { NextResponse } from 'next/server';
 
 import { ApiClientError, createServerApiClient } from '@/lib/api-client';
@@ -7,11 +7,22 @@ import { getAccessToken } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: Request, context: { params: Promise<{ slug: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   const parsedSlug = workspaceSlugSchema.safeParse((await context.params).slug);
   if (!parsedSlug.success) {
     return securePrivateResponse(
       NextResponse.json({ message: 'El módulo solicitado no es válido.' }, { status: 400 }),
+    );
+  }
+  const parsedQuery = workspaceQuerySchema.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams.entries()),
+  );
+  if (!parsedQuery.success) {
+    return securePrivateResponse(
+      NextResponse.json(
+        { message: 'El formato de reporte solicitado no es válido.' },
+        { status: 400 },
+      ),
     );
   }
 
@@ -23,7 +34,10 @@ export async function GET(_request: Request, context: { params: Promise<{ slug: 
   }
 
   try {
-    const workspace = await createServerApiClient({ accessToken }).getWorkspace(parsedSlug.data);
+    const workspace = await createServerApiClient({ accessToken }).getWorkspace(
+      parsedSlug.data,
+      parsedQuery.data,
+    );
     return securePrivateResponse(NextResponse.json(workspace));
   } catch (error) {
     if (error instanceof ApiClientError) {

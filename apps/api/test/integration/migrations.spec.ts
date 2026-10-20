@@ -42,7 +42,7 @@ describe('migration runner', () => {
 
     try {
       const result = await runMigrations(target);
-      expect(result.applied.length).toBeGreaterThanOrEqual(5);
+      expect(result.applied.length).toBeGreaterThanOrEqual(9);
       expect(result.skipped).toEqual([]);
 
       const tables = await target<{ table_name: string }[]>`
@@ -50,13 +50,30 @@ describe('migration runner', () => {
         WHERE table_schema = 'public' ORDER BY table_name
       `;
       expect(tables.map((row) => row.table_name)).toEqual([
+        'attribute_definitions',
+        'attribute_templates',
+        'audit_change_items',
         'audit_entries',
+        'catalog_categories',
+        'catalog_product_readiness',
         'cdr_schema_migrations',
+        'code_affixes',
         'equivalence_group_members',
         'equivalence_groups',
+        'external_homologs',
+        'group_applications',
+        'group_oem_codes',
+        'import_batches',
+        'import_rows',
+        'product_assets',
+        'product_attribute_values',
         'product_embeddings',
         'product_identifiers',
+        'product_template_assignments',
         'products',
+        'template_asset_requirements',
+        'template_attribute_assignments',
+        'template_attribute_role_access',
       ]);
 
       const auditId = randomUUID();
@@ -75,7 +92,7 @@ describe('migration runner', () => {
       await expect(target`DELETE FROM audit_entries WHERE id = ${auditId}`).rejects.toThrow(
         /append-only/,
       );
-      await expect(target`TRUNCATE TABLE audit_entries`).rejects.toThrow(/append-only/);
+      await expect(target`TRUNCATE TABLE audit_entries CASCADE`).rejects.toThrow(/append-only/);
 
       // Re-running is a no-op: the deployment pipeline runs this on every release.
       const second = await runMigrations(target);

@@ -16,6 +16,21 @@ export type ModuleSlug = (typeof moduleSlugs)[number];
 export type ModuleKind = 'catalog-insight' | 'workspace';
 export type CapabilityStatus = 'available' | 'confirmed' | 'next' | 'blocked';
 
+/** Capability required to open a module directly, not only to render its menu item. */
+export const moduleMenuCapabilities: Readonly<Record<ModuleSlug, AuthCapability>> = {
+  categories: 'menu:categories:view',
+  templates: 'menu:templates:view',
+  applications: 'menu:applications:view',
+  equivalences: 'menu:equivalences:view',
+  documents: 'menu:documents:view',
+  imports: 'menu:imports:view',
+  quality: 'menu:ai-quality:view',
+  publication: 'menu:publication:view',
+  integrations: 'menu:integrations:view',
+  reports: 'menu:reports:view',
+  administration: 'menu:administration:view',
+};
+
 export interface ModuleCapability {
   title: string;
   description: string;
@@ -47,25 +62,25 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'categories',
     label: 'Categorías',
     eyebrow: 'Estructura del catálogo',
-    description: 'Consulta la distribución de marcas y estados disponible en el catálogo actual.',
+    description: 'Administra la taxonomía persistida que organiza las plantillas del catálogo.',
     objective:
-      'Presenta la clasificación que el backend puede respaldar hoy sin inferir una taxonomía aún no aprobada.',
+      'Permite ordenar, renombrar, activar y desactivar categorías sin eliminar su historial.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de categorías.',
+      'Las categorías y sus cambios provienen de la API administrativa autenticada del catálogo.',
     limitation:
-      'La taxonomía comercial jerárquica todavía no está aprobada; la pantalla muestra agregados por marca y estado, no categorías inferidas.',
+      'La creación de categorías y el cambio de jerarquía requieren un contrato administrativo adicional.',
     kind: 'workspace',
     capabilities: [
       {
-        title: 'Catálogo base',
-        description: 'Productos y marcas disponibles mediante el contrato compartido.',
+        title: 'Taxonomía persistida',
+        description: 'Categorías jerárquicas con orden, vigencia y plantilla asociada.',
         status: 'available',
       },
       {
-        title: 'Taxonomía',
-        description: 'Categorías, jerarquías y asignaciones versionadas.',
-        status: 'blocked',
+        title: 'Desactivación segura',
+        description: 'Retiro lógico con concurrencia optimista y auditoría inmutable.',
+        status: 'available',
       },
       {
         title: 'Cobertura',
@@ -73,27 +88,26 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
         status: 'next',
       },
     ],
-    dependencies: ['Taxonomía aprobada', 'Contrato y persistencia de categorías'],
+    dependencies: ['Contrato futuro de alta y reorganización jerárquica'],
   },
   templates: {
     slug: 'templates',
     label: 'Plantillas',
     eyebrow: 'Gobierno de atributos',
-    description:
-      'Consulta el estado de la persistencia y las dependencias requeridas para gobernar plantillas.',
+    description: 'Gobierna atributos, reglas de presentación y acceso por rol para cada plantilla.',
     objective:
-      'Presenta el estado operativo de plantillas y explicita qué capacidades de gobierno todavía están bloqueadas.',
+      'Configura atributos activos, obligatoriedad, replicación, búsqueda y permisos por rol.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de plantillas.',
+      'Las versiones, asignaciones y matrices de acceso provienen de la API administrativa autenticada del catálogo.',
     limitation:
-      'La edición y aprobación se habilitarán después de definir permisos, versionado y compatibilidad de plantillas.',
+      'La creación, clonación y publicación de nuevas versiones todavía no tienen endpoints aprobados.',
     kind: 'workspace',
     capabilities: [
       {
         title: 'Definiciones tipadas',
         description: 'Atributos, unidades, obligatoriedad y prioridad de fuentes por plantilla.',
-        status: 'blocked',
+        status: 'available',
       },
       {
         title: 'Versionado y publicación',
@@ -103,29 +117,24 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       {
         title: 'Replicables',
         description:
-          'Indicador sí/no por atributo de la plantilla; la propagación espera reglas de fuente y compatibilidad.',
-        status: 'confirmed',
+          'Indicador por atributo; los valores PIM replicables se propagan y auditan dentro del código unificador.',
+        status: 'available',
       },
     ],
-    dependencies: [
-      'API de plantillas y definiciones',
-      'Matriz de permisos y aprobación',
-      'Fuente, compatibilidad, conflictos y lista inicial de exclusión',
-    ],
+    dependencies: ['Contrato futuro para crear y publicar versiones'],
   },
   applications: {
     slug: 'applications',
     label: 'Aplicaciones',
     eyebrow: 'Compatibilidad',
-    description:
-      'Espacio preparado para las relaciones de aplicación compartidas por código unificador.',
+    description: 'Gestiona compatibilidades compartidas por todos los SKU del código unificador.',
     objective:
-      'Presenta el estado real de la persistencia de aplicaciones y los grupos unificadores disponibles en el backend.',
+      'Permite consultar, crear, editar, desactivar y reactivar aplicaciones heredadas por grupo.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de aplicaciones.',
+      'Las relaciones se consultan y modifican mediante la API autenticada de aplicaciones.',
     limitation:
-      'No se muestran compatibilidades inventadas. El backend grupal se implementará mediante el código unificador.',
+      'La carga masiva aplica solo las filas válidas al confirmarse; las rechazadas permanecen trazables en el resultado del lote.',
     kind: 'workspace',
     capabilities: [
       {
@@ -136,29 +145,28 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       {
         title: 'Consulta y edición',
         description: 'Búsqueda por SKU, CRUD manual y carga masiva de compatibilidades.',
-        status: 'next',
+        status: 'available',
       },
       {
         title: 'Herencia efectiva',
         description: 'Resolución de aplicaciones comunes para todos los SKU del grupo.',
-        status: 'blocked',
+        status: 'available',
       },
     ],
-    dependencies: ['Contrato de aplicaciones', 'API del código unificador', 'Reglas de auditoría'],
+    dependencies: ['Definición definitiva de catálogos de marca, modelo y fuente'],
   },
   equivalences: {
     slug: 'equivalences',
-    label: 'Equivalencias',
+    label: 'Código Unificador y Homólogos',
     eyebrow: 'Relaciones de producto',
     description:
-      'Explica el modelo disponible de grupos internos y el alcance previsto de sus homólogos.',
-    objective:
-      'Presenta las relaciones respaldadas por el backend y distingue los SKU comercializados de los homólogos externos.',
+      'Gestiona homólogos externos y resuelve referencias elegibles hacia SKU vendibles.',
+    objective: 'Permite mantener código, marca, vigencia y aprobación sin crear SKU artificiales.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de equivalencias.',
+      'Los homólogos y la búsqueda elegible provienen de la API autenticada de equivalencias.',
     limitation:
-      'Solo los homólogos simultáneamente activos y aprobados serán elegibles cuando se habilite la búsqueda ampliada.',
+      'Solo las relaciones simultáneamente activas y aprobadas participan en la búsqueda ampliada.',
     kind: 'workspace',
     capabilities: [
       {
@@ -170,7 +178,7 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
         title: 'Gestión de homólogos',
         description:
           'Alta manual o masiva con código unificador, código externo y marca del homólogo.',
-        status: 'next',
+        status: 'available',
       },
       {
         title: 'Elegibilidad de homólogos',
@@ -180,89 +188,86 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       {
         title: 'Búsqueda por homólogos',
         description: 'Resolver un código externo elegible hacia los SKU comercializados del grupo.',
-        status: 'blocked',
+        status: 'available',
       },
     ],
-    dependencies: ['Contrato de equivalencias', 'Persistencia de homólogos', 'Estados y permisos'],
+    dependencies: ['Validación del catálogo definitivo de marcas de homólogos'],
   },
   documents: {
     slug: 'documents',
     label: 'Documentos',
     eyebrow: 'Activos digitales',
     description:
-      'Consulta el estado del almacenamiento y la persistencia previstos para los activos digitales.',
+      'Gestiona fotos, fichas y documentos privados asociados individualmente a cada SKU.',
     objective:
-      'Presenta el estado real del almacenamiento y de la persistencia de activos, junto con las dependencias pendientes para su gestión.',
+      'Permite consultar, cargar, descargar y reemplazar activos por SKU, además de validar o aplicar archivos ZIP masivos.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de documentos.',
+      'La API autenticada persiste metadatos y auditoría en PostgreSQL; los binarios usan memoria local o S3 según el entorno.',
     limitation:
-      'No se habilitan cargas hasta definir storage, análisis de seguridad, límites y versionado.',
+      'La memoria local de desarrollo no sobrevive a un reinicio; los ambientes alojados deben usar S3 y el control antimalware definido para operación.',
     kind: 'workspace',
     capabilities: [
       {
         title: 'Biblioteca por SKU',
         description: 'Fotos y documentos tipados con versión y procedencia.',
-        status: 'next',
+        status: 'available',
       },
       {
         title: 'Carga masiva',
-        description: 'ZIP por convención o manifiesto con vista previa.',
-        status: 'next',
+        description:
+          'ZIP por convención SKU__TIPO o manifiesto, con validación previa por archivo.',
+        status: 'available',
       },
       {
         title: 'Ficha técnica comercial',
-        description: 'Formato y selección de campos para la ficha descargable.',
-        status: 'blocked',
+        description: 'Vista previa con los atributos activos y exportables de la plantilla.',
+        status: 'available',
       },
     ],
-    dependencies: [
-      'Entidad y API de activos',
-      'Almacenamiento de objetos',
-      'Contrato común de cargas masivas',
-    ],
+    dependencies: ['Diseño comercial definitivo de la ficha PDF', 'Antimalware de producción'],
   },
   imports: {
     slug: 'imports',
     label: 'Importaciones',
     eyebrow: 'Ingreso de información',
-    description:
-      'Consulta la preparación técnica necesaria para habilitar cargas trazables y seguras.',
+    description: 'Valida y confirma lotes CSV, XLSX o JSON con resultado detallado por fila.',
     objective:
-      'Presenta el estado real de la cola, el almacenamiento temporal y la persistencia requerida para implementar lotes trazables.',
+      'Ofrece vista previa, idempotencia y confirmación auditable para atributos, aplicaciones y homólogos.',
     actions: workspaceReadActions,
     dataSource:
-      'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de importaciones.',
+      'Los lotes y sus filas se validan y persisten mediante la API autenticada de importaciones.',
     limitation:
-      'La escritura permanece deshabilitada hasta contar con idempotencia, auditoría, permisos y procesamiento asíncrono.',
+      'La confirmación es de ejecución única y parcial: cada fila válida se aplica atómicamente con su auditoría y cada rechazo queda visible.',
     kind: 'workspace',
     capabilities: [
       {
         title: 'Vista previa',
         description: 'Validación sin persistir y resultado por fila o archivo.',
-        status: 'next',
+        status: 'available',
       },
       {
         title: 'Historial de cargas',
         description: 'Actor, archivo, fecha, estado, resultado y errores por lote.',
-        status: 'next',
+        status: 'confirmed',
       },
       {
-        title: 'Ejecución asíncrona',
-        description: 'Idempotencia, reintentos, cola y auditoría de lotes.',
-        status: 'blocked',
+        title: 'Aplicación controlada',
+        description:
+          'Atributos por categoría, aplicaciones, homólogos y OEM con confirmación auditable.',
+        status: 'available',
       },
     ],
-    dependencies: ['Contrato de jobs de importación', 'RBAC', 'Cola y almacenamiento temporal'],
+    dependencies: ['Ejecución asíncrona para archivos que excedan los límites síncronos acordados'],
   },
   quality: {
     slug: 'quality',
     label: 'IA y Calidad',
     eyebrow: 'Enriquecimiento gobernado',
     description:
-      'Hallazgos deterministas sobre los campos base del catálogo y alcance futuro de revisión humana.',
+      'Completitud y obligatorios faltantes calculados desde las plantillas activas del catálogo.',
     objective:
-      'Presenta los controles y alertas de calidad disponibles sin ejecutar decisiones que el backend no soporte.',
+      'Prioriza los SKU incompletos con controles deterministas y separa las futuras sugerencias de IA.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de calidad.',
@@ -272,8 +277,8 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     capabilities: [
       {
         title: 'Cola de calidad',
-        description: 'Productos incompletos, conflictos y prioridades de revisión.',
-        status: 'next',
+        description: 'Productos sin plantilla o con atributos obligatorios activos faltantes.',
+        status: 'available',
       },
       {
         title: 'Candidatos trazables',
@@ -297,21 +302,21 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Publicación',
     eyebrow: 'Salida a canales',
     description:
-      'Consulta estados persistidos y las dependencias pendientes para definir la publicabilidad.',
+      'Calcula la elegibilidad base por SKU y organiza la futura selección de campos por categoría y plantilla.',
     objective:
-      'Presenta los estados persistidos de los productos y deja claro que aún no equivalen a elegibilidad de publicación.',
+      'Explica qué SKU cumplen todos los obligatorios activos de su plantilla y cuáles deben completarse.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de publicación.',
     limitation:
-      'La regla exacta de publicabilidad, el override por SKU, el ownership y el contrato con ICOM siguen pendientes.',
+      'La política de campos por categoría, las condiciones del canal y el contrato con ICOM siguen pendientes; no se publica ni se simula un envío.',
     kind: 'workspace',
     capabilities: [
       {
         title: 'Publicabilidad por SKU',
         description:
           'Cálculo automático por atributos requeridos, con explicación de faltantes y política de excepción pendiente.',
-        status: 'confirmed',
+        status: 'available',
       },
       {
         title: 'Campos expuestos',
@@ -325,7 +330,7 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       },
     ],
     dependencies: [
-      'Regla de publicabilidad',
+      'Política de override y condiciones adicionales de canal',
       'Contrato con ICOM',
       'Medios, aplicaciones y equivalencias resueltas',
     ],
@@ -372,14 +377,14 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     label: 'Reportes',
     eyebrow: 'Seguimiento',
     description:
-      'Agregados globales de productos, marcas, estados y grupos unificadores calculados en PostgreSQL.',
+      'Resumen operativo y tres formatos PIM calculados desde catálogo y auditoría persistidos.',
     objective:
-      'Ofrece una lectura operativa del catálogo distinguiendo las filas cargadas del total informado por el backend.',
+      'Permite consultar y exportar REPORTE ATRIBUTOS, REPORTE GENERAL y RESULTADOS DE PERIODO sin completar datos históricos inexistentes.',
     actions: workspaceReadActions,
     dataSource:
       'Los indicadores, avisos y filas provienen de la proyección autenticada del workspace de reportes.',
     limitation:
-      'Los indicadores de calidad dependen de reglas aprobadas; las exportaciones e históricos todavía no están implementados.',
+      'No existe un baseline histórico del reporte general ni una historia temporal de membresías; esas ausencias se muestran explícitamente.',
     kind: 'workspace',
     capabilities: [
       {
@@ -388,20 +393,20 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
         status: 'available',
       },
       {
-        title: 'Calidad y cobertura',
-        description: 'Indicadores basados en reglas de calidad aprobadas.',
-        status: 'blocked',
+        title: 'Formatos PIM',
+        description: 'Cambios de atributos, estado general y resultados mensuales.',
+        status: 'available',
       },
       {
         title: 'Exportaciones',
-        description: 'Reportes descargables y consultas históricas.',
-        status: 'next',
+        description: 'CSV, Excel e impresión/PDF de las filas visibles de la proyección actual.',
+        status: 'available',
       },
     ],
     dependencies: [
-      'Reglas de calidad',
-      'Endpoint de analítica',
-      'Catálogo definitivo de reportes y política de exportación',
+      'Baseline histórico para comparativos anteriores',
+      'Historia temporal de membresías de código unificador',
+      'Política de paginación/exportación para catálogos mayores a 5.000 filas',
     ],
   },
   administration: {
@@ -442,3 +447,4 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
 export function isModuleSlug(value: string): value is ModuleSlug {
   return (moduleSlugs as readonly string[]).includes(value);
 }
+import type { AuthCapability } from '@cdr/contracts';

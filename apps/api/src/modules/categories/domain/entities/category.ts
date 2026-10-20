@@ -7,9 +7,8 @@ import { type Uuid, ValidationError, newUuid } from '@cdr/shared';
  * and warehousing, the PIM classifies for finding and describing. Forcing one hierarchy to
  * serve both is what makes ERP-driven catalogues unusable for e-commerce.
  *
- * NOT PERSISTED YET — no table, no repository. The real taxonomy (its depth, whether a
- * product may sit in several branches, how it maps onto PrestaShop categories) is a
- * functional decision pending with Casa del Rulimán.
+ * Legacy domain shape kept for compatibility. The active persisted taxonomy, repositories
+ * and HTTP administration live in `catalog-schema`; new behavior belongs there.
  */
 export interface CategorySnapshot {
   readonly id: Uuid;

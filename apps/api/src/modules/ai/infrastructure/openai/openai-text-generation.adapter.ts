@@ -6,6 +6,7 @@ import type {
   TextGenerationProviderPort,
 } from '../../domain/ports/text-generation-provider.port';
 import { toDomainError } from './openai.client';
+import { responseTuning } from './openai-response-options';
 
 export class OpenAiTextGenerationAdapter implements TextGenerationProviderPort {
   constructor(
@@ -15,28 +16,27 @@ export class OpenAiTextGenerationAdapter implements TextGenerationProviderPort {
 
   async generate(request: GenerationRequest): Promise<GenerationResult> {
     try {
-      const response = await this.client.chat.completions.create({
+      const response = await this.client.responses.create({
         model: this.model,
-        temperature: request.temperature ?? 0.2,
-        ...(request.maxOutputTokens ? { max_tokens: request.maxOutputTokens } : {}),
-        messages: [
-          { role: 'system', content: request.instruction },
-          { role: 'user', content: request.input },
-        ],
+        instructions: request.instruction,
+        input: request.input,
+        store: false,
+        ...(request.maxOutputTokens ? { max_output_tokens: request.maxOutputTokens } : {}),
+        ...responseTuning(this.model, request.temperature ?? 0.2),
       });
 
       return {
-        text: response.choices[0]?.message?.content ?? '',
+        text: response.output_text,
         model: response.model,
         ...(response.usage
           ? {
-              inputTokens: response.usage.prompt_tokens,
-              outputTokens: response.usage.completion_tokens,
+              inputTokens: response.usage.input_tokens,
+              outputTokens: response.usage.output_tokens,
             }
           : {}),
       };
     } catch (error) {
-      throw toDomainError(error, 'chat.completions.create');
+      throw toDomainError(error, 'responses.create');
     }
   }
 }

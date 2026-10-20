@@ -1,7 +1,9 @@
 import 'reflect-metadata';
 
+import type { IncomingMessage } from 'node:http';
+
 import { API_PREFIX } from '@cdr/contracts';
-import { type ApiEnv, parseCorsOrigins } from '@cdr/config';
+import { type ApiEnv, parseCorsOrigins, resolveAiCapabilityProviders } from '@cdr/config';
 import { type Logger, sanitizeLogText } from '@cdr/shared';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
@@ -17,7 +19,18 @@ async function bootstrap(): Promise<void> {
     // messages that matter before ours is available.
     logger: ['error', 'warn'],
     bufferLogs: true,
+    bodyParser: false,
   });
+
+  // Import previews accept files up to 2,000,000 bytes. Express' 100 KB JSON default would
+  // reject them before contract validation, so only that endpoint gets a 2 MiB ceiling; all
+  // other JSON and URL-encoded routes keep the conservative default.
+  app.useBodyParser('json', { limit: '2mb', type: isImportPreviewJson });
+  app.useBodyParser('json', {
+    limit: '100kb',
+    type: (request) => isJson(request) && !isImportPreview(request),
+  });
+  app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
 
   const env = app.get<ApiEnv>(API_ENV);
   const logger = app.get<Logger>(LOGGER);
@@ -77,11 +90,23 @@ async function bootstrap(): Promise<void> {
     host: listenHost,
     environment: env.APP_ENV,
     version: env.APP_VERSION,
-    aiProvider: env.AI_PROVIDER,
+    aiProviders: resolveAiCapabilityProviders(env),
     queueDriver: env.QUEUE_DRIVER,
     storageDriver: env.STORAGE_DRIVER,
     swagger: env.SWAGGER_ENABLED ? `${API_PREFIX}/docs` : 'disabled',
   });
+}
+
+function isImportPreviewJson(request: IncomingMessage): boolean {
+  return isJson(request) && isImportPreview(request);
+}
+
+function isImportPreview(request: IncomingMessage): boolean {
+  return request.url?.split('?', 1)[0] === `${API_PREFIX}/imports/preview`;
+}
+
+function isJson(request: IncomingMessage): boolean {
+  return (request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json');
 }
 
 bootstrap().catch((error: unknown) => {

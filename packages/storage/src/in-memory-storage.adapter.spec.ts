@@ -23,4 +23,14 @@ describe('InMemoryStorageAdapter', () => {
     const storage = new InMemoryStorageAdapter();
     await expect(storage.get('missing')).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it.each(['../secret', '/absolute/key', 'products//asset.pdf', 'products/./asset.pdf'])(
+    'rejects unsafe object key %s',
+    async (key) => {
+      const storage = new InMemoryStorageAdapter();
+      await expect(
+        storage.put({ key, content: new Uint8Array([1]), mimeType: 'application/pdf' }),
+      ).rejects.toThrow('Unsafe object storage key');
+    },
+  );
 });

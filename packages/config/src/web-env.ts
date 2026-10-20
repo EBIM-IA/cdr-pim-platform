@@ -31,7 +31,7 @@ export const webEnvSchema = z
       .refine((value) => !URL.canParse(value) || new URL(value).origin === value, {
         message: 'must be a bare origin: scheme://host[:port] with no path or trailing slash',
       })
-      .default('http://localhost:3000'),
+      .default('http://localhost:3100'),
     NEXT_PUBLIC_APP_NAME: z.string().default('Casa del Rulimán · PIM'),
   })
   .superRefine((env, ctx) => {

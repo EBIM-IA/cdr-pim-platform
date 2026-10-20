@@ -1,9 +1,13 @@
 import { fileURLToPath } from 'node:url';
 
 import type { NextConfig } from 'next';
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 
-const config: NextConfig = {
+const config = (phase: string): NextConfig => ({
   reactStrictMode: true,
+  // Dev and production builds must never share output. Running `next build` while the local
+  // server is active otherwise replaces manifests that `next dev` still has open.
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next-build',
   // `standalone` emits a self-contained server bundle, which is what keeps the Docker
   // image small enough to be worth pulling on every ECS deployment.
   output: 'standalone',
@@ -19,6 +23,6 @@ const config: NextConfig = {
     // a different rule set.
     ignoreDuringBuilds: true,
   },
-};
+});
 
 export default config;

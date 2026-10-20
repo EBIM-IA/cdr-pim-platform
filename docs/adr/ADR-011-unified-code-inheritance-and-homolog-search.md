@@ -1,6 +1,6 @@
 # ADR-011 — Código unificador, herencia y búsqueda por homólogos
 
-**Status:** Accepted
+**Status:** Accepted; decision 8 superseded by ADR-014
 **Date:** 2026-10-01
 
 ## Context
@@ -41,7 +41,8 @@ that aggregate.
    sellable member SKU. A homolog relation is eligible only while it is both active and
    approved; pending, rejected, or inactive relations are excluded from indexing and results.
 8. Automatic attribute propagation remains disabled until source selection, template
-   compatibility, conflict resolution, permissions, and audit behavior are approved.
+   compatibility, conflict resolution, permissions, and audit behavior are approved. This
+   implementation hold was lifted by ADR-014 after the client confirmed the execution rule.
 
 ## Consequences
 

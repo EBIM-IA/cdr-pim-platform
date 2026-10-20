@@ -292,7 +292,7 @@ function WorkspaceTable({ workspace }: { workspace: WorkspaceDto }) {
                 Datos operativos de {workspace.slug}, actualizados{' '}
                 {formatWorkspaceDateTime(workspace.generatedAt)}
               </caption>
-              <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
+              <thead className="border-b bg-slate-50 text-[11px] tracking-[0.06em] text-muted-foreground">
                 <tr>
                   {workspace.columns.map((column) => (
                     <th
