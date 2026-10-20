@@ -24,10 +24,22 @@
 
 ## Authentication is enabled and fail-closed
 
-`JwtAuthGuard` and `RolesGuard` are registered globally. Every API controller is protected
-unless it opts out with `@Public()`; only `POST /api/v1/auth/login` and the health probes do
-so. Missing or invalid bearer credentials return `401 UNAUTHORIZED`, while an authenticated
-actor without a required role returns `403 FORBIDDEN`.
+`JwtAuthGuard` and `RolesGuard` are registered globally. Every human API controller is
+protected unless it opts out with `@Public()`; only `POST /api/v1/auth/login` and the health
+probes are anonymous. The local AX mock bypasses human JWT only through
+`@AxMockAuthenticated()`, which couples that bypass to a dedicated machine-secret guard;
+using `@Public()` by itself there would be unsafe. Missing or invalid bearer credentials
+return `401 UNAUTHORIZED`, while an authenticated actor without a required role returns
+`403 FORBIDDEN`.
+
+The provisional AX simulator is disabled by default, impossible to enable in QAS/PRD and
+requires a separate secret of at least 32 characters in local mode. It compares a SHA-256
+normalization of the supplied and configured values with `timingSafeEqual`, never accepts a
+human JWT as a substitute, and never logs or returns the secret, request payload or
+idempotency key. Its 100-record maximum, 12,000-code-unit aggregate raw-text ceiling and
+100-result FIFO retention cap prevent the simulator from becoming an unbounded request-size
+or process-memory sink. These application limits complement the 100 KiB parser and global
+throttler.
 
 For local/test development, `EnvironmentCredentialVerifier` reads one account exclusively
 from `AUTH_LOCAL_USER_ID`, `AUTH_LOCAL_EMAIL`, `AUTH_LOCAL_PASSWORD` and

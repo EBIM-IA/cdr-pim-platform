@@ -29,6 +29,7 @@ graph LR
 | Integration      | Port                           | Adapter                                                    | Blocked on                                           |
 | ---------------- | ------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------- |
 | Dynamics AX      | `ErpProductSourcePort` ✅      | Stub that throws; `InMemoryErpProductSource` bound instead | Integration surface, entity mapping, VPN             |
+| AX PUSH mock     | `AxMockBatchStorePort` ✅      | Local-only, volatile simulator (`draft-0`)                 | Real contract, authentication and mapping from CDR   |
 | PrestaShop       | `CommercePublisherPort` ✅     | Stub that throws                                           | Version, API access, field mapping, network location |
 | Order-taking app | `OrderChannelPublisherPort` ✅ | Stub that throws                                           | Which system it is, and whether it has an API        |
 | OpenAI           | 3 ports ✅                     | Implemented + deterministic fakes                          | Nothing — an API key switches it on                  |
@@ -38,6 +39,50 @@ graph LR
 The three stubs **throw a documented `DependencyUnavailableError`** rather than returning
 empty results. Silence would be worse: an adapter that quietly returns nothing looks like
 "the ERP has no changes" and hides a missing integration for weeks.
+
+## Local AX PUSH contract simulator (`draft-0`)
+
+The latest prototype describes Sismetic/Dynamics AX as an inbound PUSH, but CDR has not yet
+approved the real transport, fields or machine identity. The API therefore exposes a
+deliberately provisional simulator, not an AX adapter:
+
+| Method | Path                                             | Purpose                        |
+| ------ | ------------------------------------------------ | ------------------------------ |
+| `POST` | `/api/v1/integrations/ax/mock/batches`           | Validate and retain one batch  |
+| `GET`  | `/api/v1/integrations/ax/mock/batches/{batchId}` | Read the retained batch result |
+
+Its guarantees are intentionally narrow:
+
+- every POST must declare `schemaVersion: "draft-0"`, send between 1 and 100 records and
+  supply a bounded `Idempotency-Key` header;
+- all raw string values together are limited to 12,000 UTF-16 code units before trimming.
+  Even with 100 records, every optional key present and worst-case JSON escaping, the
+  canonical compact JSON stays below 94,257 bytes and therefore below the production
+  100 KiB parser ceiling. Senders must use compact JSON; insignificant whitespace outside
+  values is transport overhead and still counts toward that HTTP ceiling;
+- while a result remains retained, one idempotency key plus the same validated payload
+  returns the original result; reusing the key for another payload returns `409 CONFLICT`;
+- records missing `codigoArticulo` are reported as rejected rows, without rejecting the
+  valid rows in that batch;
+- at most 100 results live in process memory. The oldest inserted batch is evicted first,
+  reads and retries do not refresh that order, and every result disappears on restart;
+- it never invokes the catalog, import worker, database or real `AxProductSourceAdapter`;
+- it accepts only the dedicated `X-AX-Mock-Key` machine secret. A user JWT is neither
+  necessary nor accepted as a substitute;
+- `AX_MOCK_MODE=local` additionally requires `AX_MOCK_SHARED_SECRET` (minimum 32
+  characters). Configuration rejects the mock entirely in QAS and PRD; its default is
+  `disabled`, where the route responds as not found;
+- no request body, shared secret or idempotency key is written to logs or returned by the
+  presenter.
+
+The draft fields (`codigoArticulo`, supplier/unifier codes, line, application, brand and
+three category levels) are a test vocabulary derived from the current prototype and client
+templates. They are **not** the production AX schema. Replacing `draft-0` requires a reviewed
+contract and must not silently change the existing version.
+
+This simulator does not resolve the pull-versus-push production decision. The existing
+`ErpProductSourcePort`, its in-memory development binding and the fail-fast
+`AxProductSourceAdapter` remain unchanged until CDR supplies the real integration surface.
 
 ## What Casa del Rulimán must decide or provide
 

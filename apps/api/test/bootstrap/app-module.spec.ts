@@ -1,6 +1,6 @@
 import { OBJECT_STORAGE } from '@cdr/storage';
 import { QUEUE_PORT } from '@cdr/messaging';
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,11 +22,14 @@ import { AuthController } from '../../src/modules/identity/presentation/auth.con
 import { JwtAuthGuard } from '../../src/modules/identity/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../src/modules/identity/presentation/guards/roles.guard';
 import { ImportsController } from '../../src/modules/imports/presentation/imports.controller';
+import { AX_MOCK_BATCH_STORE } from '../../src/modules/integrations/domain/ports/ax-mock-batch-store.port';
 import { ERP_PRODUCT_SOURCE } from '../../src/modules/integrations/domain/ports/erp-product-source.port';
+import { AxMockController } from '../../src/modules/integrations/presentation/ax-mock.controller';
 import { PRODUCT_VECTOR_INDEX } from '../../src/modules/search/domain/ports/product-vector-index.port';
 import { SearchController } from '../../src/modules/search/presentation/search.controller';
 import { WORKSPACE_READ_MODEL } from '../../src/modules/workspaces/domain/ports/workspace-read-model.port';
 import { WorkspacesController } from '../../src/modules/workspaces/presentation/workspaces.controller';
+import { configureBodyParsers } from '../../src/shared/http/body-parser';
 import { API_ENV, CLOCK, DATABASE, DATABASE_SQL, LOGGER } from '../../src/shared/tokens';
 
 /**
@@ -64,6 +67,8 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   AUTH_LOCAL_PASSWORD: 'bootstrap-local-password',
   AUTH_LOCAL_ROLES: 'ADMIN',
   JWT_ACCESS_SECRET: 'bootstrap-test-access-secret-32-chars-min',
+  AX_MOCK_MODE: 'local',
+  AX_MOCK_SHARED_SECRET: 'bootstrap-local-ax-mock-secret-32-plus',
   QUEUE_DRIVER: 'memory',
   STORAGE_DRIVER: 'memory',
   AI_PROVIDER: 'fake',
@@ -71,7 +76,7 @@ const TEST_ENV: NodeJS.ProcessEnv = {
 };
 
 describe('AppModule bootstrap', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
 
   beforeAll(async () => {
     Object.assign(process.env, TEST_ENV);
@@ -80,7 +85,8 @@ describe('AppModule bootstrap', () => {
     // through the Nest injector, using the same decorator metadata production uses.
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
+    configureBodyParsers(app);
     (
       app.getHttpAdapter().getInstance() as {
         set(setting: string, value: number): void;
@@ -108,6 +114,7 @@ describe('AppModule bootstrap', () => {
     ['AuthController', AuthController],
     ['SearchController', SearchController],
     ['ImportsController', ImportsController],
+    ['AxMockController', AxMockController],
     ['WorkspacesController', WorkspacesController],
   ])('resolves %s with its type-injected dependencies', (_name, controller) => {
     expect(app.get(controller)).toBeInstanceOf(controller);
@@ -127,6 +134,7 @@ describe('AppModule bootstrap', () => {
     ['EMBEDDING_PROVIDER', EMBEDDING_PROVIDER],
     ['EQUIVALENCE_GROUP_REPOSITORY', EQUIVALENCE_GROUP_REPOSITORY],
     ['ERP_PRODUCT_SOURCE', ERP_PRODUCT_SOURCE],
+    ['AX_MOCK_BATCH_STORE', AX_MOCK_BATCH_STORE],
     ['TOKEN_SERVICE', TOKEN_SERVICE],
     ['CREDENTIAL_VERIFIER', CREDENTIAL_VERIFIER],
     ['AUDIT_PORT', AUDIT_PORT],
@@ -160,6 +168,203 @@ describe('AppModule bootstrap', () => {
     expect(response.body.error).toMatchObject({
       code: 'UNAUTHORIZED',
       message: 'Missing bearer token',
+    });
+  });
+
+  it('accepts, retains and retrieves a local AX mock batch without a human JWT', async () => {
+    const payload = {
+      schemaVersion: 'draft-0',
+      batchId: 'bootstrap-ax-batch-001',
+      sentAt: '2026-10-20T15:29:00.000Z',
+      records: [
+        { recordId: '1', codigoArticulo: '6205-2RS', marca: 'SKF' },
+        { recordId: '2', codigoArticulo: null, marca: 'SKF' },
+      ],
+    };
+    const headers = {
+      'x-ax-mock-key': TEST_ENV.AX_MOCK_SHARED_SECRET as string,
+      'idempotency-key': 'bootstrap-ax-idempotency-001',
+    };
+
+    const accepted = await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set(headers)
+      .send(payload)
+      .expect(202);
+
+    expect(accepted.headers.location).toBe(
+      '/api/v1/integrations/ax/mock/batches/bootstrap-ax-batch-001',
+    );
+    expect(accepted.body).toMatchObject({
+      schemaVersion: 'draft-0',
+      batchId: payload.batchId,
+      status: 'partially_processed',
+      totals: { received: 2, accepted: 1, warnings: 0, rejected: 1 },
+    });
+    expect(accepted.body).not.toHaveProperty('idempotencyKey');
+    expect(accepted.body).not.toHaveProperty('payloadHash');
+
+    const retried = await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set(headers)
+      .send(payload)
+      .expect(202);
+    expect(retried.body).toEqual(accepted.body);
+
+    const stored = await request(app.getHttpServer())
+      .get(`/api/v1/integrations/ax/mock/batches/${payload.batchId}`)
+      .set('x-ax-mock-key', TEST_ENV.AX_MOCK_SHARED_SECRET as string)
+      .expect(200);
+    expect(stored.body).toEqual(accepted.body);
+  });
+
+  it('accepts the maximum 100-row AX batch through the production 100 KiB parser', async () => {
+    const nullFields = {
+      codigoArticulo: null,
+      codigoProveedor: null,
+      codigoUnificador: null,
+      linea: null,
+      tipoAplicacion: null,
+      marca: null,
+      categoriaNivel1: null,
+      categoriaNivel2: null,
+      categoriaNivel3: null,
+      modifiedAt: null,
+    };
+    const payload = {
+      schemaVersion: 'draft-0',
+      batchId: 'A',
+      sentAt: '2026-10-20T15:29:00.000Z',
+      records: Array.from({ length: 100 }, () => ({
+        ...nullFields,
+        recordId: '\u0000'.repeat(119),
+      })),
+    };
+    const compactBytes = Buffer.byteLength(JSON.stringify(payload));
+    expect(compactBytes).toBeGreaterThan(90_000);
+    expect(compactBytes).toBeLessThan(100 * 1_024);
+
+    const accepted = await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set('x-ax-mock-key', TEST_ENV.AX_MOCK_SHARED_SECRET as string)
+      .set('idempotency-key', 'bootstrap-ax-idempotency-max-batch')
+      .send(payload)
+      .expect(202);
+
+    expect(accepted.body).toMatchObject({
+      batchId: payload.batchId,
+      status: 'rejected',
+      totals: { received: 100, accepted: 0, warnings: 0, rejected: 100 },
+    });
+    expect(accepted.body.records).toHaveLength(100);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['incorrect', 'not-the-configured-ax-machine-secret'],
+  ])('rejects a %s AX mock machine secret over HTTP', async (_case, suppliedSecret) => {
+    const call = request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set('idempotency-key', `bootstrap-ax-secret-${_case}`)
+      .send({
+        schemaVersion: 'draft-0',
+        batchId: `bootstrap-ax-secret-${_case}`,
+        sentAt: '2026-10-20T15:29:00.000Z',
+        records: [{ codigoArticulo: '6205-2RS' }],
+      });
+    if (suppliedSecret) call.set('x-ax-mock-key', suppliedSecret);
+
+    const response = await call.expect(401);
+    expect(response.body.error).toMatchObject({
+      code: 'UNAUTHORIZED',
+      message: 'Invalid AX mock credential',
+    });
+  });
+
+  it('returns one stable result for concurrent identical AX deliveries', async () => {
+    const payload = {
+      schemaVersion: 'draft-0',
+      batchId: 'bootstrap-ax-concurrent',
+      sentAt: '2026-10-20T15:29:00.000Z',
+      records: [{ codigoArticulo: '6205-2RS' }],
+    };
+    const send = () =>
+      request(app.getHttpServer())
+        .post('/api/v1/integrations/ax/mock/batches')
+        .set('x-ax-mock-key', TEST_ENV.AX_MOCK_SHARED_SECRET as string)
+        .set('idempotency-key', 'bootstrap-ax-idempotency-concurrent')
+        .send(payload);
+
+    const [first, retry] = await Promise.all([send(), send()]);
+    expect(first.status).toBe(202);
+    expect(retry.status).toBe(202);
+    expect(retry.body).toEqual(first.body);
+  });
+
+  it('rejects an AX mock retry when the idempotency key carries another payload', async () => {
+    const headers = {
+      'x-ax-mock-key': TEST_ENV.AX_MOCK_SHARED_SECRET as string,
+      'idempotency-key': 'bootstrap-ax-idempotency-002',
+    };
+    const original = {
+      schemaVersion: 'draft-0',
+      batchId: 'bootstrap-ax-batch-002',
+      sentAt: '2026-10-20T15:29:00.000Z',
+      records: [{ codigoArticulo: '6205-2RS' }],
+    };
+
+    await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set(headers)
+      .send(original)
+      .expect(202);
+
+    const conflict = await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set(headers)
+      .send({ ...original, batchId: 'bootstrap-ax-batch-003' })
+      .expect(409);
+
+    expect(conflict.body.error).toMatchObject({
+      code: 'CONFLICT',
+      details: { conflict: 'idempotency-key' },
+    });
+  });
+
+  it('requires a bounded idempotency key before accepting an AX mock batch', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/integrations/ax/mock/batches')
+      .set('x-ax-mock-key', TEST_ENV.AX_MOCK_SHARED_SECRET as string)
+      .send({
+        schemaVersion: 'draft-0',
+        batchId: 'bootstrap-ax-batch-without-key',
+        sentAt: '2026-10-20T15:29:00.000Z',
+        records: [{ codigoArticulo: '6205-2RS' }],
+      })
+      .expect(400);
+
+    expect(response.body.error).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Invalid idempotency-key header',
+    });
+  });
+
+  it('does not accept a human JWT in place of the AX mock machine credential', async () => {
+    const tokens = app.get<TokenServicePort>(TOKEN_SERVICE);
+    const { accessToken } = await tokens.issue({
+      id: 'bootstrap-admin',
+      email: 'bootstrap-admin@casadelruliman.com',
+      roles: [Role.Admin],
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/integrations/ax/mock/batches/unknown')
+      .set('authorization', `Bearer ${accessToken}`)
+      .expect(401);
+
+    expect(response.body.error).toMatchObject({
+      code: 'UNAUTHORIZED',
+      message: 'Invalid AX mock credential',
     });
   });
 

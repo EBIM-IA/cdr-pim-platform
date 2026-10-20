@@ -129,7 +129,7 @@ const toIsoString = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
 /**
- * PostgreSQL-backed query model for the eleven non-product screens.
+ * PostgreSQL-backed query model for the non-product screens.
  *
  * It intentionally reads the physical reporting surface instead of importing another
  * context's repository. This is the query side of CQRS: no write is possible here, and
@@ -158,6 +158,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         return this.readEquivalences();
       case 'documents':
         return this.readDocuments();
+      case 'catalogs':
+        return Promise.resolve(this.readCatalogs());
       case 'imports':
         return this.readImports();
       case 'quality':
@@ -767,6 +769,46 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
+  private readCatalogs(): WorkspaceDto {
+    return this.response('catalogs', {
+      operationalStatus: 'blocked',
+      metrics: [
+        textMetric('persistence', 'Registro persistente', 'Pendiente de contrato'),
+        textMetric('storage', 'Almacenamiento PDF', 'No configurado'),
+        textMetric('sharing', 'Compartición externa', 'Deshabilitada'),
+        integerMetric('catalogs', 'Catálogos registrados', 0),
+      ],
+      columns: [],
+      rows: [],
+      totalRows: 0,
+      notices: [
+        warning(
+          'catalogs-blocked',
+          'Capacidad visible, todavía no operativa',
+          'No existe un modelo persistente para título, vigencia, archivo PDF y auditoría. La pantalla no crea catálogos ni enlaces de demostración.',
+        ),
+        info(
+          'catalogs-decisions',
+          'Decisiones necesarias antes de implementar',
+          'El cliente debe confirmar permisos por rol, límites y validación del PDF, almacenamiento privado, retención y el contrato de expiración, revocación y conteo de visitas.',
+        ),
+      ],
+      actions: [
+        refreshAction('catalogs'),
+        blockedAction(
+          'upload-catalog',
+          'Cargar catálogo PDF',
+          'Bloqueado hasta definir permisos, tamaño máximo, tipos admitidos, validación, antimalware, almacenamiento y retención.',
+        ),
+        blockedAction(
+          'share-catalog',
+          'Compartir catálogo',
+          'Bloqueado hasta aprobar el contrato de enlace público, expiración, revocación, límites de acceso, conteo de visitas y auditoría.',
+        ),
+      ],
+    });
+  }
+
   private async readImports(): Promise<WorkspaceDto> {
     const storageState =
       this.env.STORAGE_DRIVER === 's3' ? 'S3 configurado' : 'Memoria local no durable';
@@ -1136,6 +1178,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     // The query proves the configured PostgreSQL connection is live for this projection.
     await this.sql`SELECT 1`;
     const aiProviders = resolveAiCapabilityProviders(this.env);
+    const axMockEnabled = this.env.AX_MOCK_MODE === 'local';
     const rows: WorkspaceRow[] = [
       {
         id: 'postgresql',
@@ -1174,6 +1217,16 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         },
       },
       {
+        id: 'ax-mock',
+        values: {
+          system: 'Mock AX (desarrollo)',
+          configured: axMockEnabled,
+          state: axMockEnabled
+            ? 'Receptor draft-0 local habilitado; memoria volátil y sin escritura al catálogo'
+            : 'Deshabilitado por defecto; no es la integración AX de producción',
+        },
+      },
+      {
         id: 'prestashop',
         values: { system: 'PrestaShop', configured: false, state: 'Adaptador no implementado' },
       },
@@ -1205,15 +1258,39 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         info(
           'no-connectivity-test',
           'No se invocaron adaptadores externos',
-          'La vista revela solo capacidades y configuración validada, nunca secretos. Los stubs de AX, PrestaShop y pedidos no se ejecutan.',
+          'La vista revela solo capacidades y configuración validada, nunca secretos. Los adaptadores reales de AX, PrestaShop y pedidos no se ejecutan.',
         ),
+        axMockEnabled
+          ? warning(
+              'ax-mock-local',
+              'Mock AX local habilitado',
+              'El receptor draft-0 valida lotes con autenticación de máquina e idempotencia, los conserva solo en memoria y nunca modifica el catálogo. No demuestra conectividad con Dynamics AX.',
+            )
+          : info(
+              'ax-mock-disabled',
+              'Mock AX local deshabilitado',
+              'Es el estado seguro por defecto. Para pruebas de contrato locales se habilita explícitamente con AX_MOCK_MODE=local y una credencial dedicada; QAS y PRD lo rechazan.',
+            ),
       ],
       actions: [
         refreshAction('integrations'),
+        axMockEnabled
+          ? {
+              id: 'receive-ax-mock-batch',
+              label: 'Recibir lote en mock AX',
+              availability: 'supported',
+              method: 'POST',
+              endpoint: '/api/v1/integrations/ax/mock/batches',
+            }
+          : blockedAction(
+              'receive-ax-mock-batch',
+              'Mock AX local',
+              'El receptor provisional está deshabilitado. Solo puede activarse en local/test con una credencial de máquina dedicada.',
+            ),
         blockedAction(
           'sync-ax',
-          'Sincronizar AX',
-          'Faltan superficie de integración, mapeo, autenticación y conectividad VPN.',
+          'Integración AX de producción',
+          'Faltan confirmar PUSH o PULL, transporte, mapeo, autenticación, reintentos y conectividad. El mock local no resuelve estas decisiones.',
         ),
         blockedAction(
           'publish-prestashop',

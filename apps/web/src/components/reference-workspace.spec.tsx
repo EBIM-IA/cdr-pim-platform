@@ -30,6 +30,52 @@ const reportsWorkspace: WorkspaceDto = {
   actions: [],
 };
 
+const catalogsWorkspace: WorkspaceDto = {
+  slug: 'catalogs',
+  operationalStatus: 'blocked',
+  generatedAt: '2026-10-20T12:00:00.000Z',
+  metrics: [
+    {
+      key: 'persistence',
+      label: 'Registro persistente',
+      value: 'Pendiente de contrato',
+      format: 'text',
+    },
+  ],
+  columns: [],
+  rows: [],
+  totalRows: 0,
+  notices: [
+    {
+      id: 'catalogs-blocked',
+      severity: 'warning',
+      title: 'Capacidad visible, todavía no operativa',
+      message: 'No existe persistencia aprobada para catálogos PDF.',
+    },
+  ],
+  actions: [
+    {
+      id: 'refresh',
+      label: 'Actualizar datos',
+      availability: 'supported',
+      method: 'GET',
+      endpoint: '/api/v1/workspaces/catalogs',
+    },
+    {
+      id: 'upload-catalog',
+      label: 'Cargar catálogo PDF',
+      availability: 'blocked',
+      reason: 'Faltan permisos, límites y almacenamiento.',
+    },
+    {
+      id: 'share-catalog',
+      label: 'Compartir catálogo',
+      availability: 'blocked',
+      reason: 'Falta el contrato de enlaces públicos.',
+    },
+  ],
+};
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -62,5 +108,23 @@ describe('ReferenceWorkspace report views', () => {
     expect(workspaceData.useWorkspaceData).toHaveBeenLastCalledWith('reports', {
       report: 'period_results',
     });
+  });
+
+  it('shows product catalogs as blocked and does not simulate CRUD data', () => {
+    workspaceData.useWorkspaceData.mockReturnValue({
+      workspace: catalogsWorkspace,
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+
+    render(<ReferenceWorkspace definition={moduleDefinitions.catalogs} />);
+
+    expect(workspaceData.useWorkspaceData).toHaveBeenLastCalledWith('catalogs', {});
+    expect(screen.getByRole('heading', { name: 'Catálogos de productos' })).toBeVisible();
+    expect(screen.getByText('Capacidad visible, todavía no operativa')).toBeVisible();
+    expect(screen.getByText('Cargar catálogo PDF')).toBeVisible();
+    expect(screen.getByText('Compartir catálogo')).toBeVisible();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 });

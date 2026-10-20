@@ -27,6 +27,7 @@ export const authCapabilitySchema = z.enum([
   'menu:applications:view',
   'menu:equivalences:view',
   'menu:documents:view',
+  'menu:catalogs:view',
   'menu:imports:view',
   'menu:ai-quality:view',
   'menu:publication:view',

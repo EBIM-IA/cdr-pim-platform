@@ -81,6 +81,14 @@ const apiOnlySchema = z.object({
   RATE_LIMIT_LOGIN_BLOCK_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(300_000),
   RATE_LIMIT_AI: z.coerce.number().int().min(1).max(10_000).default(10),
   RATE_LIMIT_INDEX: z.coerce.number().int().min(1).max(10_000).default(5),
+
+  /**
+   * Local-only simulator for the still-unapproved Sismetic / Dynamics AX PUSH contract.
+   * It is deliberately impossible to enable in hosted environments.
+   */
+  AX_MOCK_MODE: z.enum(['disabled', 'local']).default('disabled'),
+  AX_MOCK_SHARED_SECRET: z.string().min(32).max(1_024).optional(),
+
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
   SQS_JOBS_QUEUE_URL: z.string().optional(),
 
@@ -155,6 +163,20 @@ export const apiEnvSchema = baseEnvSchema
         code: z.ZodIssueCode.custom,
         path: ['OPENAI_TIMEOUT_MS'],
         message: 'times total attempts must not exceed the 35000ms provider budget',
+      });
+    }
+    if (env.AX_MOCK_MODE === 'local' && !env.AX_MOCK_SHARED_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_MOCK_SHARED_SECRET'],
+        message: 'is required when AX_MOCK_MODE=local',
+      });
+    }
+    if ((env.APP_ENV === 'qas' || env.APP_ENV === 'prd') && env.AX_MOCK_MODE !== 'disabled') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AX_MOCK_MODE'],
+        message: 'must be "disabled" in qas/prd because the mock contract is not production API',
       });
     }
     // One variable per check, in this exact shape: cdr-pim-infrastructure derives its

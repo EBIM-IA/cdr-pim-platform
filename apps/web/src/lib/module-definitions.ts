@@ -4,6 +4,7 @@ export const moduleSlugs = [
   'applications',
   'equivalences',
   'documents',
+  'catalogs',
   'imports',
   'quality',
   'publication',
@@ -23,6 +24,7 @@ export const moduleMenuCapabilities: Readonly<Record<ModuleSlug, AuthCapability>
   applications: 'menu:applications:view',
   equivalences: 'menu:equivalences:view',
   documents: 'menu:documents:view',
+  catalogs: 'menu:catalogs:view',
   imports: 'menu:imports:view',
   quality: 'menu:ai-quality:view',
   publication: 'menu:publication:view',
@@ -226,6 +228,51 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
       },
     ],
     dependencies: ['Diseño comercial definitivo de la ficha PDF', 'Antimalware de producción'],
+  },
+  catalogs: {
+    slug: 'catalogs',
+    label: 'Catálogos de productos',
+    eyebrow: 'Documentos comerciales',
+    description:
+      'Delimita la futura creación y distribución controlada de catálogos PDF sin presentar operaciones todavía no contratadas.',
+    objective:
+      'Expone el alcance aprobado por diseño y las decisiones pendientes antes de almacenar, publicar o compartir un catálogo.',
+    actions: [
+      'Revisa las dependencias de seguridad, almacenamiento y auditoría pendientes.',
+      'Confirma que no existen catálogos ni enlaces ficticios en este ambiente.',
+      'Consulta qué decisiones habilitarán la carga y la compartición.',
+    ],
+    dataSource:
+      'El estado bloqueado proviene de la API autenticada; no existe todavía una fuente persistente de catálogos PDF.',
+    limitation:
+      'No se habilitan carga, vigencia, enlaces públicos ni conteo de visitas hasta aprobar permisos, límites, almacenamiento, retención y contrato de compartición.',
+    kind: 'workspace',
+    capabilities: [
+      {
+        title: 'Registro y vigencia',
+        description:
+          'Título, descripción, PDF, vigencia y auditoría requieren un modelo persistente aprobado.',
+        status: 'blocked',
+      },
+      {
+        title: 'Carga segura de PDF',
+        description:
+          'Permisos, tamaño máximo, validación de archivo, antimalware y almacenamiento siguen pendientes.',
+        status: 'blocked',
+      },
+      {
+        title: 'Compartición externa',
+        description:
+          'Expiración, revocación, tokens, límites de acceso y trazabilidad aún no tienen contrato.',
+        status: 'blocked',
+      },
+    ],
+    dependencies: [
+      'Matriz de permisos para crear, publicar, revocar y consultar',
+      'Límites, tipos admitidos, validación y antimalware',
+      'Almacenamiento privado, retención y eliminación',
+      'Contrato de enlaces públicos, expiración, revocación y visitas',
+    ],
   },
   imports: {
     slug: 'imports',
