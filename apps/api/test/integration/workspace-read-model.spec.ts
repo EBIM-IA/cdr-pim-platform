@@ -115,10 +115,103 @@ describe('PostgresWorkspaceReadModel', () => {
       workspaceSlugSchema.options.map((slug) => readModel.read(slug, actor)),
     );
 
-    expect(projections).toHaveLength(11);
+    expect(projections).toHaveLength(12);
     for (const projection of projections) {
       expect(() => workspaceSchema.parse(projection)).not.toThrow();
     }
+  });
+
+  it('exposes product catalogs as blocked without records or simulated write endpoints', async () => {
+    const catalogs = await readModel.read('catalogs', actor);
+
+    expect(() => workspaceSchema.parse(catalogs)).not.toThrow();
+    expect(catalogs.operationalStatus).toBe('blocked');
+    expect(catalogs.rows).toEqual([]);
+    expect(catalogs.totalRows).toBe(0);
+    expect(catalogs.metrics).toContainEqual({
+      key: 'catalogs',
+      label: 'Catálogos registrados',
+      value: 0,
+      format: 'integer',
+    });
+    expect(catalogs.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'upload-catalog', availability: 'blocked' }),
+        expect.objectContaining({ id: 'share-catalog', availability: 'blocked' }),
+      ]),
+    );
+    expect(
+      catalogs.actions
+        .filter((action) => action.id !== 'refresh')
+        .every((action) => action.availability === 'blocked'),
+    ).toBe(true);
+  });
+
+  it('reports the local AX mock honestly without treating it as the production adapter', async () => {
+    const integrations = await readModel.read('integrations', actor);
+
+    expect(integrations.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ax',
+          values: expect.objectContaining({ configured: false }),
+        }),
+        expect.objectContaining({
+          id: 'ax-mock',
+          values: expect.objectContaining({
+            configured: false,
+            state: expect.stringContaining('Deshabilitado por defecto'),
+          }),
+        }),
+      ]),
+    );
+    expect(integrations.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'receive-ax-mock-batch',
+          availability: 'blocked',
+        }),
+        expect.objectContaining({ id: 'sync-ax', availability: 'blocked' }),
+      ]),
+    );
+  });
+
+  it('publishes the provisional AX receiver only when local mock mode is explicit', async () => {
+    const localMock = new PostgresWorkspaceReadModel(
+      database.sql,
+      loadApiEnv({
+        NODE_ENV: 'test',
+        APP_ENV: 'test',
+        DATABASE_URL: testDatabaseUrl(),
+        AUTH_MODE: 'local',
+        AUTH_LOCAL_USER_ID: 'integration-viewer',
+        AUTH_LOCAL_EMAIL: actor.email,
+        AUTH_LOCAL_PASSWORD: 'integration-local-password',
+        AUTH_LOCAL_ROLES: 'VIEWER',
+        JWT_ACCESS_SECRET: 'integration-test-access-secret-32-chars',
+        AX_MOCK_MODE: 'local',
+        AX_MOCK_SHARED_SECRET: 'integration-ax-mock-secret-32-chars',
+        QUEUE_DRIVER: 'memory',
+        STORAGE_DRIVER: 'memory',
+        AI_PROVIDER: 'fake',
+      }),
+    );
+
+    const integrations = await localMock.read('integrations', actor);
+
+    expect(integrations.rows).toContainEqual(
+      expect.objectContaining({
+        id: 'ax-mock',
+        values: expect.objectContaining({ configured: true }),
+      }),
+    );
+    expect(integrations.actions).toContainEqual({
+      id: 'receive-ax-mock-batch',
+      label: 'Recibir lote en mock AX',
+      availability: 'supported',
+      method: 'POST',
+      endpoint: '/api/v1/integrations/ax/mock/batches',
+    });
   });
 
   it('uses persisted catalog and equivalence data without inventing missing capabilities', async () => {

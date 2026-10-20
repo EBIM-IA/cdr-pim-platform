@@ -31,22 +31,22 @@ export function MetricCard({
   const content = (
     <Card
       className={cn(
-        'relative flex min-h-[125px] items-start gap-3.5 p-[21px]',
+        'relative flex min-h-[104px] items-start gap-3 p-4',
         href &&
           'h-full transition-[border-color,box-shadow,transform] group-hover:-translate-y-0.5 group-hover:border-primary/35 group-hover:shadow-md',
       )}
     >
-      <span
-        className={cn('grid size-[35px] shrink-0 place-items-center rounded-full', tones[tone])}
-      >
-        <Icon aria-hidden="true" className="size-[18px]" />
+      <span className={cn('grid size-8 shrink-0 place-items-center rounded-full', tones[tone])}>
+        <Icon aria-hidden="true" className="size-4" />
       </span>
       <div className="min-w-0 pt-0.5">
         <p className="text-[11px] text-muted-foreground">{label}</p>
-        <strong className="mt-1 block break-words text-[25px] font-semibold leading-none tracking-[-0.035em] text-cdr-ink">
+        <strong className="mt-0.5 block break-words text-[22px] font-semibold leading-none tracking-[-0.035em] text-cdr-ink">
           {value}
         </strong>
-        <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{note}</p>
+        <p className="mt-1.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">
+          {note}
+        </p>
       </div>
       {href ? (
         <ChevronRight

@@ -83,6 +83,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
   }
   if (
     module === 'quality' ||
+    module === 'catalogs' ||
     module === 'publication' ||
     module === 'integrations' ||
     module === 'reports' ||

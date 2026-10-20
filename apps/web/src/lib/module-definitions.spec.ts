@@ -73,6 +73,12 @@ describe('definiciones de módulos', () => {
     expect(moduleDefinitions.publication.capabilities).toContainEqual(
       expect.objectContaining({ title: 'Publicabilidad por SKU', status: 'available' }),
     );
+    expect(moduleDefinitions.catalogs.capabilities).toHaveLength(3);
+    expect(
+      moduleDefinitions.catalogs.capabilities.every(
+        (capability) => capability.status === 'blocked',
+      ),
+    ).toBe(true);
   });
 
   it('identifica una fuente autenticada para cada módulo', () => {

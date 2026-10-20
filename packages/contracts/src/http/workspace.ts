@@ -10,6 +10,7 @@ export const workspaceSlugSchema = z.enum([
   'applications',
   'equivalences',
   'documents',
+  'catalogs',
   'imports',
   'quality',
   'publication',

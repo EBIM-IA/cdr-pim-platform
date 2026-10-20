@@ -8,10 +8,11 @@ import {
 } from './workspace';
 
 describe('workspace contract', () => {
-  it('keeps the eleven web workspaces in one validated list', () => {
-    expect(workspaceSlugSchema.options).toHaveLength(11);
+  it('keeps the twelve web workspaces in one validated list', () => {
+    expect(workspaceSlugSchema.options).toHaveLength(12);
     expect(workspaceSlugSchema.options).toContain('equivalences');
     expect(workspaceSlugSchema.options).toContain('administration');
+    expect(workspaceSlugSchema.options).toContain('catalogs');
     expect(workspaceSlugSchema.safeParse('products').success).toBe(false);
   });
 
@@ -88,5 +89,49 @@ describe('workspace contract', () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  it('accepts a blocked catalog projection without invented records or write endpoints', () => {
+    const parsed = workspaceSchema.parse({
+      slug: 'catalogs',
+      operationalStatus: 'blocked',
+      generatedAt: '2026-10-20T12:00:00.000Z',
+      metrics: [
+        {
+          key: 'persistence',
+          label: 'Registro persistente',
+          value: 'Pendiente de contrato',
+          format: 'text',
+        },
+      ],
+      columns: [],
+      rows: [],
+      totalRows: 0,
+      notices: [
+        {
+          id: 'catalogs-blocked',
+          severity: 'warning',
+          title: 'Capacidad no operativa',
+          message: 'No existe persistencia aprobada para catálogos PDF.',
+        },
+      ],
+      actions: [
+        {
+          id: 'upload-catalog',
+          label: 'Cargar catálogo PDF',
+          availability: 'blocked',
+          reason: 'Faltan permisos, límites y almacenamiento.',
+        },
+        {
+          id: 'share-catalog',
+          label: 'Compartir catálogo',
+          availability: 'blocked',
+          reason: 'Falta el contrato de enlaces públicos.',
+        },
+      ],
+    });
+
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.actions.every((action) => action.availability === 'blocked')).toBe(true);
   });
 });

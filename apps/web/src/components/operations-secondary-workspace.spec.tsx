@@ -118,8 +118,16 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
             state: 'Adaptador real no implementado',
           },
         },
+        {
+          id: 'ax-mock',
+          values: {
+            system: 'Mock AX (desarrollo)',
+            configured: false,
+            state: 'Deshabilitado por defecto',
+          },
+        },
       ],
-      totalRows: 1,
+      totalRows: 2,
       notices: [],
       actions: [
         {
@@ -130,8 +138,14 @@ function workspace(slug: WorkspaceSlug): WorkspaceDto {
           endpoint: '/api/v1/workspaces/integrations',
         },
         {
+          id: 'receive-ax-mock-batch',
+          label: 'Mock AX local',
+          availability: 'blocked',
+          reason: 'El receptor provisional está deshabilitado.',
+        },
+        {
           id: 'sync-ax',
-          label: 'Sincronizar AX',
+          label: 'Integración AX de producción',
           availability: 'blocked',
           reason: 'Faltan autenticación y conectividad VPN.',
         },
@@ -351,6 +365,38 @@ describe('OperationsSecondaryWorkspace', () => {
     expect(onRefresh).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Sincronizar AX' })).not.toBeInTheDocument();
     expect(screen.getByText('Faltan autenticación y conectividad VPN.')).toBeVisible();
+  });
+
+  it('explica el mock AX deshabilitado sin presentar ejecuciones ficticias', () => {
+    renderView('integrations', 'batches');
+
+    expect(screen.getByText('Mock AX local')).toBeVisible();
+    expect(screen.getByText('El receptor provisional está deshabilitado.')).toBeVisible();
+    expect(screen.getByText('Contrato provisional draft-0')).toBeVisible();
+    expect(screen.queryByText('AX-2026-0001')).not.toBeInTheDocument();
+  });
+
+  it('muestra los endpoints del mock AX cuando la API declara el receptor local', () => {
+    const enabled: WorkspaceDto = {
+      ...workspace('integrations'),
+      actions: [
+        {
+          id: 'receive-ax-mock-batch',
+          label: 'Recibir lote en mock AX',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/integrations/ax/mock/batches',
+        },
+      ],
+    };
+
+    render(<OperationsSecondaryWorkspace workspace={enabled} slug="integrations" view="batches" />);
+
+    expect(screen.getByText('Mock AX local disponible')).toBeVisible();
+    expect(screen.getByText('POST /api/v1/integrations/ax/mock/batches')).toBeVisible();
+    expect(screen.getByText('GET /api/v1/integrations/ax/mock/batches/:batchId')).toBeVisible();
+    expect(screen.getByText('X-AX-Mock-Key')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Ejecutar/u })).not.toBeInTheDocument();
   });
 
   it('muestra la identidad efectiva y bloquea el alta de usuarios', () => {

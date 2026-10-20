@@ -109,4 +109,62 @@ describe('ProductsCatalog table view', () => {
     expect(screen.getByText('Hoja dinámica real')).toBeVisible();
     expect(screen.getByText(/columnas, permisos y cambios provienen del backend/u)).toBeVisible();
   });
+
+  it('collapses advanced filters without losing their values or active count', async () => {
+    render(<ProductsCatalog />);
+
+    const filtersButton = screen.getByRole('button', { name: /Filtros/u });
+    expect(filtersButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'Marca' })).not.toBeInTheDocument();
+
+    fireEvent.click(filtersButton);
+    const brand = screen.getByRole('combobox', { name: 'Marca' });
+    fireEvent.focus(brand);
+    fireEvent.click(screen.getByRole('option', { name: 'FAG' }));
+
+    expect(filtersButton).toHaveAccessibleName(/1 filtros activos/u);
+    fireEvent.click(filtersButton);
+    expect(screen.queryByRole('combobox', { name: 'Marca' })).not.toBeInTheDocument();
+
+    fireEvent.click(filtersButton);
+    expect(screen.getByRole('combobox', { name: 'Marca' })).toHaveValue('FAG');
+  });
+
+  it('forwards the persisted category id selected from the hierarchical control', async () => {
+    render(<ProductsCatalog />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
+    const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
+    fireEvent.focus(category);
+    fireEvent.click(screen.getByRole('button', { name: 'Rodamientos' }));
+
+    expect(mocks.workbook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ categoryId: '33333333-3333-4333-8333-333333333333' }),
+    );
+  });
+
+  it('keeps pagination available when a page-local catalog filter has no matches', () => {
+    render(<ProductsCatalog />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
+    fireEvent.click(screen.getByRole('button', { name: /Frenos0/u }));
+
+    expect(screen.getByText('Sin resultados para estos criterios')).toBeVisible();
+    expect(screen.getByRole('navigation', { name: 'Paginación del catálogo' })).toBeVisible();
+  });
+
+  it('preserves category identity for the backend table instead of filtering cards by name', async () => {
+    render(<ProductsCatalog />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
+    const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
+    fireEvent.focus(category);
+    fireEvent.click(screen.getByRole('button', { name: 'Rodamientos' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
+
+    expect(screen.getByRole('combobox', { name: 'Línea / categoría' })).toBeDisabled();
+    expect(screen.getByText('Categoría (Tabla): Rodamientos')).toBeVisible();
+    expect(screen.getByText('SKU-FAG')).toBeVisible();
+    expect(screen.getByText('SKU-SKF')).toBeVisible();
+  });
 });

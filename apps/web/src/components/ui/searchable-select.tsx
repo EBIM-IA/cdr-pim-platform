@@ -111,7 +111,7 @@ export function SearchableSelect({
               setQuery(event.target.value);
               setOpen(true);
             }}
-            className="h-11 w-full rounded-md border border-input bg-white pl-9 pr-16 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-1 disabled:opacity-50"
+            className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-16 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-1 disabled:opacity-50"
           />
           {value && !disabled ? (
             <button
