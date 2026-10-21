@@ -1,7 +1,5 @@
 import 'reflect-metadata';
 
-import type { IncomingMessage } from 'node:http';
-
 import { API_PREFIX } from '@cdr/contracts';
 import { type ApiEnv, parseCorsOrigins, resolveAiCapabilityProviders } from '@cdr/config';
 import { type Logger, sanitizeLogText } from '@cdr/shared';
@@ -11,6 +9,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 
 import { AppModule } from './app.module';
+import { configureBodyParsers } from './shared/http/body-parser';
 import { API_ENV, LOGGER } from './shared/tokens';
 
 async function bootstrap(): Promise<void> {
@@ -25,12 +24,7 @@ async function bootstrap(): Promise<void> {
   // Import previews accept files up to 2,000,000 bytes. Express' 100 KB JSON default would
   // reject them before contract validation, so only that endpoint gets a 2 MiB ceiling; all
   // other JSON and URL-encoded routes keep the conservative default.
-  app.useBodyParser('json', { limit: '2mb', type: isImportPreviewJson });
-  app.useBodyParser('json', {
-    limit: '100kb',
-    type: (request) => isJson(request) && !isImportPreview(request),
-  });
-  app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
+  configureBodyParsers(app);
 
   const env = app.get<ApiEnv>(API_ENV);
   const logger = app.get<Logger>(LOGGER);
@@ -95,18 +89,6 @@ async function bootstrap(): Promise<void> {
     storageDriver: env.STORAGE_DRIVER,
     swagger: env.SWAGGER_ENABLED ? `${API_PREFIX}/docs` : 'disabled',
   });
-}
-
-function isImportPreviewJson(request: IncomingMessage): boolean {
-  return isJson(request) && isImportPreview(request);
-}
-
-function isImportPreview(request: IncomingMessage): boolean {
-  return request.url?.split('?', 1)[0] === `${API_PREFIX}/imports/preview`;
-}
-
-function isJson(request: IncomingMessage): boolean {
-  return (request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json');
 }
 
 bootstrap().catch((error: unknown) => {

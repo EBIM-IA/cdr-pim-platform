@@ -3,6 +3,7 @@ import type {
   CatalogGridSchemaDto,
   CatalogWorkbookResultDto,
   ProductAttributeSheetDto,
+  ReassignedProductTemplateDto,
   UpdatedProductAttributeDto,
   UpdatedProductAttributesBatchDto,
 } from '@cdr/contracts';
@@ -15,6 +16,7 @@ import type {
 import type { CatalogWorkbookResult } from '../domain/ports/dynamic-catalog.repository.port';
 import type { UpdatedProductAttribute } from '../application/update-product-attribute.use-case';
 import type { UpdatedProductAttributes } from '../application/update-product-attributes.use-case';
+import type { ReassignedProductTemplate } from '../application/reassign-product-template.use-case';
 
 export function toGridSchemaDto(schema: DynamicCatalogSchema): CatalogGridSchemaDto {
   return {
@@ -111,4 +113,10 @@ export function toUpdatedProductAttributesBatchDto(
     productId: result.productId,
     attributes: result.attributes.map(toUpdatedProductAttributeDto),
   };
+}
+
+export function toReassignedProductTemplateDto(
+  result: ReassignedProductTemplate,
+): ReassignedProductTemplateDto {
+  return { ...result, assignedAt: result.assignedAt.toISOString() };
 }

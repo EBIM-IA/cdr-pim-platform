@@ -44,4 +44,18 @@ describe('GetWorkspaceUseCase', () => {
     expect(() => useCase.execute('imports', actor)).toThrow(ForbiddenError);
     expect(read).not.toHaveBeenCalled();
   });
+
+  it('allows a viewer to inspect the blocked catalog capability without granting writes', async () => {
+    const catalogs: WorkspaceDto = {
+      ...projection,
+      slug: 'catalogs',
+      operationalStatus: 'blocked',
+    };
+    const read = vi.fn<WorkspaceReadModelPort['read']>();
+    read.mockResolvedValue(catalogs);
+    const useCase = new GetWorkspaceUseCase({ read });
+
+    await expect(useCase.execute('catalogs', actor)).resolves.toEqual(catalogs);
+    expect(read).toHaveBeenCalledWith('catalogs', actor, {});
+  });
 });

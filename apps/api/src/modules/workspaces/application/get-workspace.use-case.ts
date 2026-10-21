@@ -38,6 +38,7 @@ const WORKSPACE_CAPABILITIES: Readonly<Record<WorkspaceSlug, Capability>> = {
   applications: Capability.MenuApplicationsView,
   equivalences: Capability.MenuEquivalencesView,
   documents: Capability.MenuDocumentsView,
+  catalogs: Capability.MenuCatalogsView,
   imports: Capability.MenuImportsView,
   quality: Capability.MenuAiQualityView,
   publication: Capability.MenuPublicationView,

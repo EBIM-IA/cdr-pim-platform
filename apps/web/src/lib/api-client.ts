@@ -12,6 +12,8 @@ import {
   type ProductListDto,
   type ProductStatus,
   type ReadinessResponse,
+  type ReassignProductTemplateInput,
+  type ReassignedProductTemplateDto,
   type SemanticSearchResponse,
   type ProductAttributeSheetDto,
   type UpdateProductAttributeInput,
@@ -31,6 +33,7 @@ import {
   productAttributeSheetSchema,
   productSchema,
   readinessResponseSchema,
+  reassignedProductTemplateSchema,
   semanticSearchResponseSchema,
   updatedProductAttributeSchema,
   updatedProductAttributesBatchSchema,
@@ -156,6 +159,17 @@ export class ApiClient {
     return this.get(
       `/catalog/products/${encodeURIComponent(productId)}/technical-sheet`,
       productAttributeSheetSchema,
+    );
+  }
+
+  reassignProductTemplate(
+    productId: string,
+    input: ReassignProductTemplateInput,
+  ): Promise<ReassignedProductTemplateDto> {
+    return this.request(
+      `/catalog/products/${encodeURIComponent(productId)}/template`,
+      reassignedProductTemplateSchema,
+      { method: 'PATCH', body: JSON.stringify(input) },
     );
   }
 

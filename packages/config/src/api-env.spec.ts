@@ -49,6 +49,7 @@ describe('loadApiEnv', () => {
     });
     expect(env.AUTH_LOCAL_ROLES).toEqual(['ADMIN']);
     expect(env.SWAGGER_ENABLED).toBe(false);
+    expect(env.AX_MOCK_MODE).toBe('disabled');
   });
 
   it('rejects a short JWT secret', () => {
@@ -234,6 +235,33 @@ describe('loadApiEnv', () => {
       loadApiEnv({ ...minimal, OPENAI_TIMEOUT_MS: '17000', OPENAI_MAX_RETRIES: '1' })
         .OPENAI_MAX_RETRIES,
     ).toBe(1);
+  });
+
+  describe('Dynamics AX mock isolation', () => {
+    it('requires a dedicated secret when the local mock is enabled', () => {
+      expect(() => loadApiEnv({ ...minimal, AX_MOCK_MODE: 'local' })).toThrow(
+        /AX_MOCK_SHARED_SECRET.*required when AX_MOCK_MODE=local/s,
+      );
+      expect(
+        loadApiEnv({
+          ...minimal,
+          AX_MOCK_MODE: 'local',
+          AX_MOCK_SHARED_SECRET: 'local-ax-mock-secret-at-least-32-chars',
+        }).AX_MOCK_MODE,
+      ).toBe('local');
+    });
+
+    it.each(['qas', 'prd'])('refuses the mock in %s', (APP_ENV) => {
+      expect(() =>
+        loadApiEnv({
+          ...hostedQas,
+          APP_ENV,
+          ALLOW_LOCAL_AUTH_IN_QAS: APP_ENV === 'qas' ? 'true' : undefined,
+          AX_MOCK_MODE: 'local',
+          AX_MOCK_SHARED_SECRET: 'hosted-ax-mock-secret-at-least-32-chars',
+        }),
+      ).toThrow(/AX_MOCK_MODE.*must be "disabled" in qas\/prd/s);
+    });
   });
 
   it('never includes a secret value in the error message', () => {

@@ -13,6 +13,7 @@ import {
   List as ListIcon,
   PackageSearch,
   Search,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -28,6 +29,7 @@ import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge'
 import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CategoryTreeSelect } from '@/components/ui/category-tree-select';
 import { Input } from '@/components/ui/input';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Select } from '@/components/ui/select';
@@ -110,22 +112,22 @@ function CompletenessMeter({ value, sku }: { value: number | null; sku: string }
 
 function ProductCatalogList({ products }: { products: Product[] }) {
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2">
       {products.map((product) => (
         <li
           key={product.id}
-          className="grid min-w-0 gap-5 rounded-xl border bg-white p-4 shadow-sm transition hover:border-orange-200 hover:shadow-md md:grid-cols-[130px_minmax(0,1fr)_180px_170px] md:items-center md:p-5"
+          className="grid min-w-0 gap-3 rounded-xl border bg-white p-2.5 shadow-sm transition hover:border-orange-200 hover:shadow-md md:grid-cols-[72px_minmax(0,1fr)_150px_auto] md:items-center md:p-3"
         >
           <ProductArtwork
             category={product.category}
             name={product.name}
-            className="aspect-square h-auto min-h-28 rounded-lg"
+            className="aspect-square h-auto min-h-16 rounded-lg"
           />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/products/${encodeURIComponent(product.id)}`}
-                className="break-all text-xl font-extrabold tracking-tight hover:text-primary"
+                className="break-all text-base font-extrabold tracking-tight hover:text-primary"
               >
                 {product.sku}
               </Link>
@@ -133,11 +135,11 @@ function ProductCatalogList({ products }: { products: Product[] }) {
             </div>
             <p className="mt-1 text-sm font-semibold">{product.name}</p>
             {product.description ? (
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
                 {product.description}
               </p>
             ) : null}
-            <dl className="mt-4 grid gap-x-6 gap-y-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
+            <dl className="mt-2 grid gap-x-5 gap-y-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4">
               {[
                 ['Marca', product.brand],
                 ['Línea / categoría', product.category],
@@ -157,11 +159,11 @@ function ProductCatalogList({ products }: { products: Product[] }) {
             </StatusBadge>
             <CompletenessMeter value={product.completeness} sku={product.sku} />
           </div>
-          <div className="flex flex-col gap-2">
-            <Button asChild>
+          <div className="flex flex-wrap gap-1.5 md:flex-col">
+            <Button asChild size="sm">
               <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
             </Button>
-            <Button asChild variant="ghost">
+            <Button asChild variant="ghost" size="sm">
               <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
                 Editar enriquecimiento
               </Link>
@@ -184,7 +186,7 @@ function CatalogSkeleton({ count }: { count: number }) {
         Cargando productos…
       </span>
       {Array.from({ length: Math.min(count, 6) }, (_, index) => (
-        <Skeleton key={index} className="h-[410px] rounded-xl" />
+        <Skeleton key={index} className="h-[260px] rounded-xl" />
       ))}
     </div>
   );
@@ -212,6 +214,9 @@ export function ProductsCatalog({
   const [requestedPage, setRequestedPage] = useState(1);
   const [requestedPageSize, setRequestedPageSize] = useState(25);
   const [view, setView] = useState<CatalogView>('table');
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
+    Boolean(initialBrand || initialStatus),
+  );
   const [urlReady, setUrlReady] = useState(false);
   const [catalogCategories, setCatalogCategories] = useState<CatalogCategorySummaryDto[]>([]);
   const [workbookFacets, setWorkbookFacets] = useState<CatalogWorkbookResultDto['facets']>({
@@ -236,9 +241,12 @@ export function ProductsCatalog({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setFamily(params.get('family') ?? '');
-    setCategory(params.get('category') ?? '');
-    setApplication(params.get('application') ?? '');
+    const urlFamily = params.get('family') ?? '';
+    const urlCategory = params.get('category') ?? '';
+    const urlApplication = params.get('application') ?? '';
+    setFamily(urlFamily);
+    setCategory(urlCategory);
+    setApplication(urlApplication);
     const completenessParam = params.get('completeness');
     if (
       completenessParam === 'complete' ||
@@ -247,6 +255,9 @@ export function ProductsCatalog({
       completenessParam === 'unavailable'
     ) {
       setCompleteness(completenessParam);
+    }
+    if (urlFamily || urlCategory || urlApplication || completenessParam) {
+      setAdvancedFiltersOpen(true);
     }
     setUrlReady(true);
   }, []);
@@ -315,6 +326,16 @@ export function ProductsCatalog({
       ).sort(),
     [products, status, workbookFacets.statuses],
   );
+  const categoryOptions = useMemo(
+    () =>
+      catalogCategories.map((item) => ({
+        value: item.id,
+        label: item.name,
+        path: item.path,
+        keywords: [item.slug, item.templateName, item.templateVariantKey],
+      })),
+    [catalogCategories],
+  );
   const catalogApplications = useMemo(
     () =>
       unique(products.map((product) => product.application).filter(availableCatalogValue)).sort(),
@@ -343,13 +364,12 @@ export function ProductsCatalog({
       products.filter(
         (product) =>
           (!family || catalogFamily(product) === family) &&
-          (!category || product.category === category) &&
           (!application || product.application === application) &&
           matchesCompleteness(product.completeness, completeness),
       ),
-    [application, category, completeness, family, products],
+    [application, completeness, family, products],
   );
-  const hasClientFilters = Boolean(family || category || application || completeness);
+  const hasClientFilters = Boolean(family || application || completeness);
   const visibleTotal = hasClientFilters ? visibleProducts.length : total;
   const visibleFirst = visibleTotal > 0 ? (hasClientFilters ? 1 : firstVisible) : 0;
   const visibleLast = hasClientFilters ? visibleProducts.length : lastVisible;
@@ -478,7 +498,7 @@ export function ProductsCatalog({
             onClick={() => setFamily('')}
             aria-pressed={!family}
             className={cn(
-              'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-semibold',
+              'inline-flex min-h-8 items-center gap-2 rounded-full border px-3 text-xs font-semibold',
               !family
                 ? 'border-primary bg-orange-50 text-orange-700'
                 : 'border-slate-200 bg-white hover:border-orange-200',
@@ -496,7 +516,7 @@ export function ProductsCatalog({
               onClick={() => setFamily(item.name)}
               aria-pressed={family === item.name}
               className={cn(
-                'inline-flex min-h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-semibold',
+                'inline-flex min-h-8 items-center gap-2 rounded-full border px-3 text-xs font-semibold',
                 family === item.name
                   ? 'border-primary bg-orange-50 text-orange-700'
                   : 'border-slate-200 bg-white hover:border-orange-200',
@@ -525,12 +545,9 @@ export function ProductsCatalog({
         </Card>
       ) : (
         <Card className="mb-5 overflow-hidden">
-          <div
-            id="catalog-filters"
-            className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-[minmax(260px,1.6fr)_repeat(6,minmax(130px,1fr))_auto] 2xl:items-end"
-          >
-            <label className="grid min-w-0 gap-1.5 text-xs font-semibold text-muted-foreground sm:col-span-2 xl:col-span-2 2xl:col-span-1">
-              <span>Buscar</span>
+          <div className="flex flex-wrap items-end gap-2 p-3">
+            <label className="min-w-0 flex-[1_1_280px] text-xs font-semibold text-muted-foreground">
+              <span className="sr-only">Buscar en el catálogo</span>
               <span className="relative block">
                 <Search
                   aria-hidden="true"
@@ -538,10 +555,11 @@ export function ProductsCatalog({
                 />
                 <Input
                   type="search"
+                  aria-label="Buscar en el catálogo"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   placeholder="SKU, marca, categoría o cualquier atributo: 2RS, caucho, C3, FMSI…"
-                  className="pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
+                  className="h-10 pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
                   aria-describedby="catalog-search-status"
                 />
                 {searchInput ? (
@@ -563,87 +581,30 @@ export function ProductsCatalog({
                     : 'Búsqueda actualizada'}
               </span>
             </label>
-
-            <SearchableSelect
-              label="Línea / categoría"
-              value={category}
-              placeholder="Todas las categorías"
-              options={catalogCategories.map((item) => ({
-                value: item.id,
-                label: item.name,
-                keywords: [item.path, item.templateName],
-              }))}
-              disabled={view === 'catalog' || catalogCategories.length === 0}
-              title={
-                view === 'catalog'
-                  ? 'La categoría se aplica a la tabla dinámica.'
-                  : catalogCategories.length === 0
-                    ? 'No hay categorías visibles para tu rol.'
-                    : undefined
-              }
-              onValueChange={setCategory}
-            />
-            <SearchableSelect
-              label="Marca"
-              value={brand}
-              placeholder="Todas las marcas"
-              options={brands.map((item) => ({ value: item, label: item }))}
-              onValueChange={changeBrand}
-            />
-            <SearchableSelect
-              label="Aplicación"
-              value={application}
-              placeholder={
-                applicationOptions.length === 0
-                  ? 'Sin aplicaciones activas'
-                  : 'Todas las aplicaciones'
-              }
-              options={applicationOptions.map((item) => ({ value: item, label: item }))}
-              disabled={applicationOptions.length === 0}
-              title={
-                applicationOptions.length === 0
-                  ? 'No hay aplicaciones activas para el alcance seleccionado.'
-                  : undefined
-              }
-              onValueChange={setApplication}
-            />
-            <SearchableSelect
-              label="Estado"
-              value={status}
-              placeholder="Todos los estados"
-              options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
-              onValueChange={(value) => changeStatus(value as ProductStatus | '')}
-            />
-            <SearchableSelect
-              label="Completitud"
-              value={completeness}
-              placeholder={
-                view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
-              }
-              options={[
-                { value: 'complete', label: '90–100%' },
-                { value: 'attention', label: '70–89%' },
-                { value: 'critical', label: 'Menos de 70%' },
-                ...(view === 'catalog' ? [{ value: 'unavailable', label: 'Sin indicador' }] : []),
-              ]}
-              disabled={view === 'catalog' && !hasCompletenessData}
-              title={
-                view === 'table' || hasCompletenessData
-                  ? undefined
-                  : 'El backend todavía no publica completitud en el listado general.'
-              }
-              onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
-            />
-            <Select
-              label="Origen del dato"
-              value=""
-              disabled
-              title="Cada atributo conserva su propia fuente; falta acordar una regla única de origen por SKU."
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={cn('h-10 shrink-0', activeFilterCount > 0 && 'border-orange-300')}
+              aria-expanded={advancedFiltersOpen}
+              aria-controls="catalog-advanced-filters"
+              onClick={() => setAdvancedFiltersOpen((current) => !current)}
             >
-              <option value="">Pendiente de regla por SKU</option>
-            </Select>
-            <div className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-              <span>Vista</span>
+              <SlidersHorizontal aria-hidden="true" className="size-4" />
+              Filtros
+              <span
+                className={cn(
+                  'grid min-w-4 place-items-center rounded-full px-1 text-[10px] leading-4',
+                  activeFilterCount > 0
+                    ? 'bg-primary text-white'
+                    : 'bg-slate-100 text-muted-foreground',
+                )}
+                aria-label={`${activeFilterCount} filtros activos`}
+              >
+                {activeFilterCount}
+              </span>
+            </Button>
+            <div className="shrink-0">
               <div
                 className="flex rounded-lg border bg-slate-50 p-1"
                 role="group"
@@ -653,9 +614,6 @@ export function ProductsCatalog({
                   variant={view === 'catalog' ? 'dark' : 'ghost'}
                   size="sm"
                   onClick={() => {
-                    setCategory('');
-                    setApplication('');
-                    setCompleteness('');
                     setView('catalog');
                   }}
                   aria-pressed={view === 'catalog'}
@@ -667,8 +625,6 @@ export function ProductsCatalog({
                   size="sm"
                   onClick={() => {
                     setFamily('');
-                    setApplication('');
-                    setCompleteness('');
                     setView('table');
                   }}
                   aria-pressed={view === 'table'}
@@ -679,11 +635,94 @@ export function ProductsCatalog({
             </div>
           </div>
 
-          <p className="border-t bg-slate-50 px-4 py-2.5 text-[11px] leading-5 text-muted-foreground">
-            En Tabla, búsqueda, categoría, marca y estado se procesan en el backend; la búsqueda
-            también recorre valores de atributos visibles. Aplicación y completitud pertenecen a la
-            vista Catálogo cuando esos indicadores están disponibles.
-          </p>
+          {advancedFiltersOpen ? (
+            <div id="catalog-advanced-filters" className="border-t bg-slate-50/50">
+              <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+                <CategoryTreeSelect
+                  label="Línea / categoría"
+                  value={category}
+                  placeholder="Todas las categorías"
+                  options={categoryOptions}
+                  disabled={view === 'catalog' || catalogCategories.length === 0}
+                  title={
+                    view === 'catalog'
+                      ? 'La categoría se conserva y se aplica en la vista Tabla, donde el backend filtra por su ID persistido.'
+                      : catalogCategories.length === 0
+                        ? 'No hay categorías visibles para tu rol.'
+                        : undefined
+                  }
+                  onValueChange={setCategory}
+                />
+                <SearchableSelect
+                  label="Marca"
+                  value={brand}
+                  placeholder="Todas las marcas"
+                  options={brands.map((item) => ({ value: item, label: item }))}
+                  onValueChange={changeBrand}
+                />
+                <SearchableSelect
+                  label="Aplicación"
+                  value={application}
+                  placeholder={
+                    applicationOptions.length === 0
+                      ? 'Sin aplicaciones activas'
+                      : 'Todas las aplicaciones'
+                  }
+                  options={applicationOptions.map((item) => ({ value: item, label: item }))}
+                  disabled={applicationOptions.length === 0}
+                  title={
+                    applicationOptions.length === 0
+                      ? 'No hay aplicaciones activas para el alcance seleccionado.'
+                      : undefined
+                  }
+                  onValueChange={setApplication}
+                />
+                <SearchableSelect
+                  label="Estado"
+                  value={status}
+                  placeholder="Todos los estados"
+                  options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
+                  onValueChange={(value) => changeStatus(value as ProductStatus | '')}
+                />
+                <SearchableSelect
+                  label="Completitud"
+                  value={completeness}
+                  placeholder={
+                    view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
+                  }
+                  options={[
+                    { value: 'complete', label: '90–100%' },
+                    { value: 'attention', label: '70–89%' },
+                    { value: 'critical', label: 'Menos de 70%' },
+                    ...(view === 'catalog'
+                      ? [{ value: 'unavailable', label: 'Sin indicador' }]
+                      : []),
+                  ]}
+                  disabled={view === 'catalog' && !hasCompletenessData}
+                  title={
+                    view === 'table' || hasCompletenessData
+                      ? undefined
+                      : 'El backend todavía no publica completitud en el listado general.'
+                  }
+                  onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
+                />
+                <Select
+                  label="Origen del dato"
+                  value=""
+                  disabled
+                  title="Cada atributo conserva su propia fuente; falta acordar una regla única de origen por SKU."
+                >
+                  <option value="">Pendiente de regla por SKU</option>
+                </Select>
+              </div>
+              <p className="border-t px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+                En Tabla, búsqueda, categoría, marca, estado, aplicación y completitud se procesan
+                en el backend. En Catálogo, familia, aplicación y completitud se aplican únicamente
+                a la página cargada; la categoría se conserva para volver a Tabla porque el listado
+                de tarjetas todavía no expone su ID persistido.
+              </p>
+            </div>
+          ) : null}
 
           {searchInput || activeFilterCount ? (
             <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
@@ -700,6 +739,7 @@ export function ProductsCatalog({
               ) : null}
               {category ? (
                 <button type="button" className={activeChipClass} onClick={() => setCategory('')}>
+                  {view === 'catalog' ? 'Categoría (Tabla): ' : ''}
                   {catalogCategories.find((item) => item.id === category)?.name ?? category}{' '}
                   <X aria-hidden="true" className="size-3" />
                 </button>
@@ -779,7 +819,9 @@ export function ProductsCatalog({
           }
           description={
             hasCriteria
-              ? 'Ajusta la búsqueda o elimina uno de los filtros. No se modificó ningún dato del catálogo.'
+              ? hasClientFilters && totalPages > 1
+                ? 'No hay coincidencias en esta página. Puedes avanzar a otra página o limpiar los filtros locales; no se modificó ningún dato.'
+                : 'Ajusta la búsqueda o elimina uno de los filtros. No se modificó ningún dato del catálogo.'
               : 'La API respondió correctamente, pero todavía no contiene registros de producto.'
           }
           actionLabel={hasCriteria ? 'Limpiar criterios' : undefined}
@@ -791,9 +833,17 @@ export function ProductsCatalog({
         <>
           <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold" aria-live="polite">
-              Mostrando {formatNumber(visibleFirst)}–{formatNumber(visibleLast)}
-              {' de '}
-              {formatNumber(visibleTotal)} productos
+              {hasClientFilters ? (
+                <>
+                  {formatNumber(visibleProducts.length)} coincidencias en esta página ·{' '}
+                  {formatNumber(total)} productos en la consulta
+                </>
+              ) : (
+                <>
+                  Mostrando {formatNumber(visibleFirst)}–{formatNumber(visibleLast)} de{' '}
+                  {formatNumber(visibleTotal)} productos
+                </>
+              )}
             </p>
             <p className="text-xs text-muted-foreground">
               Página {page} de {totalPages}
@@ -801,50 +851,51 @@ export function ProductsCatalog({
           </div>
 
           <ProductCatalogList products={visibleProducts} />
-
-          <nav
-            className="mt-6 flex flex-col gap-4 rounded-xl border bg-slate-50 p-4 sm:flex-row sm:items-end sm:justify-between"
-            aria-label="Paginación del catálogo"
-          >
-            <div className="w-full sm:w-44">
-              <Select
-                label="Resultados por página"
-                value={requestedPageSize}
-                onChange={(event) => {
-                  setRequestedPageSize(Number(event.target.value));
-                  setRequestedPage(1);
-                }}
-              >
-                <option value={25}>25 productos</option>
-                <option value={50}>50 productos</option>
-                <option value={100}>100 productos</option>
-              </Select>
-            </div>
-            <div className="flex items-center justify-between gap-3 sm:justify-end">
-              <Button
-                variant="outline"
-                onClick={() => setRequestedPage(Math.max(1, page - 1))}
-                disabled={page <= 1}
-                aria-label={`Ir a la página ${Math.max(1, page - 1)}`}
-              >
-                <ChevronLeft aria-hidden="true" className="size-4" />
-                Anterior
-              </Button>
-              <span className="min-w-20 text-center text-sm font-semibold tabular-nums">
-                {page} / {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                onClick={() => setRequestedPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages}
-                aria-label={`Ir a la página ${Math.min(totalPages, page + 1)}`}
-              >
-                Siguiente
-                <ChevronRight aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-          </nav>
         </>
+      ) : null}
+      {view === 'catalog' && !loading && !error && totalPages > 0 ? (
+        <nav
+          className="mt-6 flex flex-col gap-4 rounded-xl border bg-slate-50 p-4 sm:flex-row sm:items-end sm:justify-between"
+          aria-label="Paginación del catálogo"
+        >
+          <div className="w-full sm:w-44">
+            <Select
+              label="Resultados por página"
+              value={requestedPageSize}
+              onChange={(event) => {
+                setRequestedPageSize(Number(event.target.value));
+                setRequestedPage(1);
+              }}
+            >
+              <option value={25}>25 productos</option>
+              <option value={50}>50 productos</option>
+              <option value={100}>100 productos</option>
+            </Select>
+          </div>
+          <div className="flex items-center justify-between gap-3 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setRequestedPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
+              aria-label={`Ir a la página ${Math.max(1, page - 1)}`}
+            >
+              <ChevronLeft aria-hidden="true" className="size-4" />
+              Anterior
+            </Button>
+            <span className="min-w-20 text-center text-sm font-semibold tabular-nums">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              onClick={() => setRequestedPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+              aria-label={`Ir a la página ${Math.min(totalPages, page + 1)}`}
+            >
+              Siguiente
+              <ChevronRight aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
+        </nav>
       ) : null}
     </>
   );

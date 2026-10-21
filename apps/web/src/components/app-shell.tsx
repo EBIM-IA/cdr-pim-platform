@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthCapability } from '@cdr/contracts';
 import {
   BarChart3,
+  BookOpen,
   Boxes,
   ChevronDown,
   FileText,
@@ -42,48 +43,204 @@ interface NavigationItem {
 }
 
 const pageSequence = [
-  { reference: 4, href: '/', label: 'Dashboard' },
-  { reference: 5, href: '/products', label: 'Productos' },
-  { reference: 6, href: '/products', label: 'Detalle de Producto' },
-  { reference: 7, href: '/products', label: 'Editar Enriquecimiento' },
-  { reference: 8, href: '/categories', label: 'Categorías y Líneas' },
-  { reference: 9, href: '/templates', label: 'Plantilla Dinámica' },
-  { reference: 10, href: '/applications', label: 'Aplicaciones' },
-  { reference: 11, href: '/equivalences', label: 'Código Unificador y Homólogos' },
+  { reference: 4, href: '/', label: 'Dashboard', capability: 'menu:home:view' },
+  { reference: 5, href: '/products', label: 'Productos', capability: 'menu:products:view' },
+  {
+    reference: 6,
+    href: '/products',
+    label: 'Detalle de Producto',
+    capability: 'menu:products:view',
+  },
+  {
+    reference: 7,
+    href: '/products',
+    label: 'Editar Enriquecimiento',
+    capability: 'menu:products:view',
+  },
+  {
+    reference: 8,
+    href: '/categories',
+    label: 'Categorías y Líneas',
+    capability: 'menu:categories:view',
+  },
+  {
+    reference: 9,
+    href: '/templates',
+    label: 'Plantilla Dinámica',
+    capability: 'menu:templates:view',
+  },
+  {
+    reference: 10,
+    href: '/applications',
+    label: 'Aplicaciones',
+    capability: 'menu:applications:view',
+  },
+  {
+    reference: 11,
+    href: '/equivalences',
+    label: 'Código Unificador y Homólogos',
+    capability: 'menu:equivalences:view',
+  },
   {
     reference: 12,
     href: '/equivalences?view=homologs',
     label: 'Identificadores y Homólogos',
+    capability: 'menu:equivalences:view',
   },
-  { reference: 13, href: '/documents', label: 'Imágenes y Documentos' },
-  { reference: 14, href: '/imports', label: 'Importaciones' },
-  { reference: 15, href: '/imports?view=new', label: 'Nueva Importación' },
-  { reference: 16, href: '/imports?view=result', label: 'Resultado de Importación' },
-  { reference: 17, href: '/quality?view=search', label: 'Búsqueda Inteligente' },
-  { reference: 18, href: '/quality?view=extraction', label: 'Revisión de Extracción IA' },
-  { reference: 19, href: '/quality?view=commercial', label: 'Descripción Comercial con IA' },
-  { reference: 20, href: '/quality?view=quality', label: 'Calidad del Catálogo' },
-  { reference: 21, href: '/quality?view=duplicates', label: 'Posibles Duplicados' },
-  { reference: 22, href: '/quality?view=review', label: 'Bandeja de Revisión y Aprobación' },
-  { reference: 23, href: '/quality?view=sources', label: 'Prioridad de Fuentes' },
-  { reference: 24, href: '/quality?view=conflict', label: 'Resolver Conflicto de Fuentes' },
-  { reference: 25, href: '/publication?view=channels', label: 'Publicación por Canal' },
-  { reference: 26, href: '/publication?view=prestashop', label: 'Canal PrestaShop' },
-  { reference: 27, href: '/publication?view=images', label: 'Migración de Imágenes PrestaShop' },
-  { reference: 28, href: '/integrations?view=sources', label: 'Fuentes Externas' },
-  { reference: 29, href: '/integrations?view=monitor', label: 'Monitor de Integraciones' },
-  { reference: 30, href: '/integrations?view=batches', label: 'Detalle de Lote Sismetic / AX' },
-  { reference: 31, href: '/administration?view=users', label: 'Usuarios' },
-  { reference: 32, href: '/administration?view=roles', label: 'Roles y Permisos' },
-  { reference: 33, href: '/administration?view=audit', label: 'Auditoría y Trazabilidad' },
-  { reference: 34, href: '/reports?view=reports', label: 'Reportes' },
-  { reference: 35, href: '/reports?view=searches', label: 'Reporte de Búsquedas' },
+  {
+    reference: 13,
+    href: '/documents',
+    label: 'Imágenes y Documentos',
+    capability: 'menu:documents:view',
+  },
+  { reference: 14, href: '/imports', label: 'Importaciones', capability: 'menu:imports:view' },
+  {
+    reference: 15,
+    href: '/imports?view=new',
+    label: 'Nueva Importación',
+    capability: 'menu:imports:view',
+  },
+  {
+    reference: 16,
+    href: '/imports?view=result',
+    label: 'Resultado de Importación',
+    capability: 'menu:imports:view',
+  },
+  {
+    reference: 17,
+    href: '/quality?view=search',
+    label: 'Búsqueda Inteligente',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 18,
+    href: '/quality?view=extraction',
+    label: 'Revisión de Extracción IA',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 19,
+    href: '/quality?view=commercial',
+    label: 'Descripción Comercial con IA',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 20,
+    href: '/quality?view=quality',
+    label: 'Calidad del Catálogo',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 21,
+    href: '/quality?view=duplicates',
+    label: 'Posibles Duplicados',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 22,
+    href: '/quality?view=review',
+    label: 'Bandeja de Revisión y Aprobación',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 23,
+    href: '/quality?view=sources',
+    label: 'Prioridad de Fuentes',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 24,
+    href: '/quality?view=conflict',
+    label: 'Resolver Conflicto de Fuentes',
+    capability: 'menu:ai-quality:view',
+  },
+  {
+    reference: 25,
+    href: '/publication?view=channels',
+    label: 'Publicación por Canal',
+    capability: 'menu:publication:view',
+  },
+  {
+    reference: 26,
+    href: '/publication?view=prestashop',
+    label: 'Canal PrestaShop',
+    capability: 'menu:publication:view',
+  },
+  {
+    reference: 27,
+    href: '/publication?view=images',
+    label: 'Migración de Imágenes PrestaShop',
+    capability: 'menu:publication:view',
+  },
+  {
+    reference: 28,
+    href: '/integrations?view=sources',
+    label: 'Fuentes Externas',
+    capability: 'menu:integrations:view',
+  },
+  {
+    reference: 29,
+    href: '/integrations?view=monitor',
+    label: 'Monitor de Integraciones',
+    capability: 'menu:integrations:view',
+  },
+  {
+    reference: 30,
+    href: '/integrations?view=batches',
+    label: 'Detalle de Lote Sismetic / AX',
+    capability: 'menu:integrations:view',
+  },
+  {
+    reference: 31,
+    href: '/administration?view=users',
+    label: 'Usuarios',
+    capability: 'menu:administration:view',
+  },
+  {
+    reference: 32,
+    href: '/administration?view=roles',
+    label: 'Roles y Permisos',
+    capability: 'menu:administration:view',
+  },
+  {
+    reference: 33,
+    href: '/administration?view=audit',
+    label: 'Auditoría y Trazabilidad',
+    capability: 'menu:administration:view',
+  },
+  {
+    reference: 34,
+    href: '/reports?view=reports',
+    label: 'Reportes',
+    capability: 'menu:reports:view',
+  },
+  {
+    reference: 35,
+    href: '/reports?view=searches',
+    label: 'Reporte de Búsquedas',
+    capability: 'menu:reports:view',
+  },
   {
     reference: 36,
     href: '/administration?view=settings',
     label: 'Catálogos de Configuración',
+    capability: 'menu:administration:view',
   },
-] as const;
+  {
+    reference: 37,
+    href: '/catalogs',
+    label: 'Catálogos de productos',
+    capability: 'menu:catalogs:view',
+  },
+] as const satisfies readonly {
+  reference: number;
+  href: string;
+  label: string;
+  capability: AuthCapability;
+}[];
+
+const AUTHENTICATED_SCREEN_COUNT = pageSequence.length;
+const TOTAL_SCREEN_COUNT = AUTHENTICATED_SCREEN_COUNT + 1;
 
 const navigation: NavigationItem[] = [
   { label: 'Inicio', href: '/', icon: Home, capability: 'menu:home:view' },
@@ -117,6 +274,12 @@ const navigation: NavigationItem[] = [
     href: '/documents',
     icon: FileText,
     capability: 'menu:documents:view',
+  },
+  {
+    label: 'Catálogos',
+    href: '/catalogs',
+    icon: BookOpen,
+    capability: 'menu:catalogs:view',
   },
   {
     label: 'Importaciones',
@@ -165,6 +328,7 @@ const screenIndex = [
       ['Código Unificador y Homólogos', '/equivalences', 'menu:equivalences:view'],
       ['Identificadores y Homólogos', '/equivalences?view=homologs', 'menu:equivalences:view'],
       ['Imágenes y Documentos', '/documents', 'menu:documents:view'],
+      ['Catálogos de productos', '/catalogs', 'menu:catalogs:view'],
     ],
   },
   {
@@ -407,6 +571,7 @@ function referencePage(pathname: string, view: string | null): number {
   if (pathname.startsWith('/applications')) return 10;
   if (pathname.startsWith('/equivalences')) return view === 'homologs' ? 12 : 11;
   if (pathname.startsWith('/documents')) return 13;
+  if (pathname.startsWith('/catalogs')) return 37;
   if (pathname.startsWith('/imports')) return view === 'new' ? 15 : view === 'result' ? 16 : 14;
   if (pathname.startsWith('/quality')) {
     return (
@@ -437,23 +602,26 @@ function referencePage(pathname: string, view: string | null): number {
 
 function FooterPager({
   collapsed,
+  capabilities,
   onOpenIndex,
   onOpenStates,
 }: {
   collapsed: boolean;
+  capabilities: readonly AuthCapability[];
   onOpenIndex: () => void;
   onOpenStates: () => void;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const page = referencePage(pathname, searchParams.get('view'));
-  const index = Math.max(
-    0,
-    pageSequence.findIndex((item) => item.reference === page),
-  );
-  const current = pageSequence[index] ?? pageSequence[0];
-  const previous = index > 0 ? pageSequence[index - 1] : null;
-  const next = index < pageSequence.length - 1 ? pageSequence[index + 1] : null;
+  const current = pageSequence.find((item) => item.reference === page) ?? pageSequence[0];
+  const accessibleSequence = pageSequence.filter((item) => capabilities.includes(item.capability));
+  const accessibleIndex = accessibleSequence.findIndex((item) => item.reference === page);
+  const previous = accessibleIndex > 0 ? accessibleSequence[accessibleIndex - 1] : null;
+  const next =
+    accessibleIndex >= 0 && accessibleIndex < accessibleSequence.length - 1
+      ? accessibleSequence[accessibleIndex + 1]
+      : null;
 
   return (
     <footer
@@ -463,7 +631,8 @@ function FooterPager({
       )}
     >
       <small className="hidden truncate text-[10px] text-muted-foreground sm:block">
-        Pantalla {current.reference - 2} de 34 · ref. #{current.reference} · {current.label}
+        Pantalla {current.reference - 2} de {TOTAL_SCREEN_COUNT} · ref. #{current.reference} ·{' '}
+        {current.label}
       </small>
       <div className="ml-auto flex items-center gap-2">
         {previous ? (
@@ -478,7 +647,7 @@ function FooterPager({
           className="h-7 px-2.5 text-[11px]"
           onClick={onOpenIndex}
         >
-          Mapa · 34 rutas
+          Mapa · {TOTAL_SCREEN_COUNT} rutas
         </Button>
         <Button
           type="button"
@@ -565,14 +734,14 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
   };
 
   return (
-    <div className="min-h-dvh w-full bg-white">
+    <div className="min-h-dvh w-full max-w-full overflow-x-clip bg-white">
       <a
         href="#main-content"
         className="sr-only z-[100] rounded-md bg-cdr-ink px-4 py-2 text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
       >
         Saltar al contenido
       </a>
-      <div className="flex min-h-dvh w-full bg-white">
+      <div className="flex min-h-dvh w-full max-w-full bg-white">
         <Sidebar
           open={menuOpen}
           collapsed={sidebarCollapsed}
@@ -580,8 +749,8 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
           labelledBy={navigationId}
           capabilities={actor.capabilities}
         />
-        <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
+        <div className="min-w-0 max-w-full flex-1">
+          <header className="sticky top-0 z-30 flex h-14 max-w-full items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <Button
                 ref={menuButton}
@@ -626,15 +795,16 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                         <div className="mb-4 flex items-start justify-between gap-4">
                           <div>
                             <strong className="text-sm text-cdr-ink">
-                              Mapa de pantallas · 34 rutas
+                              Mapa de pantallas · {TOTAL_SCREEN_COUNT} rutas
                             </strong>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Inicio de sesión más 33 rutas autenticadas. Cada pantalla identifica
-                              sus capacidades operativas y sus límites actuales.
+                              Inicio de sesión más {AUTHENTICATED_SCREEN_COUNT} rutas autenticadas.
+                              Cada pantalla identifica sus capacidades operativas y sus límites
+                              actuales.
                             </p>
                           </div>
                           <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-primary">
-                            34 rutas
+                            {TOTAL_SCREEN_COUNT} rutas
                           </span>
                         </div>
                         <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] text-muted-foreground">
@@ -672,7 +842,8 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                         <div className="mb-4">
                           <strong className="text-sm text-cdr-ink">Estados UX compartidos</strong>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            Comportamientos verificables que complementan las 34 pantallas.
+                            Comportamientos verificables que complementan las {TOTAL_SCREEN_COUNT}{' '}
+                            pantallas.
                           </p>
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
@@ -751,12 +922,13 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
           <main
             id="main-content"
             tabIndex={-1}
-            className="min-h-[calc(100dvh-104px)] bg-white px-4 pb-20 pt-5 outline-none sm:px-6 lg:px-[35px]"
+            className="min-h-[calc(100dvh-96px)] min-w-0 max-w-full overflow-x-clip bg-white px-3 pb-16 pt-4 outline-none sm:px-5 lg:px-[35px]"
           >
             {children}
           </main>
           <FooterPager
             collapsed={sidebarCollapsed}
+            capabilities={actor.capabilities}
             onOpenIndex={() => openScreenIndex('map')}
             onOpenStates={() => openScreenIndex('states')}
           />

@@ -14,12 +14,15 @@ import { ListCatalogGridUseCase } from './application/list-catalog-grid.use-case
 import { ListCatalogWorkbookUseCase } from './application/list-catalog-workbook.use-case';
 import { UpdateProductAttributeUseCase } from './application/update-product-attribute.use-case';
 import { UpdateProductAttributesUseCase } from './application/update-product-attributes.use-case';
+import { ReassignProductTemplateUseCase } from './application/reassign-product-template.use-case';
 import { DYNAMIC_CATALOG_REPOSITORY } from './domain/ports/dynamic-catalog.repository.port';
 import { CATEGORY_ATTRIBUTE_IMPORT } from './domain/ports/category-attribute-import.port';
 import { CATALOG_ADMINISTRATION_REPOSITORY } from './domain/ports/catalog-administration.repository.port';
+import { PRODUCT_TEMPLATE_ASSIGNMENT_REPOSITORY } from './domain/ports/product-template-assignment.repository.port';
 import { DrizzleCategoryAttributeImportAdapter } from './infrastructure/persistence/drizzle-category-attribute-import.adapter';
 import { DrizzleCatalogAdministrationRepository } from './infrastructure/persistence/drizzle-catalog-administration.repository';
 import { DrizzleDynamicCatalogRepository } from './infrastructure/persistence/drizzle-dynamic-catalog.repository';
+import { DrizzleProductTemplateAssignmentRepository } from './infrastructure/persistence/drizzle-product-template-assignment.repository';
 import { DynamicCatalogController } from './presentation/dynamic-catalog.controller';
 import { CatalogAdministrationController } from './presentation/catalog-administration.controller';
 
@@ -27,6 +30,10 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
   controllers: [DynamicCatalogController, CatalogAdministrationController],
   providers: [
     { provide: DYNAMIC_CATALOG_REPOSITORY, useClass: DrizzleDynamicCatalogRepository },
+    {
+      provide: PRODUCT_TEMPLATE_ASSIGNMENT_REPOSITORY,
+      useClass: DrizzleProductTemplateAssignmentRepository,
+    },
     { provide: CATEGORY_ATTRIBUTE_IMPORT, useClass: DrizzleCategoryAttributeImportAdapter },
     {
       provide: CATALOG_ADMINISTRATION_REPOSITORY,
@@ -40,6 +47,7 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     ListActiveCategoriesUseCase,
     ListCatalogGridUseCase,
     ListCatalogWorkbookUseCase,
+    ReassignProductTemplateUseCase,
     UpdateProductAttributeUseCase,
     UpdateProductAttributesUseCase,
     UpdateCatalogCategoryUseCase,

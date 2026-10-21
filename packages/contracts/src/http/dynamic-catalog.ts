@@ -278,6 +278,30 @@ export const updatedProductAttributesBatchSchema = z.object({
 });
 export type UpdatedProductAttributesBatchDto = z.infer<typeof updatedProductAttributesBatchSchema>;
 
+export const reassignProductTemplateSchema = z.object({
+  templateId: uuidSchema,
+  expectedTemplateId: uuidSchema,
+});
+export type ReassignProductTemplateInput = z.infer<typeof reassignProductTemplateSchema>;
+
+export const reassignedProductTemplateSchema = z.object({
+  productId: uuidSchema,
+  category: z.object({
+    id: uuidSchema,
+    slug: z.string(),
+    name: z.string(),
+  }),
+  previousTemplateId: uuidSchema,
+  template: z.object({
+    id: uuidSchema,
+    variantKey: z.string().trim().min(1).max(100),
+    name: z.string(),
+    version: z.number().int().positive(),
+  }),
+  assignedAt: z.string().datetime(),
+});
+export type ReassignedProductTemplateDto = z.infer<typeof reassignedProductTemplateSchema>;
+
 export const categorySourcePrioritySchema = z.object({
   tecdoc: z.number().int().positive().optional(),
   fabricante: z.number().int().positive().optional(),

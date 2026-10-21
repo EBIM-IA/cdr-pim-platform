@@ -167,11 +167,11 @@ const viewDefinitions: Record<OperationsSecondaryView, ViewDefinition> = {
     slug: 'integrations',
     title: 'Lotes Sismetic / AX',
     description:
-      'Superficie reservada para recepción, validación, errores y reproceso idempotente de lotes.',
+      'Contrato provisional para recepción, validación por registro y consulta idempotente de lotes en desarrollo local.',
     icon: FileArchive,
-    emptyTitle: 'Lotes AX todavía no expuestos',
+    emptyTitle: 'Sin listado durable de lotes',
     emptyDescription:
-      'La proyección actual valida la configuración, pero no publica lotes ni registros de procesamiento.',
+      'El mock local conserva resultados solo en memoria y permite consultarlos por batchId; no publica un historial ni simula ejecuciones de AX.',
     presentation: 'capabilities',
   },
   users: {
@@ -746,28 +746,71 @@ function BatchSurface({
   workspace: WorkspaceDto;
   definition: ViewDefinition;
 }) {
+  const receiver = workspace.actions.find((action) => action.id === 'receive-ax-mock-batch');
+  const mockEnabled = receiver?.availability === 'supported';
+
   return (
     <div className="space-y-4">
-      <BlockedBanner
-        workspace={workspace}
-        fallback="No existe un endpoint de recepción, consulta o reproceso de lotes AX."
-      />
+      {mockEnabled ? (
+        <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-100">
+            <CheckCircle2 className="size-4" aria-hidden="true" />
+          </span>
+          <div>
+            <strong className="block text-sm">Mock AX local disponible</strong>
+            <p className="mt-1 text-xs leading-relaxed text-emerald-900/75">
+              Recibe el contrato draft-0, valida cada registro y conserva el resultado en memoria.
+              No escribe productos, no ejecuta el adaptador AX real y se pierde al reiniciar.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <BlockedBanner
+          workspace={workspace}
+          actionId="receive-ax-mock-batch"
+          fallback="El receptor mock AX está deshabilitado en este entorno."
+        />
+      )}
       <Card className="p-5">
-        <h3 className="text-base font-semibold text-cdr-ink">Cabecera del lote</h3>
+        <h3 className="text-base font-semibold text-cdr-ink">Contrato provisional draft-0</h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          La credencial de máquina nunca se entrega al navegador. Las pruebas deben realizarse desde
+          un cliente de integración controlado, como Postman o curl.
+        </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {['idLote', 'Fecha de envío', 'Recepción PIM', 'Origen'].map((label) => (
-            <div key={label} className="rounded-lg border bg-slate-50 p-4">
-              <small className="text-muted-foreground">{label}</small>
-              <strong className="mt-1 block text-lg text-cdr-ink">—</strong>
-            </div>
-          ))}
+          <div className="rounded-lg border bg-slate-50 p-4">
+            <small className="text-muted-foreground">Recepción</small>
+            <code className="mt-1 block break-all text-xs font-semibold text-cdr-ink">
+              POST /api/v1/integrations/ax/mock/batches
+            </code>
+          </div>
+          <div className="rounded-lg border bg-slate-50 p-4">
+            <small className="text-muted-foreground">Consulta</small>
+            <code className="mt-1 block break-all text-xs font-semibold text-cdr-ink">
+              GET /api/v1/integrations/ax/mock/batches/:batchId
+            </code>
+          </div>
+          <div className="rounded-lg border bg-slate-50 p-4">
+            <small className="text-muted-foreground">Autenticación</small>
+            <strong className="mt-1 block text-xs text-cdr-ink">X-AX-Mock-Key</strong>
+          </div>
+          <div className="rounded-lg border bg-slate-50 p-4">
+            <small className="text-muted-foreground">Idempotencia</small>
+            <strong className="mt-1 block text-xs text-cdr-ink">Idempotency-Key obligatoria</strong>
+          </div>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          No se presentan identificadores, fechas o conteos ilustrativos como ejecuciones reales.
+          El estado mostrado proviene de la configuración validada de la API. No se presentan
+          identificadores, fechas o conteos ilustrativos como ejecuciones reales.
         </p>
       </Card>
       <Card className="p-5">
-        <h3 className="text-base font-semibold text-cdr-ink">Errores por registro</h3>
+        <h3 className="text-base font-semibold text-cdr-ink">Resultado por registro</h3>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          La respuesta informa filas aceptadas o rechazadas y devuelve una cabecera Location para
+          consultar el mismo resultado. Reutilizar la misma clave con otro payload produce un
+          conflicto; el mock no persiste ni reprocesa el catálogo.
+        </p>
         <div className="mt-4">
           <EmptyCapability definition={definition} />
         </div>

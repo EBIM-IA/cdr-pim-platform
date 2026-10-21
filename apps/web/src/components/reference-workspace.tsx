@@ -85,6 +85,17 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       mode: 'capabilities',
     },
   ],
+  catalogs: [
+    {
+      id: 'catalogs',
+      label: 'Catálogos PDF',
+      title: 'Catálogos de productos',
+      description:
+        'Alcance previsto para registrar, auditar y compartir catálogos PDF cuando se aprueben sus controles operativos y de seguridad.',
+      icon: FileArchive,
+      mode: 'capabilities',
+    },
+  ],
   quality: [
     {
       id: 'quality',

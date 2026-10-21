@@ -40,12 +40,14 @@ siempre, y en QAS solo la acepta con `ALLOW_LOCAL_AUTH_IN_QAS=true`, hasta que s
 fuente de identidad acordada con CDR.
 
 La interfaz incluye catálogo y detalle de productos, además de workspaces conectados al backend para
-Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Importaciones, IA y
-Calidad, Publicación, Integraciones, Reportes y Administración. Cada workspace consulta una
-proyección autenticada; cuando una operación de escritura aún carece de reglas o persistencia,
-el backend la declara bloqueada y explica la dependencia. El navegador consume la API
-mediante route handlers de Next y `API_BASE_URL` se resuelve en runtime, por lo que la misma
-imagen puede promoverse entre ambientes.
+Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Catálogos de productos,
+Importaciones, IA y Calidad, Publicación, Integraciones, Reportes y Administración. Cada workspace
+consulta una proyección autenticada; cuando una operación de escritura aún carece de reglas o
+persistencia, el backend la declara bloqueada y explica la dependencia. El workspace de Catálogos
+de productos (#37) es visible para quien tenga su capacidad, pero permanece bloqueado: no ofrece
+carga ni compartición hasta definir permisos, almacenamiento privado, validación y antimalware,
+retención y enlaces con vencimiento. El navegador consume la API mediante route handlers de Next y
+`API_BASE_URL` se resuelve en runtime, por lo que la misma imagen puede promoverse entre ambientes.
 
 |                   |                                      |
 | ----------------- | ------------------------------------ |

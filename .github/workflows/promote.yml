@@ -257,14 +257,20 @@ jobs:
               *) echo "::error::Unsupported application: $app"; exit 1 ;;
             esac
 
-            # Start from the task definition currently in use, so CPU, memory, environment,
-            # secrets and IAM roles are carried over untouched. Only the image changes.
+            # Start from the task definition currently in use, so CPU, memory, environment
+            # and secrets are carried over. The immutable image and its matching observable
+            # version change together; otherwise /health/live reports a stale commit.
             aws ecs describe-task-definition \
               --task-definition "cdr-pim-$TARGET_ENVIRONMENT-$app" \
               --query taskDefinition > "td-$app.json"
 
-            jq --arg image "$image" '
+            jq --arg image "$image" --arg version "$IMAGE_TAG" '
               .containerDefinitions[0].image = $image
+              | .containerDefinitions[0].environment = (
+                  (.containerDefinitions[0].environment // [])
+                  | map(select(.name != "APP_VERSION"))
+                  + [{"name": "APP_VERSION", "value": $version}]
+                )
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                     .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
             ' "td-$app.json" > "new-td-$app.json"
@@ -290,7 +296,7 @@ jobs:
               "cdr-pim-$TARGET_ENVIRONMENT-worker" \
               "cdr-pim-$TARGET_ENVIRONMENT-web"
 
-      - name: Verify the running images match the promoted digests
+      - name: Verify the running images and versions match the promotion
         env:
           API_IMAGE: ${{ steps.digests.outputs.api_image }}
           WEB_IMAGE: ${{ steps.digests.outputs.web_image }}
@@ -313,12 +319,21 @@ jobs:
               --query 'services[0].taskDefinition' --output text)
             running=$(aws ecs describe-task-definition --task-definition "$task_definition" \
               --query 'taskDefinition.containerDefinitions[0].image' --output text)
+            running_version=$(aws ecs describe-task-definition \
+              --task-definition "$task_definition" \
+              --query "taskDefinition.containerDefinitions[0].environment[?name=='APP_VERSION'].value | [0]" \
+              --output text)
 
             if [[ "$running" != "$expected" ]]; then
               echo "::error::$app is running $running, expected $expected"
               status=1
-            else
-              echo "OK  $app  $running"
+            fi
+            if [[ "$running_version" != "$IMAGE_TAG" ]]; then
+              echo "::error::$app reports version $running_version, expected $IMAGE_TAG"
+              status=1
+            fi
+            if [[ "$running" == "$expected" && "$running_version" == "$IMAGE_TAG" ]]; then
+              echo "OK  $app  $running  version=$running_version"
             fi
           done
           exit "$status"

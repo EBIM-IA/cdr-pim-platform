@@ -90,7 +90,7 @@ function DashboardSkeleton() {
       </span>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {Array.from({ length: 5 }, (_, index) => (
-          <Skeleton key={index} className="h-[125px] rounded-xl" />
+          <Skeleton key={index} className="h-[104px] rounded-xl" />
         ))}
       </div>
       <div className="mt-[18px] grid gap-4 lg:grid-cols-2">

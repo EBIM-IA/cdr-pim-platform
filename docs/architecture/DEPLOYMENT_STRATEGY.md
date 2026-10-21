@@ -46,11 +46,12 @@ Mechanically (`promote.yml`), per application:
 2. `ecr describe-images` → `imageDigest`;
 3. `ecs describe-task-definition` on the revision currently in use, so CPU, memory,
    environment, secrets and IAM roles are carried over untouched;
-4. replace only `containerDefinitions[0].image` with `<repo>@<digest>`;
+4. replace `containerDefinitions[0].image` with `<repo>@<digest>` and set `APP_VERSION`
+   to the same immutable commit SHA so health and logs identify the running artefact;
 5. `register-task-definition` → new revision;
 6. `update-service --task-definition <new revision>`;
-7. after `services-stable`, read back the running image and assert it equals the promoted
-   digest.
+7. after `services-stable`, read back the running image and `APP_VERSION`, and assert both
+   equal the promoted digest/SHA pair.
 
 Step 7 is what makes `IMAGE_QAS == IMAGE_PRD` verifiable rather than assumed: promote the
 same tag to both environments and the assertion prints the same digest in each run.

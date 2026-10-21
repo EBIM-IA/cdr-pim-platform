@@ -4,6 +4,7 @@ import {
   fetchCatalogGrid,
   fetchCatalogWorkbook,
   patchProductAttribute,
+  reassignProductTemplate,
 } from '@/lib/dynamic-catalog-api';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -100,5 +101,48 @@ describe('dynamic catalog browser client', () => {
     });
     expect(url.searchParams.getAll('filter')).toEqual(['diametro:gte:20']);
     expect(init.credentials).toBe('same-origin');
+  });
+
+  it('sends the expected template id when reassigning a product variant', async () => {
+    const productId = '11111111-1111-4111-8111-111111111111';
+    const previousTemplateId = '22222222-2222-4222-8222-222222222222';
+    const templateId = '33333333-3333-4333-8333-333333333333';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          productId,
+          category: {
+            id: '44444444-4444-4444-8444-444444444444',
+            slug: 'filtros',
+            name: 'Filtros',
+          },
+          previousTemplateId,
+          template: {
+            id: templateId,
+            variantKey: '22.2',
+            name: 'Filtro cilíndrico',
+            version: 1,
+          },
+          assignedAt: '2026-10-19T17:00:00.000Z',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await reassignProductTemplate(productId, {
+      templateId,
+      expectedTemplateId: previousTemplateId,
+    });
+
+    const [rawUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(rawUrl, 'http://localhost').pathname).toBe(
+      `/api/catalog/dynamic/products/${productId}/template`,
+    );
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({
+      templateId,
+      expectedTemplateId: previousTemplateId,
+    });
   });
 });

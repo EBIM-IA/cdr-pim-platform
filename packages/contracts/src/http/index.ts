@@ -1,6 +1,7 @@
 export * from './audit';
 export * from './ai';
 export * from './auth';
+export * from './ax-integration';
 export * from './application';
 export * from './common';
 export * from './code-affix';
