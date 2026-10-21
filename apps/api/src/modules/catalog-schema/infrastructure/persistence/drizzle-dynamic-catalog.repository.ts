@@ -55,6 +55,105 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
+function normalizeAxFilterText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLocaleLowerCase('es');
+}
+
+function normalizedAxColumnSql(expression: SQL): SQL<string> {
+  return sql<string>`TRANSLATE(LOWER(COALESCE((${expression})::text, '')), 'áéíóúüñ', 'aeiouun')`;
+}
+
+function compareAxColumnSql(
+  left: SQL,
+  operator: '>' | '>=' | '<' | '<=',
+  rightRaw: string,
+): SQL<boolean> {
+  const leftText = sql<string>`BTRIM(COALESCE((${left})::text, ''))`;
+  const normalizedLeft = normalizedAxColumnSql(left);
+  const normalizedRight = normalizeAxFilterText(rightRaw);
+  const rightNumber = Number(rightRaw.replace(',', '.'));
+  const textComparison =
+    operator === '>'
+      ? sql<boolean>`${normalizedLeft} > ${normalizedRight}`
+      : operator === '>='
+        ? sql<boolean>`${normalizedLeft} >= ${normalizedRight}`
+        : operator === '<'
+          ? sql<boolean>`${normalizedLeft} < ${normalizedRight}`
+          : sql<boolean>`${normalizedLeft} <= ${normalizedRight}`;
+  if (!Number.isFinite(rightNumber)) return textComparison;
+  const numericLeft = sql<number>`REPLACE(${leftText}, ',', '.')::numeric`;
+  const numericComparison =
+    operator === '>'
+      ? sql<boolean>`${numericLeft} > ${rightNumber}`
+      : operator === '>='
+        ? sql<boolean>`${numericLeft} >= ${rightNumber}`
+        : operator === '<'
+          ? sql<boolean>`${numericLeft} < ${rightNumber}`
+          : sql<boolean>`${numericLeft} <= ${rightNumber}`;
+  return sql<boolean>`CASE
+    WHEN ${leftText} ~ '^[+-]?(?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?$'
+      THEN ${numericComparison}
+    ELSE ${textComparison}
+  END`;
+}
+
+function workbookAxExpressionSql(columnLabel: SQL, expression: string): SQL<boolean> {
+  const raw = expression.trim();
+  const alternatives = raw.split('|').map((value) => value.trim());
+  if (alternatives.length > 1) {
+    return sql<boolean>`(${sql.join(
+      alternatives.map((alternative) => workbookAxExpressionSql(columnLabel, alternative)),
+      sql` OR `,
+    )})`;
+  }
+  if (raw.startsWith('!')) {
+    const nested = raw.slice(1).trim();
+    return nested
+      ? sql<boolean>`NOT (${workbookAxExpressionSql(columnLabel, nested)})`
+      : sql<boolean>`FALSE`;
+  }
+  if (raw === '""') {
+    return sql<boolean>`${normalizedAxColumnSql(columnLabel)} = '(vacias)'`;
+  }
+
+  const comparison = raw.match(/^(>=|<=|>|<)\s*(.+)$/u);
+  if (comparison) {
+    return compareAxColumnSql(
+      columnLabel,
+      comparison[1] as '>' | '>=' | '<' | '<=',
+      comparison[2]!,
+    );
+  }
+
+  const rangeIndex = raw.indexOf('..');
+  if (rangeIndex > 0 && rangeIndex < raw.length - 2) {
+    const startRaw = raw.slice(0, rangeIndex).trim();
+    const endRaw = raw.slice(rangeIndex + 2).trim();
+    const startNumber = Number(startRaw.replace(',', '.'));
+    const endNumber = Number(endRaw.replace(',', '.'));
+    if (Number.isFinite(startNumber) && Number.isFinite(endNumber)) {
+      const lower = Math.min(startNumber, endNumber);
+      const upper = Math.max(startNumber, endNumber);
+      return sql<boolean>`(${compareAxColumnSql(columnLabel, '>=', String(lower))})
+        AND (${compareAxColumnSql(columnLabel, '<=', String(upper))})`;
+    }
+    const normalizedStart = normalizeAxFilterText(startRaw);
+    const normalizedEnd = normalizeAxFilterText(endRaw);
+    const [lower, upper] =
+      normalizedStart.localeCompare(normalizedEnd, 'es') <= 0
+        ? [normalizedStart, normalizedEnd]
+        : [normalizedEnd, normalizedStart];
+    const normalizedColumn = normalizedAxColumnSql(columnLabel);
+    return sql<boolean>`${normalizedColumn} >= ${lower} AND ${normalizedColumn} <= ${upper}`;
+  }
+
+  const pattern = escapeLike(normalizeAxFilterText(raw)).replace(/\*/gu, '%').replace(/\?/gu, '_');
+  return sql<boolean>`${normalizedAxColumnSql(columnLabel)} LIKE ${pattern} ESCAPE E'\\\\'`;
+}
+
 @Injectable()
 export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepositoryPort {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
@@ -1375,6 +1474,14 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           sql`, `,
         )})`
       : sql<boolean>`TRUE`;
+    if (filter.expression !== undefined) {
+      const columnLabel = sql<string>`CASE
+        WHEN NOT (${applicable}) THEN '(No aplica)'
+        WHEN ${expression} IS NULL OR BTRIM((${expression})::text) = '' THEN '(Vacías)'
+        ELSE (${expression})::text
+      END`;
+      return workbookAxExpressionSql(columnLabel, filter.expression);
+    }
     const selections = filter.values.map((selection) => {
       if (selection === '__cdr_excel_not_applicable__') {
         return attribute ? sql<boolean>`NOT (${applicable})` : sql<boolean>`FALSE`;

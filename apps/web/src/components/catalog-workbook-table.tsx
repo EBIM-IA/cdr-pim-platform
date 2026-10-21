@@ -11,6 +11,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Columns3,
   Download,
   FileSpreadsheet,
   Pencil,
@@ -20,6 +21,7 @@ import {
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+import { usePersistentColumnOrder } from '@/components/column-order';
 import {
   EXCEL_NOT_APPLICABLE,
   ExcelTableFilterBar,
@@ -57,16 +59,44 @@ type WorkbookColumn = ExcelTableColumn<CatalogWorkbookProductDto, string> & {
   readonly exportable: boolean;
 };
 
+const workbookGroupLabels: Record<WorkbookColumn['group'], string> = {
+  identity: 'Identificación',
+  erp: 'Base ERP · solo lectura',
+  attribute: 'Atributos de plantilla · permisos por rol',
+};
+
+export function groupWorkbookColumns(columns: readonly WorkbookColumn[]) {
+  return columns.reduce<Array<{ group: WorkbookColumn['group']; count: number }>>(
+    (groups, column) => {
+      const current = groups.at(-1);
+      if (current?.group === column.group) current.count += 1;
+      else groups.push({ group: column.group, count: 1 });
+      return groups;
+    },
+    [],
+  );
+}
+
 export const WORKBOOK_EXPORT_LIMIT = 5_000;
 const WORKBOOK_EXPORT_PAGE_SIZE = 100;
 
 export function serializeWorkbookColumnFilters(
   filters: Partial<Record<string, ReadonlySet<string>>>,
+  expressions: Readonly<Record<string, string>> = {},
 ): string[] {
-  return Object.entries(filters)
+  const serialized = new Map<string, string>();
+  Object.entries(filters)
     .filter((entry): entry is [string, ReadonlySet<string>] => Boolean(entry[1]?.size))
+    .forEach(([key, values]) => {
+      serialized.set(key, JSON.stringify({ key, values: [...values].sort() }));
+    });
+  Object.entries(expressions).forEach(([key, expression]) => {
+    const normalized = expression.trim();
+    if (normalized) serialized.set(key, JSON.stringify({ key, expression: normalized }));
+  });
+  return [...serialized.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, values]) => JSON.stringify({ key, values: [...values].sort() }));
+    .map(([, value]) => value);
 }
 
 export function serializeWorkbookSort(
@@ -230,6 +260,7 @@ export function CatalogWorkbookTable({
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const [columnExpressions, setColumnExpressions] = useState<Record<string, string>>({});
 
   const columns = useMemo<WorkbookColumn[]>(
     () => [
@@ -245,14 +276,23 @@ export function CatalogWorkbookTable({
     ],
     [dynamicColumns],
   );
+  const columnOrder = usePersistentColumnOrder({
+    screenKey: 'products-catalog',
+    columnKeys: columns.map((column) => column.key),
+  });
+  const orderedColumns = columnOrder.orderedColumnKeys.flatMap((key) => {
+    const column = columns.find((candidate) => candidate.key === key);
+    return column ? [column] : [];
+  });
+  const groupedOrderedColumns = groupWorkbookColumns(orderedColumns);
   const table = useExcelTableRows({
     rows,
     columns,
     initialSort: { key: 'base:sku', direction: 'asc' },
   });
   const serializedColumnFilters = useMemo(
-    () => serializeWorkbookColumnFilters(table.filters),
-    [table.filters],
+    () => serializeWorkbookColumnFilters(table.filters, columnExpressions),
+    [columnExpressions, table.filters],
   );
   const serializedColumnFilterKey = serializedColumnFilters.join('\u001f');
   const serializedSort = serializeWorkbookSort(table.sort);
@@ -333,7 +373,7 @@ export function CatalogWorkbookTable({
     () => new Map(columns.map((column) => [column.key, column.label])),
     [columns],
   );
-  const exportColumns = columns.filter((column) => column.exportable);
+  const exportColumns = orderedColumns.filter((column) => column.exportable);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const makeExportData = (products: readonly CatalogWorkbookProductDto[]): TabularData => ({
@@ -512,6 +552,16 @@ export function CatalogWorkbookTable({
             <FileSpreadsheet aria-hidden="true" className="size-4" />
             XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={columnOrder.isDefaultOrder}
+            onClick={columnOrder.resetOrder}
+            title="Restaurar el orden original de las columnas"
+          >
+            <Columns3 aria-hidden="true" className="size-4" />
+            Restaurar columnas
+          </Button>
         </div>
       </div>
 
@@ -533,7 +583,14 @@ export function CatalogWorkbookTable({
       ) : null}
 
       <ExcelTableFilterBar
-        filteredColumns={table.filteredColumnKeys.map((key) => columnLabels.get(key) ?? key)}
+        filteredColumns={[
+          ...new Set([
+            ...table.filteredColumnKeys,
+            ...Object.entries(columnExpressions)
+              .filter(([, expression]) => Boolean(expression.trim()))
+              .map(([key]) => key),
+          ]),
+        ].map((key) => columnLabels.get(key) ?? key)}
         sort={
           table.sort
             ? {
@@ -544,7 +601,10 @@ export function CatalogWorkbookTable({
         }
         visibleCount={table.visibleRows.length}
         totalCount={total}
-        onClear={table.clear}
+        onClear={() => {
+          table.clear();
+          setColumnExpressions({});
+        }}
       />
 
       <div className="scrollbar-thin max-w-full overflow-x-auto">
@@ -554,41 +614,66 @@ export function CatalogWorkbookTable({
           </caption>
           <thead className="sticky top-0 z-10 border-b bg-white text-[11px] text-muted-foreground">
             <tr className="border-b text-[10px] font-extrabold tracking-[0.06em] text-orange-700">
-              <th colSpan={4} className="bg-orange-50 px-3 py-2.5">
-                Identificación
-              </th>
-              <th colSpan={5} className="border-l bg-orange-50 px-3 py-2.5">
-                Base ERP · solo lectura
-              </th>
-              {dynamicColumns.length > 0 ? (
-                <th colSpan={dynamicColumns.length} className="border-l bg-slate-50 px-3 py-2.5">
-                  Atributos de plantilla · permisos por rol
+              {groupedOrderedColumns.map((segment, index) => (
+                <th
+                  key={`${segment.group}:${index}`}
+                  colSpan={segment.count}
+                  className={cn(
+                    'px-3 py-2.5',
+                    index > 0 && 'border-l',
+                    segment.group === 'attribute' ? 'bg-slate-50' : 'bg-orange-50',
+                  )}
+                >
+                  {workbookGroupLabels[segment.group]}
                 </th>
-              ) : null}
+              ))}
               <th className="bg-slate-50 px-3 py-2.5">
                 <span className="sr-only">Acciones</span>
               </th>
             </tr>
             <tr>
-              {columns.map((column, index) => (
+              {orderedColumns.map((column, index) => (
                 <ExcelTableHeader
                   key={column.key}
                   columnKey={column.key}
                   label={column.label}
                   options={table.getValueOptions(column.key)}
                   selectedValues={table.filters[column.key]}
+                  expression={columnExpressions[column.key] ?? ''}
                   sortDirection={table.sort?.key === column.key ? table.sort.direction : undefined}
                   onFilterChange={(values) => {
                     setPage(1);
+                    setColumnExpressions((current) => {
+                      if (!(column.key in current)) return current;
+                      const next = { ...current };
+                      delete next[column.key];
+                      return next;
+                    });
                     table.setColumnFilter(column.key, values);
+                  }}
+                  onExpressionChange={(expression) => {
+                    setPage(1);
+                    table.setColumnFilter(column.key, undefined);
+                    setColumnExpressions((current) => {
+                      if (!expression) {
+                        if (!(column.key in current)) return current;
+                        const next = { ...current };
+                        delete next[column.key];
+                        return next;
+                      }
+                      return { ...current, [column.key]: expression };
+                    });
                   }}
                   onSort={(direction) => {
                     setPage(1);
                     table.setSort(column.key, direction);
                   }}
+                  reorder={columnOrder.getColumnControl(column.key, column.label)}
                   className={cn(
                     'max-w-[240px] border-r last:border-r-0',
-                    (index === 4 || index === 9) && 'border-l-2 border-l-orange-200',
+                    index > 0 &&
+                      orderedColumns[index - 1]?.group !== column.group &&
+                      'border-l-2 border-l-orange-200',
                   )}
                 />
               ))}
@@ -600,7 +685,7 @@ export function CatalogWorkbookTable({
           <tbody className="divide-y">
             {table.visibleRows.map((row) => (
               <tr key={row.id} className="hover:bg-orange-50/40">
-                {columns.map((column, index) => {
+                {orderedColumns.map((column, index) => {
                   if (!column.attribute) {
                     const value = column.getValue(row);
                     return (
@@ -608,7 +693,9 @@ export function CatalogWorkbookTable({
                         key={column.key}
                         className={cn(
                           'max-w-[280px] border-r px-3 py-2.5',
-                          index === 4 && 'border-l-2 border-l-orange-200',
+                          index > 0 &&
+                            orderedColumns[index - 1]?.group !== column.group &&
+                            'border-l-2 border-l-orange-200',
                         )}
                       >
                         {column.key === 'base:sku' ? (
@@ -646,7 +733,12 @@ export function CatalogWorkbookTable({
                       <td
                         key={column.key}
                         aria-label={`${attribute.label}: no aplica`}
-                        className="min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500"
+                        className={cn(
+                          'min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500',
+                          index > 0 &&
+                            orderedColumns[index - 1]?.group !== column.group &&
+                            'border-l-2 border-l-orange-200',
+                        )}
                       >
                         No aplica
                       </td>
@@ -660,6 +752,9 @@ export function CatalogWorkbookTable({
                       key={column.key}
                       className={cn(
                         'min-w-36 border-r px-2 py-1.5',
+                        index > 0 &&
+                          orderedColumns[index - 1]?.group !== column.group &&
+                          'border-l-2 border-l-orange-200',
                         editable && 'bg-blue-50/35',
                         cell.required && cell.value === null && 'bg-red-50',
                       )}
@@ -784,7 +879,7 @@ export function CatalogWorkbookTable({
             {table.visibleRows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length + 1}
+                  colSpan={orderedColumns.length + 1}
                   className="px-4 py-12 text-center text-sm text-muted-foreground"
                 >
                   {rows.length === 0

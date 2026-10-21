@@ -103,6 +103,11 @@ to the `qas` GitHub Environment: each run then waits for an approval instead of 
 Remove the reviewer to resume. A manual `Promote` to QAS keeps working either way, and is
 also how a previous commit is rolled back.
 
+This behaviour supersedes section 11 of the Windows deployment guide dated 12 October 2026,
+which still describes a manual QAS promotion after every merge. That manual sequence remains
+valid for rollback or an explicit redeploy, but it is no longer the normal path for new commits.
+Operational copies of that guide must be updated before they are reused.
+
 `build-and-publish.yml` and `promote.yml` authenticate to AWS via **OIDC** — no long-lived
 access keys in GitHub secrets. Every third-party Action is pinned to a full commit SHA, and
 CI rejects mutable Action, Dockerfile and service-image references.

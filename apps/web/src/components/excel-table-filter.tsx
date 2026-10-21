@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { type ColumnOrderControl, ReorderableColumnLabel } from '@/components/column-order';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -353,9 +354,12 @@ export interface ExcelTableHeaderProps<Key extends string> {
   readonly label: string;
   readonly options: readonly ExcelTableValueOption[];
   readonly selectedValues?: ReadonlySet<string>;
+  readonly expression?: string;
   readonly sortDirection?: ExcelSortDirection;
   readonly onFilterChange: (values?: ReadonlySet<string>) => void;
+  readonly onExpressionChange?: (expression: string) => void;
   readonly onSort: (direction: ExcelSortDirection) => void;
+  readonly reorder?: ColumnOrderControl<Key>;
   readonly className?: string;
 }
 
@@ -365,14 +369,17 @@ export function ExcelTableHeader<Key extends string>({
   label,
   options,
   selectedValues,
+  expression: controlledExpression,
   sortDirection,
   onFilterChange,
+  onExpressionChange,
   onSort,
+  reorder,
   className,
 }: ExcelTableHeaderProps<Key>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [expression, setExpression] = useState('');
+  const [internalExpression, setInternalExpression] = useState('');
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -381,28 +388,29 @@ export function ExcelTableHeader<Key extends string>({
   const titleId = useId();
   const popoverId = useId();
   const style = usePopoverPosition(open, triggerRef, popoverRef);
-  const filtered = Boolean(selectedValues);
+  const expression = controlledExpression ?? internalExpression;
+  const filtered = Boolean(selectedValues) || Boolean(expression.trim());
   const optionsIdentity = options
     .map((option) => `${option.key}\u0000${option.label}`)
     .join('\u0001');
 
   useEffect(() => {
+    if (!onExpressionChange && !selectedValues) setInternalExpression('');
+  }, [onExpressionChange, selectedValues]);
+
+  useEffect(() => {
     onFilterChangeRef.current = onFilterChange;
   }, [onFilterChange]);
 
-  useEffect(() => {
-    if (!filtered) setExpression('');
-  }, [filtered]);
-
   const applyExpression = (nextExpression: string) => {
-    setExpression(nextExpression);
-    if (!nextExpression.trim()) {
-      onFilterChange(undefined);
-    }
+    if (onExpressionChange) onExpressionChange(nextExpression);
+    else setInternalExpression(nextExpression);
+    if (!nextExpression.trim()) onFilterChange(undefined);
   };
 
   useEffect(() => {
-    const trimmed = expression.trim();
+    if (onExpressionChange) return;
+    const trimmed = internalExpression.trim();
     if (!trimmed) return;
     const matching = new Set(
       options
@@ -410,7 +418,7 @@ export function ExcelTableHeader<Key extends string>({
         .map((option) => option.key),
     );
     onFilterChangeRef.current(matching);
-  }, [expression, optionsIdentity]);
+  }, [internalExpression, onExpressionChange, optionsIdentity]);
 
   const visibleOptions = useMemo(() => {
     const term = normalizeSearch(query.trim());
@@ -586,6 +594,8 @@ export function ExcelTableHeader<Key extends string>({
           size="sm"
           disabled={!filtered}
           onClick={() => {
+            if (onExpressionChange) onExpressionChange('');
+            else setInternalExpression('');
             onFilterChange(undefined);
             close(true);
           }}
@@ -603,6 +613,8 @@ export function ExcelTableHeader<Key extends string>({
           onClick={() => {
             const allSelected =
               options.length > 0 && options.every((option) => draft.has(option.key));
+            if (onExpressionChange) onExpressionChange('');
+            else setInternalExpression('');
             onFilterChange(allSelected ? undefined : draft);
             close(true);
           }}
@@ -623,7 +635,7 @@ export function ExcelTableHeader<Key extends string>({
       className={cn('relative px-3 py-3 font-semibold', className)}
     >
       <span className="flex min-w-max items-center gap-2">
-        <span>{label}</span>
+        {reorder ? <ReorderableColumnLabel control={reorder} /> : <span>{label}</span>}
         <button
           ref={triggerRef}
           type="button"

@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import type { DynamicCatalogRepositoryPort } from '../domain/ports/dynamic-catalog.repository.port';
-import { ListCatalogWorkbookUseCase } from './list-catalog-workbook.use-case';
+import {
+  ListCatalogWorkbookUseCase,
+  parseWorkbookColumnFilter,
+} from './list-catalog-workbook.use-case';
 
 const actor: AuthenticatedActor = {
   id: 'buyer-1',
@@ -29,6 +32,10 @@ describe('ListCatalogWorkbookUseCase', () => {
         applicationType: 'INDUSTRIAL',
         completeness: 'critical',
         filter: ['diametro:gte:25'],
+        columnFilter: [
+          JSON.stringify({ key: 'base:unifier', expression: '*trilo' }),
+          JSON.stringify({ key: 'base:brand', values: ['value:FAG'] }),
+        ],
       },
       actor,
     );
@@ -44,8 +51,35 @@ describe('ListCatalogWorkbookUseCase', () => {
       applicationType: 'INDUSTRIAL',
       completeness: 'critical',
       filters: [{ key: 'diametro', operator: 'gte', value: '25' }],
-      columnFilters: [],
+      columnFilters: [
+        { key: 'base:unifier', expression: '*trilo' },
+        { key: 'base:brand', values: ['value:FAG'] },
+      ],
       sort: undefined,
     });
+  });
+
+  it('rejects ambiguous or unbounded workbook column expressions', () => {
+    expect(() =>
+      parseWorkbookColumnFilter(
+        JSON.stringify({ key: 'base:unifier', values: ['value:A'], expression: 'A*' }),
+      ),
+    ).toThrow('Invalid workbook column filter');
+    expect(() =>
+      parseWorkbookColumnFilter(
+        JSON.stringify({ key: 'base:unifier', expression: `${'a'.repeat(301)}` }),
+      ),
+    ).toThrow('Invalid workbook column filter');
+    expect(() =>
+      parseWorkbookColumnFilter(JSON.stringify({ key: 'base:unifier', expression: 'A||B' })),
+    ).toThrow('Invalid workbook column filter');
+    expect(() =>
+      parseWorkbookColumnFilter(JSON.stringify({ key: 'base:unifier', expression: '!' })),
+    ).toThrow('Invalid workbook column filter');
+    expect(() =>
+      parseWorkbookColumnFilter(
+        JSON.stringify({ key: 'base:unifier', expression: '!!!!!!!!!!!A' }),
+      ),
+    ).toThrow('Invalid workbook column filter');
   });
 });
