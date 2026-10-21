@@ -188,3 +188,70 @@ function addInvariantIssue(
     message: 'AX mock batch totals, records and status must be coherent',
   });
 }
+
+/**
+ * Sismetic / Microsoft Dynamics AX -> CDR PIM inbound contract v1.1.
+ *
+ * This is intentionally separate from the local `draft-0` simulator above. The production
+ * direction is now confirmed as one-way: AX sends product information and the PIM receives
+ * it. Persisting the inbox does not yet decide how each AX field updates the master catalog.
+ */
+export const AX_SYNC_ROUTE = {
+  controller: 'productos',
+  action: 'sincronizar',
+} as const;
+export const AX_SYNC_PATH = `/${AX_SYNC_ROUTE.controller}/${AX_SYNC_ROUTE.action}` as const;
+export const AX_SYNC_STATUS_ROUTE = 'sincronizaciones' as const;
+export const AX_ID_LOTE_MAX_LENGTH = 128;
+const isNotBlank = (value: string): boolean => value.trim().length > 0;
+export const axBatchIdSchema = z.string().min(1).max(AX_ID_LOTE_MAX_LENGTH).refine(isNotBlank, {
+  message: 'must not be blank',
+});
+
+const axIsoDateTime = z.string().datetime({ offset: true });
+const axRequiredCode = z.string().min(1).refine(isNotBlank, { message: 'must not be blank' });
+const axOptionalText = z.string().nullable().optional();
+
+export const axProductSchema = z
+  .object({
+    codigoArticulo: axRequiredCode,
+    codigoProveedor: axRequiredCode,
+    codigoUnificador: axOptionalText,
+    codigoLinea: axRequiredCode,
+    tipoAplicacion: axOptionalText,
+    marca: axOptionalText,
+    fechaModificacion: axIsoDateTime.nullable().optional(),
+  })
+  .strict();
+export type AxProduct = z.infer<typeof axProductSchema>;
+
+export const axSyncRequestSchema = z
+  .object({
+    idLote: axBatchIdSchema,
+    fechaEnvio: axIsoDateTime,
+    sistemaOrigen: axOptionalText,
+    productos: z.array(axProductSchema).min(1),
+  })
+  .strict();
+export type AxSyncRequest = z.infer<typeof axSyncRequestSchema>;
+
+export const axSyncStatusSchema = z.enum(['RECIBIDO']);
+export type AxSyncStatus = z.infer<typeof axSyncStatusSchema>;
+
+export const axSyncAcceptedResponseSchema = z
+  .object({
+    idLote: z.string(),
+    estado: axSyncStatusSchema,
+    registrosRecibidos: z.number().int().positive(),
+    fechaRecepcion: z.string().datetime(),
+    correlationId: z.string(),
+  })
+  .strict();
+export type AxSyncAcceptedResponse = z.infer<typeof axSyncAcceptedResponseSchema>;
+
+export const axSyncBatchStatusResponseSchema = axSyncAcceptedResponseSchema.extend({
+  fechaEnvio: axIsoDateTime,
+  sistemaOrigen: z.string().nullable(),
+  requestHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+});
+export type AxSyncBatchStatusResponse = z.infer<typeof axSyncBatchStatusResponseSchema>;
