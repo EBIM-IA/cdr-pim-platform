@@ -54,6 +54,8 @@ describe('migration runner', () => {
         'attribute_templates',
         'audit_change_items',
         'audit_entries',
+        'ax_inbound_batches',
+        'ax_inbound_records',
         'catalog_categories',
         'catalog_product_readiness',
         'cdr_schema_migrations',

@@ -101,6 +101,7 @@ describe('ExcelTableHeader', () => {
     expect(matchesAxFilterExpression('2026', '2024..2027')).toBe(true);
     expect(matchesAxFilterExpression('90', '>=80')).toBe(true);
     expect(matchesAxFilterExpression('(Vacías)', '""')).toBe(true);
+    expect(matchesAxFilterExpression('FAG', '!')).toBe(false);
   });
 
   it('filters directly from the field displayed below each heading', () => {

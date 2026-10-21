@@ -47,10 +47,9 @@ export interface CatalogWorkbookOptions {
   readonly sort?: CatalogWorkbookSort;
 }
 
-export interface CatalogWorkbookColumnFilter {
-  readonly key: string;
-  readonly values: readonly string[];
-}
+export type CatalogWorkbookColumnFilter =
+  | { readonly key: string; readonly values: readonly string[]; readonly expression?: never }
+  | { readonly key: string; readonly expression: string; readonly values?: never };
 
 export interface CatalogWorkbookSort {
   readonly key: string;

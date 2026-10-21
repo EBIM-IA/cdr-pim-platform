@@ -123,6 +123,7 @@ const secondApplication: GroupApplicationDto = {
 afterEach(cleanup);
 
 beforeEach(() => {
+  window.localStorage.clear();
   mocks.listApplications.mockResolvedValue([application, secondApplication]);
   mocks.updateApplication.mockResolvedValue(application);
   mocks.createApplication.mockResolvedValue({
@@ -176,6 +177,22 @@ beforeEach(() => {
 });
 
 describe('catálogo secundario aprobado', () => {
+  it('reordena las columnas de aplicaciones con controles accesibles y persiste la preferencia', async () => {
+    render(<ApplicationsWorkspace canWrite={false} />);
+
+    await screen.findAllByText('UNI-6205');
+    fireEvent.click(screen.getByRole('button', { name: 'Mover columna Marca a la izquierda' }));
+
+    const headings = screen.getAllByRole('columnheader').map((heading) => heading.textContent);
+    expect(headings.findIndex((text) => text?.includes('Marca'))).toBeLessThan(
+      headings.findIndex((text) => text?.includes('Contexto')),
+    );
+    expect(window.localStorage.getItem('cdr:column-order:guest:applications')).toContain(
+      '"make","vehicleType"',
+    );
+    expect(screen.getByRole('button', { name: 'Restaurar columnas' })).toBeEnabled();
+  });
+
   it('presenta aplicaciones por código unificador y filtros reales', async () => {
     render(<ApplicationsWorkspace canWrite />);
 

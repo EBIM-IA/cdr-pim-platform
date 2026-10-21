@@ -7,7 +7,18 @@ import type {
   UpdateExternalHomologInput,
   WorkspaceRow,
 } from '@cdr/contracts';
-import { Check, Link2, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload, X } from 'lucide-react';
+import {
+  Check,
+  Columns3,
+  Link2,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -17,6 +28,7 @@ import {
   type ExcelTableColumn,
   useExcelTableRows,
 } from '@/components/excel-table-filter';
+import { usePersistentColumnOrder } from '@/components/column-order';
 import { OemCodesWorkspace } from '@/components/oem-codes-workspace';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
@@ -86,6 +98,8 @@ const homologColumns: readonly ExcelTableColumn<ExternalHomologDto, HomologColum
   },
   { key: 'active', label: 'Estado', getValue: (row) => (row.active ? 'Activo' : 'Inactivo') },
 ];
+
+const homologColumnKeys = homologColumns.map((column) => column.key);
 
 function homologUpdate(
   row: ExternalHomologDto,
@@ -190,6 +204,18 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
       ? { key: groups.workspace.columns[0].key, direction: 'asc' }
       : undefined,
   });
+  const groupColumnKeys = useMemo(
+    () => groups.workspace?.columns.map((column) => column.key) ?? [],
+    [groups.workspace?.columns],
+  );
+  const groupColumnOrder = usePersistentColumnOrder({
+    screenKey: 'equivalences-groups',
+    columnKeys: groupColumnKeys,
+  });
+  const orderedGroupColumns = groupColumnOrder.orderedColumnKeys.flatMap((key) => {
+    const column = groups.workspace?.columns.find((candidate) => candidate.key === key);
+    return column ? [column] : [];
+  });
 
   const filteredHomologs = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('es');
@@ -205,18 +231,22 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
     columns: homologColumns,
     initialSort: { key: 'unifiedCode', direction: 'asc' },
   });
+  const homologColumnOrder = usePersistentColumnOrder({
+    screenKey: 'equivalences-homologs',
+    columnKeys: homologColumnKeys,
+  });
+  const orderedHomologColumns = homologColumnOrder.orderedColumnKeys.map((key) =>
+    homologColumns.find((column) => column.key === key)!,
+  );
 
   const exportData: (TabularData & { filename: string }) | null = useMemo(() => {
     if (view === 'groups' && groups.workspace) {
       return {
         filename: 'codigos-unificadores-filtrados',
         sheetName: 'Código Unificador',
-        headers: groups.workspace.columns.map((column) => column.label),
-        rows: groupTable.visibleRows.map(
-          (row) =>
-            groups.workspace?.columns.map((column) =>
-              formatWorkspaceCell(row.values[column.key], column),
-            ) ?? [],
+        headers: orderedGroupColumns.map((column) => column.label),
+        rows: groupTable.visibleRows.map((row) =>
+          orderedGroupColumns.map((column) => formatWorkspaceCell(row.values[column.key], column)),
         ),
       };
     }
@@ -224,19 +254,21 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
       return {
         filename: 'homologos-filtrados',
         sheetName: 'Homólogos',
-        headers: homologColumns.map((column) => column.label),
-        rows: homologTable.visibleRows.map((row) => [
-          row.unifiedCode,
-          row.externalCode,
-          row.externalBrand,
-          approvalLabels[row.approvalStatus],
-          row.source === 'import' ? 'Importación' : 'Manual',
-          row.active ? 'Activo' : 'Inactivo',
-        ]),
+        headers: orderedHomologColumns.map((column) => column.label),
+        rows: homologTable.visibleRows.map((row) =>
+          orderedHomologColumns.map((column) => column.getValue(row)),
+        ),
       };
     }
     return null;
-  }, [groupTable.visibleRows, groups.workspace, homologTable.visibleRows, view]);
+  }, [
+    groupTable.visibleRows,
+    groups.workspace,
+    homologTable.visibleRows,
+    orderedGroupColumns,
+    orderedHomologColumns,
+    view,
+  ]);
 
   const toggleSelection = (
     setter: React.Dispatch<React.SetStateAction<Set<string>>>,
@@ -433,6 +465,21 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
             {exportData ? (
               <TableExportButtons {...exportData} disabled={loading || groups.loading} />
             ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={
+                view === 'groups' ? groupColumnOrder.resetOrder : homologColumnOrder.resetOrder
+              }
+              disabled={
+                view === 'groups'
+                  ? groupColumnOrder.isDefaultOrder
+                  : homologColumnOrder.isDefaultOrder
+              }
+            >
+              <Columns3 className="size-4" aria-hidden="true" /> Restaurar columnas
+            </Button>
             {view === 'homologs' && canWrite ? (
               <>
                 <Button type="button" size="sm" onClick={() => setNewRow(true)} disabled={newRow}>
@@ -557,7 +604,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                           }
                         />
                       </th>
-                      {groups.workspace.columns.map((column) => (
+                      {orderedGroupColumns.map((column) => (
                         <ExcelTableHeader
                           key={column.key}
                           columnKey={column.key}
@@ -573,6 +620,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                             groupTable.setColumnFilter(column.key, values)
                           }
                           onSort={(direction) => groupTable.setSort(column.key, direction)}
+                          reorder={groupColumnOrder.getColumnControl(column.key, column.label)}
                         />
                       ))}
                     </tr>
@@ -588,7 +636,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                             onChange={() => toggleSelection(setSelectedGroupIds, row.id)}
                           />
                         </td>
-                        {groups.workspace?.columns.map((column) => (
+                        {orderedGroupColumns.map((column) => (
                           <td key={column.key} className="px-4 py-3">
                             {formatWorkspaceCell(row.values[column.key], column)}
                           </td>
@@ -701,7 +749,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                           }
                         />
                       </th>
-                      {homologColumns.map((column) => (
+                      {orderedHomologColumns.map((column) => (
                         <ExcelTableHeader
                           key={column.key}
                           columnKey={column.key}
@@ -717,6 +765,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                             homologTable.setColumnFilter(column.key, values)
                           }
                           onSort={(direction) => homologTable.setSort(column.key, direction)}
+                          reorder={homologColumnOrder.getColumnControl(column.key, column.label)}
                         />
                       ))}
                       <th className="px-4 py-3">Guardado</th>
@@ -726,61 +775,15 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                     {newRow ? (
                       <tr className="bg-orange-50/50">
                         <td className="px-4 py-2" />
-                        <td className="px-2 py-2">
-                          <Input
-                            autoFocus
-                            value={newDraft.unifiedCode}
-                            onChange={(event) =>
-                              setNewDraft((draft) => ({
-                                ...draft,
-                                unifiedCode: event.target.value,
-                              }))
-                            }
-                            aria-label="Nuevo código unificador"
+                        {homologColumnOrder.orderedColumnKeys.map((column, index) => (
+                          <NewHomologCell
+                            key={column}
+                            column={column}
+                            draft={newDraft}
+                            autoFocus={index === 0}
+                            onChange={setNewDraft}
                           />
-                        </td>
-                        <td className="px-2 py-2">
-                          <Input
-                            value={newDraft.externalCode}
-                            onChange={(event) =>
-                              setNewDraft((draft) => ({
-                                ...draft,
-                                externalCode: event.target.value,
-                              }))
-                            }
-                            aria-label="Nuevo código externo"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <Input
-                            value={newDraft.externalBrand}
-                            onChange={(event) =>
-                              setNewDraft((draft) => ({
-                                ...draft,
-                                externalBrand: event.target.value,
-                              }))
-                            }
-                            aria-label="Nueva marca externa"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <Select
-                            label=""
-                            value={newDraft.approvalStatus}
-                            onChange={(event) =>
-                              setNewDraft((draft) => ({
-                                ...draft,
-                                approvalStatus: event.target.value as HomologApprovalStatus,
-                              }))
-                            }
-                          >
-                            <option value="pending">Pendiente</option>
-                            <option value="approved">Aprobado</option>
-                            <option value="rejected">Rechazado</option>
-                          </Select>
-                        </td>
-                        <td className="px-4 py-2">Manual</td>
-                        <td className="px-4 py-2">Activo</td>
+                        ))}
                         <td className="px-2 py-2">
                           <div className="flex gap-1">
                             <Button
@@ -819,41 +822,28 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
                             onChange={() => toggleSelection(setSelectedHomologIds, row.id)}
                           />
                         </td>
-                        <td className="px-4 py-3 font-semibold">{row.unifiedCode}</td>
-                        {(['externalCode', 'externalBrand', 'approvalStatus'] as const).map(
-                          (column) => (
-                            <EditableHomologCell
-                              key={column}
-                              row={row}
-                              column={column}
-                              canWrite={canWrite && row.active}
-                              editing={
-                                editingCell?.id === row.id && editingCell.column === column
-                                  ? editingCell
-                                  : null
-                              }
-                              state={cellState[`${row.id}:${column}`]}
-                              onStart={() =>
-                                setEditingCell({
-                                  id: row.id,
-                                  column,
-                                  draft: String(row[column]),
-                                })
-                              }
-                              onDraft={(draft) => setEditingCell({ id: row.id, column, draft })}
-                              onSave={() => void saveCell(row)}
-                              onCancel={() => setEditingCell(null)}
-                            />
-                          ),
-                        )}
-                        <td className="px-4 py-3">
-                          {row.source === 'import' ? 'Importación' : 'Manual'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge tone={row.active ? 'success' : 'neutral'}>
-                            {row.active ? 'Activo' : 'Inactivo'}
-                          </StatusBadge>
-                        </td>
+                        {homologColumnOrder.orderedColumnKeys.map((column) => (
+                          <HomologDataCell
+                            key={column}
+                            row={row}
+                            column={column}
+                            canWrite={canWrite}
+                            editingCell={editingCell}
+                            state={cellState[`${row.id}:${column}`]}
+                            onStart={(editableColumn) =>
+                              setEditingCell({
+                                id: row.id,
+                                column: editableColumn,
+                                draft: String(row[editableColumn]),
+                              })
+                            }
+                            onDraft={(editableColumn, draft) =>
+                              setEditingCell({ id: row.id, column: editableColumn, draft })
+                            }
+                            onSave={() => void saveCell(row)}
+                            onCancel={() => setEditingCell(null)}
+                          />
+                        ))}
                         <td className="px-4 py-3 text-xs text-muted-foreground">
                           {Object.entries(cellState).some(
                             ([key, state]) => key.startsWith(`${row.id}:`) && state === 'saving',
@@ -883,6 +873,107 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
         </>
       )}
     </>
+  );
+}
+
+function NewHomologCell({
+  column,
+  draft,
+  autoFocus,
+  onChange,
+}: {
+  column: HomologColumn;
+  draft: HomologDraft;
+  autoFocus: boolean;
+  onChange: React.Dispatch<React.SetStateAction<HomologDraft>>;
+}) {
+  if (column === 'source') return <td className="px-4 py-2">Manual</td>;
+  if (column === 'active') return <td className="px-4 py-2">Activo</td>;
+  if (column === 'approvalStatus') {
+    return (
+      <td className="px-2 py-2">
+        <Select
+          label=""
+          value={draft.approvalStatus}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              approvalStatus: event.target.value as HomologApprovalStatus,
+            }))
+          }
+        >
+          <option value="pending">Pendiente</option>
+          <option value="approved">Aprobado</option>
+          <option value="rejected">Rechazado</option>
+        </Select>
+      </td>
+    );
+  }
+  const labels: Record<'unifiedCode' | 'externalCode' | 'externalBrand', string> = {
+    unifiedCode: 'Nuevo código unificador',
+    externalCode: 'Nuevo código externo',
+    externalBrand: 'Nueva marca externa',
+  };
+  return (
+    <td className="px-2 py-2">
+      <Input
+        autoFocus={autoFocus}
+        value={draft[column]}
+        onChange={(event) => onChange((current) => ({ ...current, [column]: event.target.value }))}
+        aria-label={labels[column]}
+      />
+    </td>
+  );
+}
+
+function HomologDataCell({
+  row,
+  column,
+  canWrite,
+  editingCell,
+  state,
+  onStart,
+  onDraft,
+  onSave,
+  onCancel,
+}: {
+  row: ExternalHomologDto;
+  column: HomologColumn;
+  canWrite: boolean;
+  editingCell: EditingHomologCell | null;
+  state?: 'saving' | 'saved' | 'error';
+  onStart: (column: EditableHomologColumn) => void;
+  onDraft: (column: EditableHomologColumn, draft: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (column === 'unifiedCode') {
+    return <td className="px-4 py-3 font-semibold">{row.unifiedCode}</td>;
+  }
+  if (column === 'source') {
+    return <td className="px-4 py-3">{row.source === 'import' ? 'Importación' : 'Manual'}</td>;
+  }
+  if (column === 'active') {
+    return (
+      <td className="px-4 py-3">
+        <StatusBadge tone={row.active ? 'success' : 'neutral'}>
+          {row.active ? 'Activo' : 'Inactivo'}
+        </StatusBadge>
+      </td>
+    );
+  }
+  return (
+    <EditableHomologCell
+      row={row}
+      column={column}
+      canWrite={canWrite && row.active}
+      editing={editingCell?.id === row.id && editingCell.column === column ? editingCell : null}
+      state={state}
+      onStart={() => onStart(column)}
+      onDraft={(draft) => onDraft(column, draft)}
+      onSave={onSave}
+      onCancel={onCancel}
+    />
   );
 }
 

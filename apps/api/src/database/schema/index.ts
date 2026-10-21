@@ -30,6 +30,10 @@ import {
 import { productEmbeddings } from '../../modules/search/infrastructure/persistence/search.tables';
 import { productAssets } from '../../modules/product-assets/infrastructure/persistence/product-assets.tables';
 import { codeAffixes } from '../../modules/code-affixes/infrastructure/persistence/code-affix.tables';
+import {
+  axInboundBatches,
+  axInboundRecords,
+} from '../../modules/ax-integration/infrastructure/persistence/ax-integration.tables';
 
 /**
  * Composition root for the database schema.
@@ -39,6 +43,8 @@ import { codeAffixes } from '../../modules/code-affixes/infrastructure/persisten
  * assembles the Nest modules.
  */
 export const schema = {
+  axInboundBatches,
+  axInboundRecords,
   auditChangeItems,
   auditEntries,
   attributeDefinitions,
@@ -64,6 +70,8 @@ export const schema = {
 };
 
 export {
+  axInboundBatches,
+  axInboundRecords,
   auditChangeItems,
   auditEntries,
   attributeDefinitions,

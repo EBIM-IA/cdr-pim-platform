@@ -49,6 +49,7 @@ graph LR
 | **search**         | Operativo                  | Búsqueda directa, atributos, pgvector, homólogos/OEM elegibles e interpretación de afijos, combinados y deduplicados en la experiencia web                             | Worker de reindexación completa y ranking híbrido único en backend                                                             |
 | **ai**             | Fundación implementada     | Puertos, adaptadores OpenAI, fakes deterministas y selección por configuración                                                                                         | Presupuestos, cuotas distribuidas y flujos de revisión humana completos                                                        |
 | **integrations**   | Puertos y stubs explícitos | Contratos para ERP, comercio y pedidos; fuente ERP en memoria; simulador PUSH AX `draft-0` local, volátil, autenticado e idempotente, sin mutar catálogo               | AX, PrestaShop y pedidos reales: VPN, credenciales y mapeos siguen pendientes                                                  |
+| **ax-integration** | Recepción persistente      | `POST /productos/sincronizar`, estado GET, Bearer M2M temporal, PostgreSQL e idempotencia por lote; dirección AX → PIM confirmada                                      | Aplicación al catálogo, M2M definitivo, VPN y reglas de precedencia                                                            |
 | **product-assets** | Operativo                  | Metadatos por SKU, binarios privados en memoria/S3, carga individual y ZIP parcial, descarga, reemplazo/borrado lógico y auditoría atómica                             | Antimalware, lifecycle/reconciliación de objetos huérfanos y configuración S3 de cada ambiente                                 |
 | **workspaces**     | Read model operativo       | Proyecciones protegidas para las pantallas no especializadas; Catálogos #37 es visible pero devuelve un estado bloqueado, sin filas ni operaciones ficticias           | Debe ceder comandos a los contextos propietarios; Catálogos requiere modelo persistente y contrato de seguridad y compartición |
 
@@ -80,8 +81,9 @@ replicables se propagan a los productos elegibles del mismo código unificador.
 ## Autenticación privada por defecto
 
 `JwtAuthGuard` y `RolesGuard` son guardas globales. Login local y health son las únicas
-rutas anónimas. El mock AX local omite JWT humano únicamente mediante un decorador que
-instala su guarda de sistema dedicada en el mismo paso; nunca queda sin autenticación. El
+rutas anónimas. Tanto el mock AX local como el receptor AX persistente omiten JWT humano
+únicamente mediante decoradores que instalan su guarda de sistema dedicada en el mismo paso;
+nunca quedan sin autenticación. El
 adaptador local toma una cuenta de variables validadas;
 `AUTH_MODE=local` se rechaza en PRD y en QAS requiere el opt-in explícito y temporal
 `ALLOW_LOCAL_AUTH_IN_QAS=true`. La autorización nueva usa capacidades; la matriz de

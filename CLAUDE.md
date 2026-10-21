@@ -45,7 +45,8 @@ packages/storage      ObjectStoragePort + S3StorageAdapter + InMemoryStorageAdap
 ```
 
 Bounded contexts in `apps/api/src/modules/`: catalog, categories, attributes, equivalences,
-search, ai, imports, integrations, identity, audit, health. Their real status is in
+search, ai, imports, integrations, ax-integration (durable AX -> PIM inbox), identity, audit,
+health. Their real status is in
 `docs/architecture/MODULE_ARCHITECTURE.md` — several are scaffolding on purpose.
 
 ## Commands

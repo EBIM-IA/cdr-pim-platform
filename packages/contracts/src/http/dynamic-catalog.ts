@@ -211,7 +211,7 @@ export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
   applicationType: z.enum(['AUTOMOTRIZ', 'INDUSTRIAL']).optional(),
   completeness: z.enum(['complete', 'attention', 'critical']).optional(),
   filter: filterQuerySchema.default([]),
-  /** Repeated JSON wire values: `{ "key": string, "values": string[] }`. */
+  /** Repeated JSON wire values: `{ "key": string, "values": string[] }` or `{ "key": string, "expression": string }`. */
   columnFilter: workbookColumnFilterQuerySchema.optional(),
   /** JSON wire value: `{ "key": string, "direction": "asc" | "desc" }`. */
   sort: z.string().min(3).max(500).optional(),

@@ -288,3 +288,21 @@ jobs:
           printf 'Tagged `%s:%s` as `%s` (`%s`).\n' \
             "$repository" "$SOURCE_COMMIT" "$RELEASE_TAG" "$source_digest" \
             >> "$GITHUB_STEP_SUMMARY"
+
+  # Keep QAS on the tip of main: once a main commit's three images are in ECR, promote them
+  # to QAS (migrations included) through promote.yml. Release tags only alias an existing
+  # image and deploy nothing; PRD is always a manual promotion. To pause it (e.g. a UAT
+  # freeze), add a required reviewer to the `qas` GitHub Environment: each run then waits.
+  deploy-qas:
+    name: Deploy to QAS
+    if: github.ref == 'refs/heads/main' && needs.validate-source.outputs.is_release != 'true'
+    needs: [validate-source, publish]
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/promote.yml
+    with:
+      environment: qas
+      image_tag: ${{ needs.validate-source.outputs.source_commit }}
+      run_migrations: true

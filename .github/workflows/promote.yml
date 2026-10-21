@@ -7,10 +7,28 @@
 # corresponding ECR tags to immutable digests, registers new ECS task definition revisions
 # pointing at those digests, and updates the services. Before any AWS credential is
 # requested, PRD verifies that its GitHub Environment requires an independent reviewer.
+#
+# Two ways in: by hand (workflow_dispatch, QAS or PRD), or from build-and-publish.yml, which
+# calls it after every main commit to keep QAS on the tip of main. A call can only reach QAS;
+# PRD is always a manual, reviewed promotion.
 # =============================================================================
 name: Promote
 
 on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (only qas is accepted from a call)
+        required: true
+        type: string
+      image_tag:
+        description: Full git commit SHA published by build-and-publish
+        required: true
+        type: string
+      run_migrations:
+        description: Run database migrations before updating the services
+        required: true
+        type: boolean
   workflow_dispatch:
     inputs:
       environment:
@@ -46,6 +64,7 @@ jobs:
       - id: validate
         name: Require an immutable SHA and known environment
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
           REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
@@ -56,6 +75,12 @@ jobs:
           fi
           if [[ "$REQUESTED_ENVIRONMENT" != 'qas' && "$REQUESTED_ENVIRONMENT" != 'prd' ]]; then
             echo '::error::environment must be qas or prd.'
+            exit 1
+          fi
+          # Inside a called workflow, event_name is the caller's event (push), never
+          # workflow_dispatch: an automatic promotion must not reach PRD.
+          if [[ "$EVENT_NAME" != 'workflow_dispatch' && "$REQUESTED_ENVIRONMENT" != 'qas' ]]; then
+            echo '::error::Only QAS is promoted automatically; PRD requires a manual promotion.'
             exit 1
           fi
           printf 'environment=%s\n' "$REQUESTED_ENVIRONMENT" >> "$GITHUB_OUTPUT"
@@ -95,6 +120,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ needs.validate-input.outputs.environment }}
+    # One promotion per environment at a time: two quick merges must not run migrations or
+    # update the services concurrently. A newer pending promotion supersedes an older one.
+    concurrency:
+      group: promote-${{ needs.validate-input.outputs.environment }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
@@ -227,14 +257,20 @@ jobs:
               *) echo "::error::Unsupported application: $app"; exit 1 ;;
             esac
 
-            # Start from the task definition currently in use, so CPU, memory, environment,
-            # secrets and IAM roles are carried over untouched. Only the image changes.
+            # Start from the task definition currently in use, so CPU, memory, environment
+            # and secrets are carried over. The immutable image and its matching observable
+            # version change together; otherwise /health/live reports a stale commit.
             aws ecs describe-task-definition \
               --task-definition "cdr-pim-$TARGET_ENVIRONMENT-$app" \
               --query taskDefinition > "td-$app.json"
 
-            jq --arg image "$image" '
+            jq --arg image "$image" --arg version "$IMAGE_TAG" '
               .containerDefinitions[0].image = $image
+              | .containerDefinitions[0].environment = (
+                  (.containerDefinitions[0].environment // [])
+                  | map(select(.name != "APP_VERSION"))
+                  + [{"name": "APP_VERSION", "value": $version}]
+                )
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                     .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
             ' "td-$app.json" > "new-td-$app.json"
@@ -260,7 +296,7 @@ jobs:
               "cdr-pim-$TARGET_ENVIRONMENT-worker" \
               "cdr-pim-$TARGET_ENVIRONMENT-web"
 
-      - name: Verify the running images match the promoted digests
+      - name: Verify the running images and versions match the promotion
         env:
           API_IMAGE: ${{ steps.digests.outputs.api_image }}
           WEB_IMAGE: ${{ steps.digests.outputs.web_image }}
@@ -283,12 +319,21 @@ jobs:
               --query 'services[0].taskDefinition' --output text)
             running=$(aws ecs describe-task-definition --task-definition "$task_definition" \
               --query 'taskDefinition.containerDefinitions[0].image' --output text)
+            running_version=$(aws ecs describe-task-definition \
+              --task-definition "$task_definition" \
+              --query "taskDefinition.containerDefinitions[0].environment[?name=='APP_VERSION'].value | [0]" \
+              --output text)
 
             if [[ "$running" != "$expected" ]]; then
               echo "::error::$app is running $running, expected $expected"
               status=1
-            else
-              echo "OK  $app  $running"
+            fi
+            if [[ "$running_version" != "$IMAGE_TAG" ]]; then
+              echo "::error::$app reports version $running_version, expected $IMAGE_TAG"
+              status=1
+            fi
+            if [[ "$running" == "$expected" && "$running_version" == "$IMAGE_TAG" ]]; then
+              echo "OK  $app  $running  version=$running_version"
             fi
           done
           exit "$status"

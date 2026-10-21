@@ -26,15 +26,16 @@ graph LR
 
 ## Status — and what is blocking each one
 
-| Integration      | Port                           | Adapter                                                    | Blocked on                                           |
-| ---------------- | ------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------- |
-| Dynamics AX      | `ErpProductSourcePort` ✅      | Stub that throws; `InMemoryErpProductSource` bound instead | Integration surface, entity mapping, VPN             |
-| AX PUSH mock     | `AxMockBatchStorePort` ✅      | Local-only, volatile simulator (`draft-0`)                 | Real contract, authentication and mapping from CDR   |
-| PrestaShop       | `CommercePublisherPort` ✅     | Stub that throws                                           | Version, API access, field mapping, network location |
-| Order-taking app | `OrderChannelPublisherPort` ✅ | Stub that throws                                           | Which system it is, and whether it has an API        |
-| OpenAI           | 3 ports ✅                     | Implemented + deterministic fakes                          | Nothing — an API key switches it on                  |
-| S3               | `ObjectStoragePort` ✅         | Implemented (`S3StorageAdapter`) + in-memory               | Nothing                                              |
-| SQS              | `QueuePort` ✅                 | Implemented (`SqsQueueAdapter`) + in-memory                | Nothing                                              |
+| Integration      | Port                           | Adapter                                           | Blocked on                                           |
+| ---------------- | ------------------------------ | ------------------------------------------------- | ---------------------------------------------------- |
+| Dynamics AX pull | `ErpProductSourcePort` ✅      | Legacy stub; not used by the confirmed direction  | Kept only until ADR-008 is superseded                |
+| AX inbound v1.1  | `AxInboxRepositoryPort` ✅     | Persistent PostgreSQL inbox + M2M REST controller | Catalog mapping, production M2M and VPN              |
+| AX PUSH mock     | `AxMockBatchStorePort` ✅      | Local-only, volatile simulator (`draft-0`)        | Retained for isolated developer tests                |
+| PrestaShop       | `CommercePublisherPort` ✅     | Stub that throws                                  | Version, API access, field mapping, network location |
+| Order-taking app | `OrderChannelPublisherPort` ✅ | Stub that throws                                  | Which system it is, and whether it has an API        |
+| OpenAI           | 3 ports ✅                     | Implemented + deterministic fakes                 | Nothing — an API key switches it on                  |
+| S3               | `ObjectStoragePort` ✅         | Implemented (`S3StorageAdapter`) + in-memory      | Nothing                                              |
+| SQS              | `QueuePort` ✅                 | Implemented (`SqsQueueAdapter`) + in-memory       | Nothing                                              |
 
 The three stubs **throw a documented `DependencyUnavailableError`** rather than returning
 empty results. Silence would be worse: an adapter that quietly returns nothing looks like
@@ -80,9 +81,23 @@ three category levels) are a test vocabulary derived from the current prototype 
 templates. They are **not** the production AX schema. Replacing `draft-0` requires a reviewed
 contract and must not silently change the existing version.
 
-This simulator does not resolve the pull-versus-push production decision. The existing
-`ErpProductSourcePort`, its in-memory development binding and the fail-fast
-`AxProductSourceAdapter` remain unchanged until CDR supplies the real integration surface.
+## Confirmed AX inbound receiver
+
+CDR confirmed that AX only sends information to the PIM. The hosted integration therefore
+uses a one-way push receiver:
+
+| Method | Path                                          | Purpose                           |
+| ------ | --------------------------------------------- | --------------------------------- |
+| `POST` | `/api/v1/productos/sincronizar`               | Validate and persist one AX batch |
+| `GET`  | `/api/v1/productos/sincronizaciones/{idLote}` | Read its durable reception state  |
+
+The inbox stores the validated records without updating the master catalog. Reusing the
+same `idLote` with the same canonical payload is idempotent; different content returns
+`409`. This transport guarantee is independent from the still-pending rules that decide
+whether an AX value may overwrite a manually enriched PIM value.
+
+The existing pull-oriented `ErpProductSourcePort` remains as legacy scaffolding until a new
+ADR supersedes ADR-008; it is not the implementation path for this confirmed integration.
 
 ## What Casa del Rulimán must decide or provide
 
@@ -90,15 +105,13 @@ None of this is invented. Each item blocks a specific piece of work.
 
 ### Dynamics AX 2012 R2
 
-1. **Integration surface** — AIF services? A staging/replication database? A scheduled
-   export? Each implies a different adapter and a different failure mode.
-2. **Authentication** — service account, domain, permissions.
-3. **Entity mapping** — which AX entities and fields correspond to SKU, name, description,
+1. **Authentication** — definitive M2M identity, rotation and permissions.
+2. **Entity mapping** — which AX entities and fields correspond to SKU, name, description,
    brand and manufacturer part number.
-4. **Delta field** — the field that reliably marks "modified since". Without a trustworthy
-   one, every synchronisation is a full scan.
-5. **Volume and cadence** — how many items change per day; how fresh the PIM must be.
-6. **Direction** — confirmation that the PIM never writes back to AX.
+3. **Stale rule** — how `fechaModificacion` prevents an older push from overwriting a newer
+   value, including records where that field is absent.
+4. **Volume and cadence** — maximum batch size, changes per day and retry window.
+5. **Network** — final VPN/internal ALB route for production.
 
 ### PrestaShop
 

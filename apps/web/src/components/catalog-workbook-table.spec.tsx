@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CatalogWorkbookTable, parseWorkbookDraft } from '@/components/catalog-workbook-table';
+import {
+  CatalogWorkbookTable,
+  parseWorkbookDraft,
+  serializeWorkbookColumnFilters,
+} from '@/components/catalog-workbook-table';
 
 const mocks = vi.hoisted(() => ({
   fetchWorkbook: vi.fn(),
@@ -113,6 +117,7 @@ const workbook = {
 afterEach(cleanup);
 
 beforeEach(() => {
+  window.localStorage.clear();
   Object.values(mocks).forEach((mock) => mock.mockReset());
   mocks.fetchWorkbook.mockResolvedValue(workbook);
   mocks.patchAttribute.mockResolvedValue({
@@ -127,6 +132,81 @@ beforeEach(() => {
 });
 
 describe('CatalogWorkbookTable', () => {
+  it('reorders the catalog columns and keeps the same order in the export', async () => {
+    const { container } = render(<CatalogWorkbookTable canEdit />);
+    await screen.findByRole('link', { name: 'SKU-1' });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Mover columna Descripción a la izquierda' }),
+    );
+
+    expect(
+      [
+        ...container.querySelectorAll<HTMLTableCellElement>(
+          'thead tr:nth-child(2) [data-column-key]',
+        ),
+      ]
+        .slice(0, 2)
+        .map((header) => header.dataset.columnKey),
+    ).toEqual(['base:name', 'base:sku']);
+
+    fireEvent.click(screen.getByRole('button', { name: /CSV · 2 filas$/u }));
+    await waitFor(() => {
+      expect(mocks.downloadCsv).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.arrayContaining(['Descripción', 'SKU']),
+        }),
+        'catalogo-pim-vista-filtrada',
+      );
+      const headers = mocks.downloadCsv.mock.calls.at(-1)?.[0].headers;
+      expect(headers.slice(0, 2)).toEqual(['Descripción', 'SKU']);
+    });
+  });
+
+  it('sends a typed AX expression to the backend instead of reducing it to page values', async () => {
+    render(<CatalogWorkbookTable canEdit />);
+    await screen.findByRole('link', { name: 'SKU-1' });
+
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Filtro de columna Código unificador' }),
+      { target: { value: '*trilo' } },
+    );
+
+    await waitFor(() => {
+      expect(mocks.fetchWorkbook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          columnFilter: [JSON.stringify({ key: 'base:unifier', expression: '*trilo' })],
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+    expect(
+      screen.getByRole('searchbox', { name: 'Filtro de columna Código unificador' }),
+    ).toHaveValue('*trilo');
+  });
+
+  it('keeps the global expression when exporting every matching page', async () => {
+    render(<CatalogWorkbookTable canEdit />);
+    await screen.findByRole('link', { name: 'SKU-1' });
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Filtro de columna Código unificador' }),
+      { target: { value: 'UNI-*' } },
+    );
+    await waitFor(() => expect(mocks.fetchWorkbook).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: /CSV · 2 filas$/u }));
+    await waitFor(() => {
+      expect(mocks.fetchWorkbook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          page: 1,
+          pageSize: 100,
+          columnFilter: [JSON.stringify({ key: 'base:unifier', expression: 'UNI-*' })],
+        }),
+      );
+      expect(mocks.downloadCsv).toHaveBeenCalled();
+    });
+  });
+
   it('renders the dynamic union, marks non-applicable cells and exports displayed columns', async () => {
     const onFacetsChange = vi.fn();
     render(
@@ -140,7 +220,9 @@ describe('CatalogWorkbookTable', () => {
     );
 
     expect(await screen.findByRole('link', { name: 'SKU-1' })).toBeVisible();
-    expect(screen.getByLabelText('Descripción técnica: no aplica')).toHaveTextContent('No aplica');
+    expect(await screen.findByLabelText('Descripción técnica: no aplica')).toHaveTextContent(
+      'No aplica',
+    );
     expect(mocks.fetchWorkbook).toHaveBeenCalledWith(
       expect.objectContaining({
         q: 'C3',
@@ -207,5 +289,16 @@ describe('parseWorkbookDraft', () => {
       kind: 'value',
       value: true,
     });
+  });
+});
+
+describe('serializeWorkbookColumnFilters', () => {
+  it('prefers a global expression over exact page values for the same column', () => {
+    expect(
+      serializeWorkbookColumnFilters(
+        { 'base:unifier': new Set(['value:UNI-1']) },
+        { 'base:unifier': '  *trilo  ' },
+      ),
+    ).toEqual([JSON.stringify({ key: 'base:unifier', expression: '*trilo' })]);
   });
 });
