@@ -24,3 +24,28 @@
 
 Hasta cerrar estas reglas, el procesador de catálogo debe permanecer desacoplado del buzón.
 Esto evita que una recepción válida sobrescriba datos enriquecidos con una política inventada.
+
+## Campos observados el 21 de octubre de 2026
+
+Las capturas de AX permiten ampliar el inventario de análisis, no el contrato v1.1. La validación
+actual permanece estricta y debe rechazar campos desconocidos hasta que exista una versión nueva
+aprobada.
+
+| Evidencia de AX                   | Destino candidato                      | Decisión pendiente                                   |
+| --------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| Código de artículo CDR            | SKU o identificador ERP                | Identidad canónica y tratamiento de ceros iniciales  |
+| Código de proveedor               | Identificador asociado al origen       | Unicidad por proveedor o marca                       |
+| Código unificador                 | Grupo de equivalencia                  | Alta, asociación y conflictos                        |
+| Marca                             | Marca base del producto                | Catálogo, normalización y precedencia                |
+| Fecha de creación y modificación  | Metadata de fuente                     | Regla de mensajes antiguos; no reemplazar fechas PIM |
+| Código de aduana                  | Nuevo tipo de identificador o atributo | Semántica y unicidad                                 |
+| Descripción                       | Nombre o descripción                   | Separar texto compuesto de descripción utilizable    |
+| Medidas                           | Atributos de la plantilla              | Descomposición, tipo y unidad por categoría          |
+| Frecuencia                        | `frecuencia_articulo`                  | Valores permitidos, incluidos códigos y `Ninguno`    |
+| Homólogo                          | Relación de homólogos                  | Código, marca, estado y aprobación                   |
+| Código OEM                        | Relación OEM                           | Marcas, estado y aprobación                          |
+| Observación o información técnica | `especificacion_observacion`           | Autoridad y posibilidad de edición manual            |
+| Jerarquía de categoría            | Ruta o metadata de origen              | Tratamiento de `ADQUISICIONES/MERCADERÍAS`           |
+
+Los campos adicionales del manifiesto ERP —`ecommerce`, `bloqueado_venta` y
+`bloqueado_compra`— también requieren confirmación aunque no aparezcan en las capturas recibidas.

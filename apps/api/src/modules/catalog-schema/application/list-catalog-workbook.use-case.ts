@@ -55,21 +55,39 @@ const COLUMN_KEY = /^(?:base:[a-z]+|attribute:[a-z0-9_]+)$/u;
 export function parseWorkbookColumnFilter(raw: string): CatalogWorkbookColumnFilter {
   try {
     const value: unknown = JSON.parse(raw);
+    const values =
+      value && typeof value === 'object' && 'values' in value ? value.values : undefined;
+    const expression =
+      value && typeof value === 'object' && 'expression' in value ? value.expression : undefined;
+    const validValues =
+      Array.isArray(values) &&
+      values.length > 0 &&
+      values.length <= 100 &&
+      values.every((entry) => typeof entry === 'string' && entry.length <= 500);
+    const normalizedExpression = typeof expression === 'string' ? expression.trim() : '';
+    const expressionTerms = normalizedExpression.split('|').map((term) => term.trim());
+    const validExpression =
+      typeof expression === 'string' &&
+      normalizedExpression.length > 0 &&
+      normalizedExpression.length <= 300 &&
+      !normalizedExpression.includes('\u0000') &&
+      expressionTerms.length <= 20 &&
+      expressionTerms.every(
+        (term) => Boolean(term) && term !== '!' && (term.match(/^!+/u)?.[0]?.length ?? 0) <= 10,
+      );
     if (
       !value ||
       typeof value !== 'object' ||
       !('key' in value) ||
       typeof value.key !== 'string' ||
       !COLUMN_KEY.test(value.key) ||
-      !('values' in value) ||
-      !Array.isArray(value.values) ||
-      value.values.length === 0 ||
-      value.values.length > 100 ||
-      value.values.some((entry) => typeof entry !== 'string' || entry.length > 500)
+      validValues === validExpression
     ) {
       throw new Error('shape');
     }
-    return { key: value.key, values: [...new Set(value.values)] };
+    return validValues
+      ? { key: value.key, values: [...new Set(values as string[])] }
+      : { key: value.key, expression: normalizedExpression };
   } catch {
     throw new ValidationError('Invalid workbook column filter', { filter: raw });
   }

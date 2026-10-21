@@ -120,6 +120,23 @@ que se consulta el mismo contenido.
 Campos desconocidos se rechazan. El límite técnico actual del cuerpo es 100 KiB y el límite
 operativo temporal es 30 solicitudes por minuto por IP.
 
+### Campos observados que todavía no pertenecen al contrato
+
+Las capturas de Dynamics AX entregadas el 21 de octubre de 2026 muestran además fecha de
+creación, código de aduana, descripción, medidas, frecuencia, homólogo, código OEM, observación
+técnica y una jerarquía de categorías. Esta evidencia sirve para preparar el mapeo, pero no define
+un payload: no confirma nombres JSON, tipos, obligatoriedad, semántica de vacío ni autoridad.
+
+El manifiesto PIM ya reconoce como campos de autoridad ERP `codigo_articulo`,
+`codigo_proveedor`, `codigo_unificador`, los tres niveles de categoría, `linea`,
+`tipo_aplicacion`, `marca`, `frecuencia_articulo`, `ecommerce`, `bloqueado_venta`,
+`bloqueado_compra` y `especificacion_observacion`. Que existan en el manifiesto no autoriza a
+agregarlos silenciosamente al contrato v1.1.
+
+Si el cliente aprueba campos adicionales, se publicarán en una versión nueva del contrato. En
+particular, medidas deben mapearse por plantilla, y homólogos y OEM deben crear o actualizar sus
+relaciones; no deben convertirse en campos escalares del producto.
+
 ## Persistencia
 
 - `ax_inbound_batches`: identidad externa, fechas, fuente, hash, correlación y cantidad.
@@ -137,10 +154,17 @@ La ruta responde `404` cuando `AX_INTEGRATION_MODE` está deshabilitado. Para QA
 AX_INTEGRATION_MODE=inbound
 AX_INTEGRATION_AUTH_MODE=static_bearer
 AX_INTEGRATION_TOKEN=<secreto de al menos 256 bits>
+RATE_LIMIT_INTEGRATION=30
 ```
 
 El token estático es una solución temporal de QAS. PRD rechaza esta configuración hasta que
 el cliente confirme el mecanismo M2M definitivo. El valor nunca se registra ni se devuelve.
+
+Estas variables deben llegar a la definición de tarea de la API desde
+`cdr-pim-infrastructure`. `AX_INTEGRATION_TOKEN` debe residir en AWS Secrets Manager y entrar como
+secreto de ECS; las otras variables son configuración no secreta. Mientras infraestructura no
+las inyecte, el `404` es el comportamiento esperado y no se debe abrir la ruta debilitando la
+guarda de la aplicación.
 
 ## Pendiente del cliente para aplicar al catálogo
 

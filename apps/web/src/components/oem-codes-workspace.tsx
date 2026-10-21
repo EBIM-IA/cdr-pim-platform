@@ -6,10 +6,29 @@ import type {
   OemSearchResultDto,
   UpdateGroupOemCodeInput,
 } from '@cdr/contracts';
-import { Check, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload, X } from 'lucide-react';
+import {
+  Check,
+  Columns3,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
+import { ReorderableColumnLabel, usePersistentColumnOrder } from '@/components/column-order';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
 import { TableExportButtons } from '@/components/table-export-buttons';
@@ -27,6 +46,7 @@ import {
 } from '@/lib/operational-api';
 
 type EditableOemColumn = 'oemCode' | 'brands' | 'approvalStatus';
+type OemColumn = 'unifiedCode' | EditableOemColumn | 'active';
 
 interface OemDraft {
   unifiedCode: string;
@@ -53,6 +73,24 @@ const labels: Record<OemApprovalStatus, string> = {
   approved: 'Aprobado',
   rejected: 'Rechazado',
 };
+
+const oemColumns: ReadonlyArray<{
+  key: OemColumn;
+  label: string;
+  exportValue: (row: GroupOemCodeDto) => string;
+}> = [
+  { key: 'unifiedCode', label: 'Código unificador', exportValue: (row) => row.unifiedCode },
+  { key: 'oemCode', label: 'Código OEM', exportValue: (row) => row.oemCode },
+  { key: 'brands', label: 'Marcas', exportValue: (row) => row.brands.join(', ') },
+  {
+    key: 'approvalStatus',
+    label: 'Aprobación',
+    exportValue: (row) => labels[row.approvalStatus],
+  },
+  { key: 'active', label: 'Estado', exportValue: (row) => (row.active ? 'Activo' : 'Inactivo') },
+];
+
+const oemColumnKeys = oemColumns.map((column) => column.key);
 
 function splitBrands(value: string): string[] {
   return [
@@ -134,6 +172,14 @@ export function OemCodesWorkspace({
       ),
     );
   }, [items, query]);
+
+  const columnOrder = usePersistentColumnOrder({
+    screenKey: 'equivalences-oem',
+    columnKeys: oemColumnKeys,
+  });
+  const orderedOemColumns = columnOrder.orderedColumnKeys.map((key) =>
+    oemColumns.find((column) => column.key === key)!,
+  );
 
   const toggleSelection = (id: string) => {
     setSelectedIds((current) => {
@@ -271,16 +317,20 @@ export function OemCodesWorkspace({
         <TableExportButtons
           filename="codigos-oem-filtrados"
           sheetName="OEM"
-          headers={['Código unificador', 'Código OEM', 'Marcas', 'Aprobación', 'Estado']}
-          rows={filtered.map((row) => [
-            row.unifiedCode,
-            row.oemCode,
-            row.brands.join(', '),
-            labels[row.approvalStatus],
-            row.active ? 'Activo' : 'Inactivo',
-          ])}
+          headers={orderedOemColumns.map((column) => column.label)}
+          rows={filtered.map((row) => orderedOemColumns.map((column) => column.exportValue(row)))}
           disabled={loading}
         />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={columnOrder.resetOrder}
+          disabled={columnOrder.isDefaultOrder}
+          title="Restaurar el orden original de las columnas"
+        >
+          <Columns3 className="size-4" aria-hidden="true" /> Restaurar columnas
+        </Button>
         {canWrite ? (
           <>
             <Button type="button" size="sm" onClick={() => setNewRow(true)} disabled={newRow}>
@@ -404,11 +454,13 @@ export function OemCodesWorkspace({
                       }
                     />
                   </th>
-                  <th className="px-4 py-3">Código unificador</th>
-                  <th className="px-4 py-3">Código OEM</th>
-                  <th className="px-4 py-3">Marcas</th>
-                  <th className="px-4 py-3">Aprobación</th>
-                  <th className="px-4 py-3">Estado</th>
+                  {orderedOemColumns.map((column) => (
+                    <th key={column.key} className="px-4 py-3">
+                      <ReorderableColumnLabel
+                        control={columnOrder.getColumnControl(column.key, column.label)}
+                      />
+                    </th>
+                  ))}
                   <th className="px-4 py-3">Guardado</th>
                 </tr>
               </thead>
@@ -416,52 +468,14 @@ export function OemCodesWorkspace({
                 {newRow ? (
                   <tr className="bg-orange-50/50">
                     <td className="px-4 py-2" />
-                    <td className="px-2 py-2">
-                      <Input
-                        autoFocus
-                        aria-label="Nuevo código unificador OEM"
-                        value={newDraft.unifiedCode}
-                        onChange={(event) =>
-                          setNewDraft((draft) => ({ ...draft, unifiedCode: event.target.value }))
-                        }
+                    {orderedOemColumns.map((column) => (
+                      <NewOemCell
+                        key={column.key}
+                        column={column.key}
+                        draft={newDraft}
+                        onChange={setNewDraft}
                       />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        aria-label="Nuevo código OEM"
-                        value={newDraft.oemCode}
-                        onChange={(event) =>
-                          setNewDraft((draft) => ({ ...draft, oemCode: event.target.value }))
-                        }
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        aria-label="Nuevas marcas OEM"
-                        value={newDraft.brands}
-                        onChange={(event) =>
-                          setNewDraft((draft) => ({ ...draft, brands: event.target.value }))
-                        }
-                        placeholder="Separadas por coma"
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Select
-                        label=""
-                        value={newDraft.approvalStatus}
-                        onChange={(event) =>
-                          setNewDraft((draft) => ({
-                            ...draft,
-                            approvalStatus: event.target.value as OemApprovalStatus,
-                          }))
-                        }
-                      >
-                        <option value="pending">Pendiente</option>
-                        <option value="approved">Aprobado</option>
-                        <option value="rejected">Rechazado</option>
-                      </Select>
-                    </td>
-                    <td className="px-4 py-2">Activo</td>
+                    ))}
                     <td className="px-2 py-2">
                       <div className="flex gap-1">
                         <Button
@@ -500,37 +514,20 @@ export function OemCodesWorkspace({
                         onChange={() => toggleSelection(row.id)}
                       />
                     </td>
-                    <td className="px-4 py-3 font-semibold">{row.unifiedCode}</td>
-                    {(['oemCode', 'brands', 'approvalStatus'] as const).map((column) => (
-                      <EditableOemCell
-                        key={column}
+                    {orderedOemColumns.map((column) => (
+                      <OemDataCell
+                        key={column.key}
+                        column={column.key}
                         row={row}
-                        column={column}
-                        canWrite={canWrite && row.active}
-                        editing={
-                          editingCell?.id === row.id && editingCell.column === column
-                            ? editingCell
-                            : null
-                        }
-                        saving={savingCell === `${row.id}:${column}`}
-                        onStart={() =>
-                          setEditingCell({
-                            id: row.id,
-                            column,
-                            draft:
-                              column === 'brands' ? row.brands.join(', ') : String(row[column]),
-                          })
-                        }
-                        onDraft={(draft) => setEditingCell({ id: row.id, column, draft })}
+                        canWrite={canWrite}
+                        editingCell={editingCell}
+                        savingCell={savingCell}
+                        onStart={setEditingCell}
+                        onDraft={setEditingCell}
                         onSave={() => void saveCell(row)}
                         onCancel={() => setEditingCell(null)}
                       />
                     ))}
-                    <td className="px-4 py-3">
-                      <StatusBadge tone={row.active ? 'success' : 'neutral'}>
-                        {row.active ? 'Activo' : 'Inactivo'}
-                      </StatusBadge>
-                    </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {savingCell?.startsWith(`${row.id}:`) ? 'Guardando…' : 'Al día'}
                     </td>
@@ -542,6 +539,112 @@ export function OemCodesWorkspace({
         </Card>
       )}
     </div>
+  );
+}
+
+function NewOemCell({
+  column,
+  draft,
+  onChange,
+}: {
+  column: OemColumn;
+  draft: OemDraft;
+  onChange: Dispatch<SetStateAction<OemDraft>>;
+}) {
+  if (column === 'active') return <td className="px-4 py-2">Activo</td>;
+  if (column === 'approvalStatus') {
+    return (
+      <td className="px-2 py-2">
+        <Select
+          label=""
+          value={draft.approvalStatus}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              approvalStatus: event.target.value as OemApprovalStatus,
+            }))
+          }
+        >
+          <option value="pending">Pendiente</option>
+          <option value="approved">Aprobado</option>
+          <option value="rejected">Rechazado</option>
+        </Select>
+      </td>
+    );
+  }
+
+  const field = column;
+  const ariaLabel =
+    column === 'unifiedCode'
+      ? 'Nuevo código unificador OEM'
+      : column === 'oemCode'
+        ? 'Nuevo código OEM'
+        : 'Nuevas marcas OEM';
+  return (
+    <td className="px-2 py-2">
+      <Input
+        autoFocus={column === 'unifiedCode'}
+        aria-label={ariaLabel}
+        value={draft[field]}
+        onChange={(event) => onChange((current) => ({ ...current, [field]: event.target.value }))}
+        placeholder={column === 'brands' ? 'Separadas por coma' : undefined}
+      />
+    </td>
+  );
+}
+
+function OemDataCell({
+  column,
+  row,
+  canWrite,
+  editingCell,
+  savingCell,
+  onStart,
+  onDraft,
+  onSave,
+  onCancel,
+}: {
+  column: OemColumn;
+  row: GroupOemCodeDto;
+  canWrite: boolean;
+  editingCell: EditingOemCell | null;
+  savingCell: string | null;
+  onStart: (next: EditingOemCell) => void;
+  onDraft: (next: EditingOemCell) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (column === 'unifiedCode') {
+    return <td className="px-4 py-3 font-semibold">{row.unifiedCode}</td>;
+  }
+  if (column === 'active') {
+    return (
+      <td className="px-4 py-3">
+        <StatusBadge tone={row.active ? 'success' : 'neutral'}>
+          {row.active ? 'Activo' : 'Inactivo'}
+        </StatusBadge>
+      </td>
+    );
+  }
+
+  return (
+    <EditableOemCell
+      row={row}
+      column={column}
+      canWrite={canWrite && row.active}
+      editing={editingCell?.id === row.id && editingCell.column === column ? editingCell : null}
+      saving={savingCell === `${row.id}:${column}`}
+      onStart={() =>
+        onStart({
+          id: row.id,
+          column,
+          draft: column === 'brands' ? row.brands.join(', ') : String(row[column]),
+        })
+      }
+      onDraft={(draft) => onDraft({ id: row.id, column, draft })}
+      onSave={onSave}
+      onCancel={onCancel}
+    />
   );
 }
 

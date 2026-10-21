@@ -197,18 +197,18 @@ Documentación de arquitectura completa en [`docs/architecture/`](docs/architect
 
 Deliberado, no olvidado. Cada punto está justificado en la documentación enlazada.
 
-| Área                    | Falta                                                                  | Bloqueado por                                                           |
-| ----------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Dynamics AX             | Adapter real (hoy es un stub que falla con un error documentado)       | Superficie de integración, mapeo de entidades y VPN — pendientes de CDR |
-| PrestaShop / pedidos    | Adapters reales                                                        | Acceso a API, mapeo de campos, ubicación de red                         |
-| Gobierno de plantillas  | Crear, clonar y publicar nuevas versiones desde la interfaz            | Flujo de aprobación y diccionario definitivo del cliente                |
-| Autenticación           | Fuente empresarial, refresh y revocación                               | ¿Cuentas administradas en el PIM o Active Directory/OIDC de CDR?        |
-| Auditoría               | Política final de retención, archivo y acceso a campos sensibles       | Requisitos operativos y regulatorios del cliente                        |
-| Búsqueda semántica      | Reindexación asíncrona del catálogo completo                           | Programación del worker y política operativa de reindexación            |
-| Activos                 | Antimalware y reconciliación/lifecycle de objetos                      | Servicios y políticas de plataforma de producción                       |
-| IA                      | Presupuesto, cuotas distribuidas y flujos completos de revisión humana | Debe existir antes de generar en volumen con una clave real             |
-| AWS                     | `terraform plan` / `apply`                                             | No se entregaron credenciales; no se inventó ninguna                    |
-| Perímetro de producción | WAF y límites de tráfico en el edge                                    | Infraestructura previa a exponer el servicio a internet                 |
+| Área                    | Falta                                                                  | Bloqueado por                                                          |
+| ----------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Dynamics AX             | Aplicar los lotes recibidos al catálogo maestro                        | Mapeo de campos, precedencia, M2M definitivo y VPN — pendientes de CDR |
+| PrestaShop / pedidos    | Adapters reales                                                        | Acceso a API, mapeo de campos, ubicación de red                        |
+| Gobierno de plantillas  | Crear, clonar y publicar nuevas versiones desde la interfaz            | Flujo de aprobación y diccionario definitivo del cliente               |
+| Autenticación           | Fuente empresarial, refresh y revocación                               | ¿Cuentas administradas en el PIM o Active Directory/OIDC de CDR?       |
+| Auditoría               | Política final de retención, archivo y acceso a campos sensibles       | Requisitos operativos y regulatorios del cliente                       |
+| Búsqueda semántica      | Reindexación asíncrona del catálogo completo                           | Programación del worker y política operativa de reindexación           |
+| Activos                 | Antimalware y reconciliación/lifecycle de objetos                      | Servicios y políticas de plataforma de producción                      |
+| IA                      | Presupuesto, cuotas distribuidas y flujos completos de revisión humana | Debe existir antes de generar en volumen con una clave real            |
+| AWS                     | Activar receptor AX en QAS y preparar promoción protegida a PRD        | Variables, secreto M2M, red/VPN y decisiones del cliente               |
+| Perímetro de producción | WAF y límites de tráfico en el edge                                    | Infraestructura previa a exponer el servicio a internet                |
 
 ---
 
@@ -218,6 +218,12 @@ Este repositorio es uno de dos:
 
 - **`cdr-pim-platform`** (este) — web, API, worker, librerías compartidas
 - **`cdr-pim-infrastructure`** — Terraform para AWS (QAS y PRD)
+
+Cada merge aprobado a `main` publica imágenes inmutables y promueve automáticamente el mismo
+SHA a QAS, migraciones incluidas. PRD conserva la promoción manual con revisión. Para habilitar
+el receptor AX en QAS, infraestructura debe inyectar `AX_INTEGRATION_MODE=inbound`,
+`AX_INTEGRATION_AUTH_MODE=static_bearer`, `RATE_LIMIT_INTEGRATION` y el secreto
+`AX_INTEGRATION_TOKEN` desde AWS Secrets Manager; el valor del token nunca se guarda aquí.
 
 Para trabajar en este código, empieza por [`CLAUDE.md`](CLAUDE.md): contiene las reglas de
 dependencia, los flujos habituales y lo que está prohibido.

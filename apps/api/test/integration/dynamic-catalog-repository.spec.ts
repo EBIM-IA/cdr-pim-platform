@@ -161,6 +161,15 @@ describe('DrizzleDynamicCatalogRepository', () => {
       position: 100,
       required: true,
     });
+    await database.db.insert(templateAttributeRoleAccess).values({
+      templateId: assignment!.templateId,
+      attributeDefinitionId: missingRequiredId,
+      role: 'COMPRAS',
+      canView: true,
+      canEdit: true,
+      canImport: true,
+      canExport: true,
+    });
     const [membership] = await database.db
       .select({ groupId: equivalenceGroupMembers.groupId })
       .from(equivalenceGroupMembers)
@@ -237,6 +246,66 @@ describe('DrizzleDynamicCatalogRepository', () => {
     ).resolves.toMatchObject({
       total: 1,
       items: [{ sku: 'D1672', applicationTypes: ['AUTOMOTRIZ', 'INDUSTRIAL'] }],
+    });
+    await expect(
+      repository.listWorkbook({
+        roles: ['COMPRAS'],
+        page: 1,
+        pageSize: 1,
+        filters: [],
+        columnFilters: [{ key: 'base:sku', expression: '*1672' }],
+      }),
+    ).resolves.toMatchObject({ total: 1, items: [{ sku: 'D1672' }] });
+    await expect(
+      repository.listWorkbook({
+        roles: ['COMPRAS'],
+        page: 1,
+        pageSize: 1,
+        filters: [],
+        columnFilters: [{ key: 'attribute:material_exclusivo_prueba', expression: '*ceramica*' }],
+      }),
+    ).resolves.toMatchObject({ total: 1, items: [{ sku: 'D1672' }] });
+    await expect(
+      repository.listWorkbook({
+        roles: ['COMPRAS'],
+        page: 1,
+        pageSize: 1,
+        filters: [],
+        columnFilters: [{ key: 'base:unifier', expression: '*sin-coincidencias*' }],
+      }),
+    ).resolves.toMatchObject({ total: 0, items: [] });
+    await expect(
+      repository.listWorkbook({
+        roles: ['COMPRAS'],
+        page: 1,
+        pageSize: 1,
+        filters: [],
+        columnFilters: [{ key: 'base:sku', expression: '*_*' }],
+      }),
+    ).resolves.toMatchObject({ total: 0, items: [] });
+    await expect(
+      repository.listWorkbook({
+        roles: ['COMPRAS'],
+        page: 1,
+        pageSize: 1,
+        q: 'D1672',
+        filters: [],
+        columnFilters: [{ key: 'attribute:requerido_faltante_prueba', expression: '""' }],
+      }),
+    ).resolves.toMatchObject({
+      total: 1,
+      items: [{ sku: 'D1672', attributes: { requerido_faltante_prueba: { applicable: true } } }],
+    });
+    const notApplicable = await repository.listWorkbook({
+      roles: ['COMPRAS'],
+      page: 1,
+      pageSize: 1,
+      filters: [],
+      columnFilters: [{ key: 'attribute:requerido_faltante_prueba', expression: '*no aplica*' }],
+    });
+    expect(notApplicable.total).toBeGreaterThan(0);
+    expect(notApplicable.items[0]?.attributes.requerido_faltante_prueba).toEqual({
+      applicable: false,
     });
 
     const completenessBeforeAsset = productRow!.completeness;

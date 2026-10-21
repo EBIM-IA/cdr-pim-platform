@@ -4,6 +4,7 @@ import type { GroupApplicationDto, UpdateGroupApplicationInput } from '@cdr/cont
 import {
   CarFront,
   Check,
+  Columns3,
   Download,
   Layers3,
   Plus,
@@ -23,6 +24,7 @@ import {
   type ExcelTableColumn,
   useExcelTableRows,
 } from '@/components/excel-table-filter';
+import { usePersistentColumnOrder } from '@/components/column-order';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -153,20 +155,7 @@ const applicationTableColumns: readonly ExcelTableColumn<
   },
 ];
 
-const editableApplicationColumns: readonly EditableApplicationColumn[] = [
-  'make',
-  'model',
-  'bodyStyle',
-  'fuel',
-  'traction',
-  'displacement',
-  'yearFrom',
-  'yearTo',
-  'area',
-  'subarea',
-  'engine',
-  'notes',
-];
+const applicationTableColumnKeys = applicationTableColumns.map((column) => column.key);
 
 function year(value: string): number | undefined {
   return value.trim() ? Number(value) : undefined;
@@ -281,24 +270,16 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     columns: applicationTableColumns,
     initialSort: { key: 'unifiedCode', direction: 'asc' },
   });
-  const exportRows = applicationTable.visibleRows.map((item) => [
-    item.unifiedCode,
-    item.vehicleType,
-    item.make,
-    item.model,
-    item.bodyStyle,
-    item.fuel,
-    item.traction,
-    item.displacement,
-    item.yearFrom,
-    item.yearTo,
-    item.area,
-    item.subarea,
-    item.engine,
-    item.notes,
-    item.source === 'import' ? 'Importación' : 'Manual',
-    item.active ? 'Activo' : 'Inactivo',
-  ]);
+  const applicationColumnOrder = usePersistentColumnOrder({
+    screenKey: 'applications',
+    columnKeys: applicationTableColumnKeys,
+  });
+  const orderedApplicationColumns = applicationColumnOrder.orderedColumnKeys.map((key) =>
+    applicationTableColumns.find((column) => column.key === key)!,
+  );
+  const exportRows = applicationTable.visibleRows.map((item) =>
+    orderedApplicationColumns.map((column) => column.getValue(item)),
+  );
   const vehicleTypes = useMemo(
     () =>
       [
@@ -507,27 +488,19 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               : 'aplicaciones-filtradas'
           }
           sheetName="Aplicaciones"
-          headers={[
-            'Código unificador',
-            'Contexto de aplicación',
-            'Marca',
-            'Modelo',
-            'Tipo',
-            'Combustible',
-            'Tracción',
-            'Cilindraje',
-            'Año desde',
-            'Año hasta',
-            'Área',
-            'Subárea',
-            'Motor',
-            'Notas',
-            'Origen',
-            'Estado',
-          ]}
+          headers={orderedApplicationColumns.map((column) => column.label)}
           rows={exportRows}
           disabled={loading}
         />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={applicationColumnOrder.resetOrder}
+          disabled={applicationColumnOrder.isDefaultOrder}
+        >
+          <Columns3 aria-hidden="true" className="size-4" /> Restaurar columnas
+        </Button>
         {canWrite ? (
           <>
             <Button
@@ -792,7 +765,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       }
                     />
                   </th>
-                  {applicationTableColumns.map((column) => (
+                  {orderedApplicationColumns.map((column) => (
                     <ExcelTableHeader
                       key={column.key}
                       columnKey={column.key}
@@ -808,6 +781,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                         applicationTable.setColumnFilter(column.key, values)
                       }
                       onSort={(direction) => applicationTable.setSort(column.key, direction)}
+                      reorder={applicationColumnOrder.getColumnControl(column.key, column.label)}
                     />
                   ))}
                   <th className="px-4 py-3">Guardado</th>
@@ -816,6 +790,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               <tbody className="divide-y">
                 {showForm ? (
                   <NewApplicationRow
+                    columns={applicationColumnOrder.orderedColumnKeys}
                     form={form}
                     saving={saving}
                     onField={updateField}
@@ -833,42 +808,32 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                         onChange={() => toggleSelection(item.id)}
                       />
                     </td>
-                    <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>
-                    <td className="px-4 py-3">{item.vehicleType ?? '—'}</td>
-                    {editableApplicationColumns.map((column) => (
-                      <InlineApplicationCell
+                    {applicationColumnOrder.orderedColumnKeys.map((column) => (
+                      <ApplicationDataCell
                         key={column}
                         item={item}
                         column={column}
-                        canWrite={canWrite && item.active}
-                        editing={
-                          editingCell?.applicationId === item.id && editingCell.column === column
-                            ? editingCell
-                            : null
-                        }
+                        canWrite={canWrite}
+                        editingCell={editingCell}
                         saving={cellSaving}
-                        onStart={() =>
+                        onStart={(editableColumn) =>
                           setEditingCell({
                             applicationId: item.id,
-                            column,
-                            draft: applicationCellValue(item, column),
+                            column: editableColumn,
+                            draft: applicationCellValue(item, editableColumn),
                           })
                         }
-                        onDraft={(draft) =>
-                          setEditingCell({ applicationId: item.id, column, draft })
+                        onDraft={(editableColumn, draft) =>
+                          setEditingCell({
+                            applicationId: item.id,
+                            column: editableColumn,
+                            draft,
+                          })
                         }
                         onSave={() => void saveCell(item)}
                         onCancel={() => setEditingCell(null)}
                       />
                     ))}
-                    <td className="px-4 py-3">
-                      {item.source === 'import' ? 'Importación' : 'Manual'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge tone={item.active ? 'success' : 'neutral'}>
-                        {item.active ? 'Activo' : 'Inactivo'}
-                      </StatusBadge>
-                    </td>
                     <td className="px-4 py-3">
                       <span className="text-xs text-muted-foreground">
                         {cellSaving ? 'Guardando…' : 'Al día'}
@@ -896,12 +861,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 }
 
 function NewApplicationRow({
+  columns,
   form,
   saving,
   onField,
   onSave,
   onCancel,
 }: {
+  columns: readonly ApplicationTableColumnKey[];
   form: ApplicationForm;
   saving: boolean;
   onField: <Key extends keyof ApplicationForm>(field: Key, value: ApplicationForm[Key]) => void;
@@ -911,126 +878,15 @@ function NewApplicationRow({
   return (
     <tr className="bg-orange-50/50">
       <td className="px-4 py-2" />
-      <td className="px-2 py-2">
-        <Input
-          autoFocus
-          aria-label="Nuevo código unificador de aplicación"
-          value={form.unifiedCode}
-          onChange={(event) => onField('unifiedCode', event.target.value)}
+      {columns.map((column, index) => (
+        <NewApplicationCell
+          key={column}
+          column={column}
+          form={form}
+          autoFocus={index === 0}
+          onField={onField}
         />
-      </td>
-      <td className="px-2 py-2">
-        <select
-          aria-label="Nuevo contexto de aplicación"
-          value={form.vehicleType}
-          onChange={(event) =>
-            onField('vehicleType', event.target.value as ApplicationForm['vehicleType'])
-          }
-          className="h-10 min-w-36 rounded-md border bg-white px-2 text-sm"
-        >
-          <option value="">Selecciona</option>
-          <option value="AUTOMOTRIZ">Automotriz</option>
-          <option value="INDUSTRIAL">Industrial</option>
-        </select>
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nueva marca de aplicación"
-          value={form.make}
-          onChange={(event) => onField('make', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo modelo de aplicación"
-          value={form.model}
-          onChange={(event) => onField('model', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo tipo de carrocería"
-          maxLength={200}
-          value={form.bodyStyle}
-          onChange={(event) => onField('bodyStyle', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo combustible"
-          maxLength={200}
-          value={form.fuel}
-          onChange={(event) => onField('fuel', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nueva tracción"
-          maxLength={200}
-          value={form.traction}
-          onChange={(event) => onField('traction', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo cilindraje"
-          maxLength={200}
-          value={form.displacement}
-          onChange={(event) => onField('displacement', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo año desde"
-          type="number"
-          min={1886}
-          max={2200}
-          value={form.yearFrom}
-          onChange={(event) => onField('yearFrom', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo año hasta"
-          type="number"
-          min={1886}
-          max={2200}
-          value={form.yearTo}
-          onChange={(event) => onField('yearTo', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nueva área"
-          maxLength={200}
-          value={form.area}
-          onChange={(event) => onField('area', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nueva subárea"
-          maxLength={200}
-          value={form.subarea}
-          onChange={(event) => onField('subarea', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevo motor"
-          value={form.engine}
-          onChange={(event) => onField('engine', event.target.value)}
-        />
-      </td>
-      <td className="px-2 py-2">
-        <Input
-          aria-label="Nuevas notas"
-          value={form.notes}
-          onChange={(event) => onField('notes', event.target.value)}
-        />
-      </td>
-      <td className="px-4 py-2">Manual</td>
-      <td className="px-4 py-2">Activo</td>
+      ))}
       <td className="px-2 py-2">
         <div className="flex gap-1">
           <Button
@@ -1055,6 +911,133 @@ function NewApplicationRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function NewApplicationCell({
+  column,
+  form,
+  autoFocus,
+  onField,
+}: {
+  column: ApplicationTableColumnKey;
+  form: ApplicationForm;
+  autoFocus: boolean;
+  onField: <Key extends keyof ApplicationForm>(field: Key, value: ApplicationForm[Key]) => void;
+}) {
+  if (column === 'source') return <td className="px-4 py-2">Manual</td>;
+  if (column === 'active') return <td className="px-4 py-2">Activo</td>;
+  if (column === 'vehicleType') {
+    return (
+      <td className="px-2 py-2">
+        <select
+          autoFocus={autoFocus}
+          aria-label="Nuevo contexto de aplicación"
+          value={form.vehicleType}
+          onChange={(event) =>
+            onField('vehicleType', event.target.value as ApplicationForm['vehicleType'])
+          }
+          className="h-10 min-w-36 rounded-md border bg-white px-2 text-sm"
+        >
+          <option value="">Selecciona</option>
+          <option value="AUTOMOTRIZ">Automotriz</option>
+          <option value="INDUSTRIAL">Industrial</option>
+        </select>
+      </td>
+    );
+  }
+
+  const field = column as keyof ApplicationForm;
+  const labels: Record<
+    Exclude<ApplicationTableColumnKey, 'source' | 'active' | 'vehicleType'>,
+    string
+  > = {
+    unifiedCode: 'Nuevo código unificador de aplicación',
+    make: 'Nueva marca de aplicación',
+    model: 'Nuevo modelo de aplicación',
+    bodyStyle: 'Nuevo tipo de carrocería',
+    fuel: 'Nuevo combustible',
+    traction: 'Nueva tracción',
+    displacement: 'Nuevo cilindraje',
+    yearFrom: 'Nuevo año desde',
+    yearTo: 'Nuevo año hasta',
+    area: 'Nueva área',
+    subarea: 'Nueva subárea',
+    engine: 'Nuevo motor',
+    notes: 'Nuevas notas',
+  };
+  const yearField = column === 'yearFrom' || column === 'yearTo';
+  return (
+    <td className="px-2 py-2">
+      <Input
+        autoFocus={autoFocus}
+        aria-label={labels[column]}
+        type={yearField ? 'number' : 'text'}
+        min={yearField ? 1886 : undefined}
+        max={yearField ? 2200 : undefined}
+        maxLength={
+          ['bodyStyle', 'fuel', 'traction', 'displacement', 'area', 'subarea'].includes(column)
+            ? 200
+            : undefined
+        }
+        value={String(form[field])}
+        onChange={(event) => onField(field, event.target.value as never)}
+      />
+    </td>
+  );
+}
+
+function ApplicationDataCell({
+  item,
+  column,
+  canWrite,
+  editingCell,
+  saving,
+  onStart,
+  onDraft,
+  onSave,
+  onCancel,
+}: {
+  item: GroupApplicationDto;
+  column: ApplicationTableColumnKey;
+  canWrite: boolean;
+  editingCell: EditingApplicationCell | null;
+  saving: boolean;
+  onStart: (column: EditableApplicationColumn) => void;
+  onDraft: (column: EditableApplicationColumn, draft: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  if (column === 'unifiedCode') {
+    return <td className="px-4 py-3 font-semibold">{item.unifiedCode}</td>;
+  }
+  if (column === 'vehicleType') return <td className="px-4 py-3">{item.vehicleType ?? '—'}</td>;
+  if (column === 'source') {
+    return <td className="px-4 py-3">{item.source === 'import' ? 'Importación' : 'Manual'}</td>;
+  }
+  if (column === 'active') {
+    return (
+      <td className="px-4 py-3">
+        <StatusBadge tone={item.active ? 'success' : 'neutral'}>
+          {item.active ? 'Activo' : 'Inactivo'}
+        </StatusBadge>
+      </td>
+    );
+  }
+  return (
+    <InlineApplicationCell
+      item={item}
+      column={column}
+      canWrite={canWrite && item.active}
+      editing={
+        editingCell?.applicationId === item.id && editingCell.column === column ? editingCell : null
+      }
+      saving={saving}
+      onStart={() => onStart(column)}
+      onDraft={(draft) => onDraft(column, draft)}
+      onSave={onSave}
+      onCancel={onCancel}
+    />
   );
 }
 

@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { ColumnOrderUserProvider } from '@/components/column-order';
 import { Button } from '@/components/ui/button';
 import type { AuthActor } from '@/lib/auth';
 import { logoutSession } from '@/lib/bff-client';
@@ -734,206 +735,208 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
   };
 
   return (
-    <div className="min-h-dvh w-full max-w-full overflow-x-clip bg-white">
-      <a
-        href="#main-content"
-        className="sr-only z-[100] rounded-md bg-cdr-ink px-4 py-2 text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
-      >
-        Saltar al contenido
-      </a>
-      <div className="flex min-h-dvh w-full max-w-full bg-white">
-        <Sidebar
-          open={menuOpen}
-          collapsed={sidebarCollapsed}
-          onClose={closeMenu}
-          labelledBy={navigationId}
-          capabilities={actor.capabilities}
-        />
-        <div className="min-w-0 max-w-full flex-1">
-          <header className="sticky top-0 z-30 flex h-14 max-w-full items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
-            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <Button
-                ref={menuButton}
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="shrink-0"
-                onClick={toggleNavigation}
-                aria-expanded={menuOpen || !sidebarCollapsed}
-                aria-controls={navigationId}
-                aria-label={
-                  sidebarCollapsed ? 'Expandir menú principal' : 'Contraer menú principal'
-                }
-              >
-                <Menu className="size-5" />
-              </Button>
-              <div className="relative">
+    <ColumnOrderUserProvider userId={actor.id}>
+      <div className="min-h-dvh w-full max-w-full overflow-x-clip bg-white">
+        <a
+          href="#main-content"
+          className="sr-only z-[100] rounded-md bg-cdr-ink px-4 py-2 text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+        >
+          Saltar al contenido
+        </a>
+        <div className="flex min-h-dvh w-full max-w-full bg-white">
+          <Sidebar
+            open={menuOpen}
+            collapsed={sidebarCollapsed}
+            onClose={closeMenu}
+            labelledBy={navigationId}
+            capabilities={actor.capabilities}
+          />
+          <div className="min-w-0 max-w-full flex-1">
+            <header className="sticky top-0 z-30 flex h-14 max-w-full items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <Button
+                  ref={menuButton}
                   type="button"
-                  className="h-9 rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
-                  onClick={() => {
-                    if (screenIndexOpen && screenIndexMode === 'map') {
-                      setScreenIndexOpen(false);
-                    } else {
-                      openScreenIndex('map');
-                    }
-                  }}
-                  aria-expanded={screenIndexOpen}
-                  aria-controls="screen-index"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={toggleNavigation}
+                  aria-expanded={menuOpen || !sidebarCollapsed}
+                  aria-controls={navigationId}
+                  aria-label={
+                    sidebarCollapsed ? 'Expandir menú principal' : 'Contraer menú principal'
+                  }
                 >
-                  <LayoutGrid aria-hidden="true" className="size-4" />
-                  Pantallas
-                  <ChevronDown aria-hidden="true" className="size-3.5" />
+                  <Menu className="size-5" />
                 </Button>
-                {screenIndexOpen ? (
-                  <div
-                    id="screen-index"
-                    className="absolute left-0 top-11 z-50 max-h-[min(76vh,720px)] w-[min(88vw,760px)] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-5"
+                <div className="relative">
+                  <Button
+                    type="button"
+                    className="h-9 rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
+                    onClick={() => {
+                      if (screenIndexOpen && screenIndexMode === 'map') {
+                        setScreenIndexOpen(false);
+                      } else {
+                        openScreenIndex('map');
+                      }
+                    }}
+                    aria-expanded={screenIndexOpen}
+                    aria-controls="screen-index"
                   >
-                    {screenIndexMode === 'map' ? (
-                      <>
-                        <div className="mb-4 flex items-start justify-between gap-4">
-                          <div>
-                            <strong className="text-sm text-cdr-ink">
-                              Mapa de pantallas · {TOTAL_SCREEN_COUNT} rutas
-                            </strong>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Inicio de sesión más {AUTHENTICATED_SCREEN_COUNT} rutas autenticadas.
-                              Cada pantalla identifica sus capacidades operativas y sus límites
-                              actuales.
-                            </p>
-                          </div>
-                          <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-primary">
-                            {TOTAL_SCREEN_COUNT} rutas
-                          </span>
-                        </div>
-                        <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] text-muted-foreground">
-                          <b className="text-foreground">Inicio de sesión</b> · acceso protegido;
-                          disponible al cerrar la sesión actual.
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-3">
-                          {screenIndex.map((group) => (
-                            <section key={group.label}>
-                              <h2 className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
-                                {group.label}
-                              </h2>
-                              <div className="grid gap-1">
-                                {group.links
-                                  .filter(([, , capability]) =>
-                                    actor.capabilities.includes(capability),
-                                  )
-                                  .map(([label, href]) => (
-                                    <Link
-                                      key={label}
-                                      href={href}
-                                      onClick={() => setScreenIndexOpen(false)}
-                                      className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-orange-50 hover:text-primary"
-                                    >
-                                      {label}
-                                    </Link>
-                                  ))}
-                              </div>
-                            </section>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="mb-4">
-                          <strong className="text-sm text-cdr-ink">Estados UX compartidos</strong>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Comportamientos verificables que complementan las {TOTAL_SCREEN_COUNT}{' '}
-                            pantallas.
-                          </p>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {uxStates.map(([label, description]) => (
-                            <div key={label} className="rounded-lg border bg-slate-50 p-3">
-                              <strong className="text-xs">{label}</strong>
-                              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                                {description}
+                    <LayoutGrid aria-hidden="true" className="size-4" />
+                    Pantallas
+                    <ChevronDown aria-hidden="true" className="size-3.5" />
+                  </Button>
+                  {screenIndexOpen ? (
+                    <div
+                      id="screen-index"
+                      className="absolute left-0 top-11 z-50 max-h-[min(76vh,720px)] w-[min(88vw,760px)] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-5"
+                    >
+                      {screenIndexMode === 'map' ? (
+                        <>
+                          <div className="mb-4 flex items-start justify-between gap-4">
+                            <div>
+                              <strong className="text-sm text-cdr-ink">
+                                Mapa de pantallas · {TOTAL_SCREEN_COUNT} rutas
+                              </strong>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Inicio de sesión más {AUTHENTICATED_SCREEN_COUNT} rutas
+                                autenticadas. Cada pantalla identifica sus capacidades operativas y
+                                sus límites actuales.
                               </p>
                             </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ) : null}
+                            <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-primary">
+                              {TOTAL_SCREEN_COUNT} rutas
+                            </span>
+                          </div>
+                          <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] text-muted-foreground">
+                            <b className="text-foreground">Inicio de sesión</b> · acceso protegido;
+                            disponible al cerrar la sesión actual.
+                          </div>
+                          <div className="grid gap-4 sm:grid-cols-3">
+                            {screenIndex.map((group) => (
+                              <section key={group.label}>
+                                <h2 className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
+                                  {group.label}
+                                </h2>
+                                <div className="grid gap-1">
+                                  {group.links
+                                    .filter(([, , capability]) =>
+                                      actor.capabilities.includes(capability),
+                                    )
+                                    .map(([label, href]) => (
+                                      <Link
+                                        key={label}
+                                        href={href}
+                                        onClick={() => setScreenIndexOpen(false)}
+                                        className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-orange-50 hover:text-primary"
+                                      >
+                                        {label}
+                                      </Link>
+                                    ))}
+                                </div>
+                              </section>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mb-4">
+                            <strong className="text-sm text-cdr-ink">Estados UX compartidos</strong>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Comportamientos verificables que complementan las {TOTAL_SCREEN_COUNT}{' '}
+                              pantallas.
+                            </p>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {uxStates.map(([label, description]) => (
+                              <div key={label} className="rounded-lg border bg-slate-50 p-3">
+                                <strong className="text-xs">{label}</strong>
+                                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                                  {description}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-4">
-              <Button
-                asChild
-                variant="secondary"
-                className="max-w-[180px] px-3 sm:w-[240px] sm:justify-start"
-              >
-                <Link
-                  href={
-                    actor.capabilities.includes('menu:ai-quality:view')
-                      ? '/quality?view=search'
-                      : '/products'
-                  }
-                  aria-label="Abrir la búsqueda del PIM"
+              <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-4">
+                <Button
+                  asChild
+                  variant="secondary"
+                  className="max-w-[180px] px-3 sm:w-[240px] sm:justify-start"
                 >
-                  <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="hidden truncate text-muted-foreground sm:inline">
-                    Buscar en PIM…
+                  <Link
+                    href={
+                      actor.capabilities.includes('menu:ai-quality:view')
+                        ? '/quality?view=search'
+                        : '/products'
+                    }
+                    aria-label="Abrir la búsqueda del PIM"
+                  >
+                    <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="hidden truncate text-muted-foreground sm:inline">
+                      Buscar en PIM…
+                    </span>
+                  </Link>
+                </Button>
+                <div className="hidden max-w-[220px] text-right leading-tight md:block">
+                  <strong className="block truncate text-sm" title={actor.email}>
+                    {actorName(actor.email)}
+                  </strong>
+                  <span
+                    className="mt-1 block truncate rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground"
+                    title={roleLabel}
+                  >
+                    {roleLabel}
                   </span>
-                </Link>
-              </Button>
-              <div className="hidden max-w-[220px] text-right leading-tight md:block">
-                <strong className="block truncate text-sm" title={actor.email}>
-                  {actorName(actor.email)}
-                </strong>
+                </div>
                 <span
-                  className="mt-1 block truncate rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground"
-                  title={roleLabel}
+                  className="grid size-10 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs font-semibold text-white"
+                  aria-label={`Perfil: ${actor.email}`}
                 >
-                  {roleLabel}
+                  {actorInitials(actor.email)}
                 </span>
+                {logoutError ? (
+                  <span role="alert" className="hidden max-w-48 text-xs text-destructive sm:inline">
+                    {logoutError}
+                  </span>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => void handleLogout()}
+                  disabled={loggingOut}
+                  aria-label={loggingOut ? 'Cerrando sesión' : 'Cerrar sesión'}
+                  title={loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+                >
+                  <LogOut aria-hidden="true" className="size-4" />
+                </Button>
               </div>
-              <span
-                className="grid size-10 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs font-semibold text-white"
-                aria-label={`Perfil: ${actor.email}`}
-              >
-                {actorInitials(actor.email)}
-              </span>
-              {logoutError ? (
-                <span role="alert" className="hidden max-w-48 text-xs text-destructive sm:inline">
-                  {logoutError}
-                </span>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => void handleLogout()}
-                disabled={loggingOut}
-                aria-label={loggingOut ? 'Cerrando sesión' : 'Cerrar sesión'}
-                title={loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
-              >
-                <LogOut aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-          </header>
+            </header>
 
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className="min-h-[calc(100dvh-96px)] min-w-0 max-w-full overflow-x-clip bg-white px-3 pb-16 pt-4 outline-none sm:px-5 lg:px-[35px]"
-          >
-            {children}
-          </main>
-          <FooterPager
-            collapsed={sidebarCollapsed}
-            capabilities={actor.capabilities}
-            onOpenIndex={() => openScreenIndex('map')}
-            onOpenStates={() => openScreenIndex('states')}
-          />
+            <main
+              id="main-content"
+              tabIndex={-1}
+              className="min-h-[calc(100dvh-96px)] min-w-0 max-w-full overflow-x-clip bg-white px-3 pb-16 pt-4 outline-none sm:px-5 lg:px-[35px]"
+            >
+              {children}
+            </main>
+            <FooterPager
+              collapsed={sidebarCollapsed}
+              capabilities={actor.capabilities}
+              onOpenIndex={() => openScreenIndex('map')}
+              onOpenStates={() => openScreenIndex('states')}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </ColumnOrderUserProvider>
   );
 }
