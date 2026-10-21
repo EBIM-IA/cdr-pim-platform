@@ -58,7 +58,7 @@ export class ReceiveAxBatchUseCase {
       integrationDirection: 'ax-to-pim',
     });
 
-    return acceptedResponse(receipt);
+    return acceptedResponse(receipt, correlationId);
   }
 }
 
@@ -70,7 +70,7 @@ export class GetAxBatchStatusUseCase {
     const receipt = await this.inbox.findByExternalId(idLote);
     if (!receipt) throw new NotFoundError('AX inbound batch', idLote);
     return {
-      ...acceptedResponse(receipt),
+      ...acceptedResponse(receipt, getCorrelationId() ?? newUuid()),
       fechaEnvio: receipt.fechaEnvio.toISOString(),
       sistemaOrigen: receipt.sistemaOrigen,
       requestHash: receipt.requestHash,
@@ -78,13 +78,13 @@ export class GetAxBatchStatusUseCase {
   }
 }
 
-function acceptedResponse(receipt: AxInboxReceipt): AxSyncAcceptedResponse {
+function acceptedResponse(receipt: AxInboxReceipt, correlationId: string): AxSyncAcceptedResponse {
   return {
     idLote: receipt.idLote,
     estado: 'RECIBIDO',
     registrosRecibidos: receipt.recordCount,
     fechaRecepcion: receipt.receivedAt.toISOString(),
-    correlationId: receipt.correlationId,
+    correlationId,
   };
 }
 
