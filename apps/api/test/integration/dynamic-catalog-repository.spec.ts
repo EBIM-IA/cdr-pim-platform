@@ -279,6 +279,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
         roles: ['COMPRAS'],
         page: 1,
         pageSize: 1,
+        q: 'D1672',
         filters: [],
         columnFilters: [{ key: 'base:sku', expression: '*_*' }],
       }),
