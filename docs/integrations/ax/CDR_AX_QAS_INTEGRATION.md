@@ -1,5 +1,29 @@
 # CDR PIM — Integración Sismetic / Dynamics AX · QAS
 
+> Guía técnica del contrato API v1.1. La guía operativa entregada al usuario puede tener una
+> versión documental posterior (actualmente v1.2) sin cambiar este contrato de transporte.
+
+## Estado actual de QAS
+
+El receptor AX está habilitado y protegido en QAS. El 22 de octubre de 2026 se volvió a
+validar contra el servicio desplegado:
+
+| Prueba                                 | Resultado             |
+| -------------------------------------- | --------------------- |
+| Salud API y dependencia PostgreSQL     | `200`                 |
+| Token de integración válido            | aceptado              |
+| Recepción de un lote                   | `202`                 |
+| Consulta del lote persistido           | `200`                 |
+| Reenvío exacto del mismo lote          | `202` sin duplicación |
+| Mismo `idLote` con contenido diferente | `409`                 |
+| Solicitud sin token                    | `401`                 |
+| Producto con tipo inválido             | `400`                 |
+
+La prueba crea únicamente registros identificables en el buzón AX; no modifica el catálogo
+maestro. Puede repetirse con `pnpm test:ax:qas`: el script solicita el token de manera oculta,
+no lo guarda y no lo imprime. La prueba de `429` se mantiene manual para no afectar a otros
+usuarios de QAS.
+
 ## Decisión funcional confirmada
 
 La integración es de una sola vía:
@@ -120,6 +144,10 @@ que se consulta el mismo contenido.
 Campos desconocidos se rechazan. El límite técnico actual del cuerpo es 100 KiB y el límite
 operativo temporal es 30 solicitudes por minuto por IP.
 
+Los valores de `idLote` de los ejemplos Postman usan GUID para evitar colisiones entre dos
+ejecuciones dentro del mismo segundo. Las pruebas de idempotencia usan variables congeladas:
+no cambie `idLote`, `fechaEnvio` ni el contenido entre el primer envío y el reintento exacto.
+
 ### Campos observados que todavía no pertenecen al contrato
 
 Las capturas de Dynamics AX entregadas el 21 de octubre de 2026 muestran además fecha de
@@ -148,7 +176,7 @@ que reenvíe los lotes ya recibidos.
 
 ## Seguridad y habilitación
 
-La ruta responde `404` cuando `AX_INTEGRATION_MODE` está deshabilitado. Para QAS requiere:
+La ruta responde `404` cuando `AX_INTEGRATION_MODE` está deshabilitado. QAS está activo con:
 
 ```text
 AX_INTEGRATION_MODE=inbound
@@ -160,11 +188,10 @@ RATE_LIMIT_INTEGRATION=30
 El token estático es una solución temporal de QAS. PRD rechaza esta configuración hasta que
 el cliente confirme el mecanismo M2M definitivo. El valor nunca se registra ni se devuelve.
 
-Estas variables deben llegar a la definición de tarea de la API desde
-`cdr-pim-infrastructure`. `AX_INTEGRATION_TOKEN` debe residir en AWS Secrets Manager y entrar como
-secreto de ECS; las otras variables son configuración no secreta. Mientras infraestructura no
-las inyecte, el `404` es el comportamiento esperado y no se debe abrir la ruta debilitando la
-guarda de la aplicación.
+Estas variables llegan a la definición de tarea de la API desde infraestructura.
+`AX_INTEGRATION_TOKEN` debe residir en AWS Secrets Manager y entrar como secreto de ECS; las otras
+variables son configuración no secreta. El token nunca se registra, se incorpora a Postman, se
+documenta ni se versiona. Si se comparte por chat, correo, ticket o captura, debe rotarse.
 
 ## Pendiente del cliente para aplicar al catálogo
 
@@ -180,4 +207,6 @@ guarda de la aplicación.
 
 - [OpenAPI](./openapi-ax-v1.json)
 - [Colección Postman](./CDR_AX_QAS.postman_collection.json)
+- [Guía operativa PDF v1.2](./Guia_Pruebas_API_AX_CDR_PIM_QAS_v1.2.pdf)
 - [Decisiones pendientes de aplicación al catálogo](./NEXT_DB_PHASE.md)
+- Prueba automatizada segura: `pnpm test:ax:qas`

@@ -10,6 +10,7 @@ build/
 .next-build/
 apps/web/next-env.d.ts
 out/
+output/
 *.tsbuildinfo
 
 # Python tooling used only to regenerate source manifests

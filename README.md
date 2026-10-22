@@ -207,7 +207,7 @@ Deliberado, no olvidado. Cada punto está justificado en la documentación enlaz
 | Búsqueda semántica      | Reindexación asíncrona del catálogo completo                           | Programación del worker y política operativa de reindexación           |
 | Activos                 | Antimalware y reconciliación/lifecycle de objetos                      | Servicios y políticas de plataforma de producción                      |
 | IA                      | Presupuesto, cuotas distribuidas y flujos completos de revisión humana | Debe existir antes de generar en volumen con una clave real            |
-| AWS                     | Activar receptor AX en QAS y preparar promoción protegida a PRD        | Variables, secreto M2M, red/VPN y decisiones del cliente               |
+| AWS                     | Preparar la integración AX definitiva y la promoción protegida a PRD   | M2M definitivo, red/VPN y decisiones del cliente                       |
 | Perímetro de producción | WAF y límites de tráfico en el edge                                    | Infraestructura previa a exponer el servicio a internet                |
 
 ---
@@ -220,10 +220,19 @@ Este repositorio es uno de dos:
 - **`cdr-pim-infrastructure`** — Terraform para AWS (QAS y PRD)
 
 Cada merge aprobado a `main` publica imágenes inmutables y promueve automáticamente el mismo
-SHA a QAS, migraciones incluidas. PRD conserva la promoción manual con revisión. Para habilitar
-el receptor AX en QAS, infraestructura debe inyectar `AX_INTEGRATION_MODE=inbound`,
+SHA a QAS, migraciones incluidas. PRD conserva la promoción manual con revisión. El receptor AX
+de QAS está habilitado con autenticación M2M temporal y fue validado el 22 de octubre de 2026.
+Infraestructura inyecta `AX_INTEGRATION_MODE=inbound`,
 `AX_INTEGRATION_AUTH_MODE=static_bearer`, `RATE_LIMIT_INTEGRATION` y el secreto
-`AX_INTEGRATION_TOKEN` desde AWS Secrets Manager; el valor del token nunca se guarda aquí.
+`AX_INTEGRATION_TOKEN`; el valor del token nunca se guarda aquí. Para repetir la matriz de
+conectividad, recepción, consulta, idempotencia y seguridad sin persistir la credencial:
+
+```bash
+pnpm test:ax:qas
+```
+
+La configuración de PRD permanece deshabilitada hasta aprobar el mecanismo M2M y la VPN
+definitivos.
 
 Para trabajar en este código, empieza por [`CLAUDE.md`](CLAUDE.md): contiene las reglas de
 dependencia, los flujos habituales y lo que está prohibido.
