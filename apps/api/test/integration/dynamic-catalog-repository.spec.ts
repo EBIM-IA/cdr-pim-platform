@@ -6,6 +6,7 @@ import { seedDemoCatalog } from '../../src/database/demo-seed';
 import {
   attributeDefinitions,
   attributeTemplates,
+  catalogCategories,
   equivalenceGroupMembers,
   equivalenceGroups,
   groupApplications,
@@ -106,6 +107,145 @@ describe('DrizzleDynamicCatalogRepository', () => {
     });
     expect(result).toMatchObject({ total: 1, items: [{ sku: 'D1672' }] });
     expect(result.items[0]?.attributes.codigo_proveedor?.value).toContain('CARBON');
+  });
+
+  it('filters a parent category across its real descendants and all template variants', async () => {
+    const [root] = await database.db
+      .select()
+      .from(catalogCategories)
+      .where(eq(catalogCategories.slug, 'filtros'));
+    expect(root?.active).toBe(true);
+    const categories = await repository.listActiveCategories(['COMPRAS']);
+    const filterTemplates = categories.filter((category) => category.slug.startsWith('filtros-'));
+    expect(filterTemplates.length).toBeGreaterThan(3);
+    expect(filterTemplates.every((category) => category.ancestors?.[0]?.id === root!.id)).toBe(
+      true,
+    );
+    const expected = await database.db
+      .select({ id: products.id, sku: products.sku, brand: products.brand })
+      .from(products)
+      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .where(
+        inArray(
+          productTemplateAssignments.templateId,
+          filterTemplates.map((item) => item.templateId),
+        ),
+      )
+      .orderBy(products.sku);
+    const scope = {
+      categoryId: root!.id as ReturnType<typeof assertUuid>,
+      roles: ['COMPRAS'],
+      filters: [],
+    };
+    const all = await repository.listWorkbook({ ...scope, page: 1, pageSize: 100 });
+    const first = await repository.listWorkbook({ ...scope, page: 1, pageSize: 2 });
+    const second = await repository.listWorkbook({ ...scope, page: 2, pageSize: 2 });
+
+    expect(all.total).toBe(expected.length);
+    expect(all.items.map((item) => item.id)).toEqual(expected.map((item) => item.id));
+    expect(new Set(all.items.map((item) => item.id)).size).toBe(all.total);
+    expect(first.total).toBe(all.total);
+    expect(second.total).toBe(all.total);
+    expect([...first.items, ...second.items].map((item) => item.id)).toEqual(
+      expected.slice(0, 4).map((item) => item.id),
+    );
+    expect(all.facets.brands).toEqual(
+      [...new Set(expected.map((item) => item.brand).filter(Boolean))].sort((left, right) =>
+        left!.localeCompare(right!, 'es'),
+      ),
+    );
+    expect(all.columns.length).toBeGreaterThan(5);
+    expect(all.items.some((item) => item.template?.variantKey === '22.1')).toBe(true);
+    expect(all.items.some((item) => item.template?.variantKey === '22.2')).toBe(true);
+
+    const intermediateId = filterTemplates
+      .find((item) => item.templateVariantKey === '22.1')!
+      .ancestors!.at(-1)!.id;
+    const air = await repository.listWorkbook({
+      ...scope,
+      categoryId: intermediateId,
+      page: 1,
+      pageSize: 100,
+    });
+    expect(new Set(air.items.map((item) => item.template?.variantKey))).toEqual(
+      new Set(['22.1', '22.2']),
+    );
+    expect(air.total).toBe(air.items.length);
+    expect(
+      await repository.listWorkbook({ ...scope, categoryId: newUuid(), page: 1, pageSize: 25 }),
+    ).toMatchObject({ total: 0, columns: [], items: [] });
+  });
+
+  it('keeps unclassified and inactive-template SKU searchable and paginated without editable cells', async () => {
+    const unclassifiedId = newUuid();
+    await database.db.insert(products).values({
+      id: unclassifiedId,
+      sku: 'UNCLASSIFIED-QA',
+      name: 'Pendiente de clasificación',
+      brand: 'QA BRAND',
+      status: 'in_review',
+    });
+    const [inactiveProduct] = await database.db
+      .select({ id: products.id, templateId: productTemplateAssignments.templateId })
+      .from(products)
+      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .where(eq(products.sku, 'D1672'));
+    await database.db
+      .update(attributeTemplates)
+      .set({ status: 'retired' })
+      .where(eq(attributeTemplates.id, inactiveProduct!.templateId));
+    const options = { roles: ['COMPRAS'], page: 1, pageSize: 100, filters: [] };
+    const all = await repository.listWorkbook(options);
+    expect(all.total).toBe(98);
+    const pending = all.items.find((item) => item.id === unclassifiedId);
+    expect(pending).toMatchObject({ category: null, template: null, completeness: null });
+    expect(Object.values(pending!.attributes).every((cell) => !cell.applicable)).toBe(true);
+    const inactive = all.items.find((item) => item.id === inactiveProduct!.id);
+    expect(inactive?.category).not.toBeNull();
+    expect(inactive).toMatchObject({ template: null, completeness: null });
+    expect(Object.values(inactive!.attributes).every((cell) => !cell.applicable)).toBe(true);
+    expect(all.facets.brands).toContain('QA BRAND');
+    const search = await repository.listWorkbook({ ...options, q: 'UNCLASSIFIED-QA', pageSize: 1 });
+    expect(search).toMatchObject({ total: 1, items: [{ id: unclassifiedId }] });
+    const emptySecondPage = await repository.listWorkbook({
+      ...options,
+      q: 'UNCLASSIFIED-QA',
+      page: 2,
+      pageSize: 1,
+    });
+    expect(emptySecondPage).toMatchObject({ total: 1, items: [] });
+    const notApplicable = await repository.listWorkbook({
+      ...options,
+      q: 'UNCLASSIFIED-QA',
+      columnFilters: [
+        { key: 'attribute:codigo_proveedor', values: ['__cdr_excel_not_applicable__'] },
+      ],
+    });
+    expect(notApplicable.total).toBe(1);
+
+    await database.db
+      .update(attributeTemplates)
+      .set({ status: 'active' })
+      .where(eq(attributeTemplates.id, inactiveProduct!.templateId));
+    await database.db
+      .update(catalogCategories)
+      .set({ active: false })
+      .where(eq(catalogCategories.id, inactive!.category!.id));
+    const inactiveCategory = await repository.listWorkbook({ ...options, q: 'D1672' });
+    const inactiveCategoryProduct = inactiveCategory.items.find(
+      (item) => item.id === inactiveProduct!.id,
+    );
+    expect(inactiveCategoryProduct).toMatchObject({ template: null, completeness: null });
+    expect(
+      Object.values(inactiveCategoryProduct!.attributes).every((cell) => !cell.applicable),
+    ).toBe(true);
+
+    await database.db.update(attributeTemplates).set({ status: 'retired' });
+    expect(await repository.listWorkbook({ ...options, q: 'UNCLASSIFIED-QA' })).toMatchObject({
+      total: 1,
+      columns: [],
+      items: [{ id: unclassifiedId, template: null, completeness: null, attributes: {} }],
+    });
   });
 
   it('builds a role-filtered workbook union with applicability and attribute-value search', async () => {
@@ -310,6 +450,12 @@ describe('DrizzleDynamicCatalogRepository', () => {
     });
 
     const completenessBeforeAsset = productRow!.completeness;
+    const sheetBeforeAsset = await repository.getProductSheet(
+      product!.id as ReturnType<typeof assertUuid>,
+      ['COMPRAS'],
+    );
+    expect(sheetBeforeAsset?.completeness).toBe(completenessBeforeAsset);
+    expect(sheetBeforeAsset!.completeness).toBeLessThan(100);
     await database.db.insert(productAssets).values({
       id: newUuid(),
       productId: product!.id,
@@ -331,7 +477,14 @@ describe('DrizzleDynamicCatalogRepository', () => {
       filters: [],
     });
     expect(afterAsset.items.find((item) => item.id === product!.id)!.completeness).toBeGreaterThan(
-      completenessBeforeAsset,
+      completenessBeforeAsset!,
+    );
+    const sheetAfterAsset = await repository.getProductSheet(
+      product!.id as ReturnType<typeof assertUuid>,
+      ['COMPRAS'],
+    );
+    expect(sheetAfterAsset?.completeness).toBe(
+      afterAsset.items.find((item) => item.id === product!.id)!.completeness,
     );
     expect(
       (

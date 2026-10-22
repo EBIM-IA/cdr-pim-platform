@@ -145,6 +145,7 @@ const sheet: ProductAttributeSheetDto = {
 };
 
 beforeEach(() => {
+  window.history.replaceState({}, '', `/products/${product.id}`);
   vi.clearAllMocks();
   vi.mocked(fetchProduct).mockResolvedValue(product);
   vi.mocked(fetchProductAttributeSheet).mockResolvedValue(sheet);
@@ -244,7 +245,7 @@ describe('ProductDetailView operational data', () => {
     expect(persistentContext).not.toBeNull();
     expect(within(persistentContext as HTMLElement).getByText('D1672-CARBON')).toBeInTheDocument();
     expect(within(persistentContext as HTMLElement).getByText('CDR')).toBeInTheDocument();
-    expect(persistentContext?.parentElement).toHaveClass('sticky', 'top-16');
+    expect(persistentContext?.parentElement).toHaveClass('sticky', 'top-12', 'md:top-0');
     expect(
       within(persistentContext?.parentElement as HTMLElement).getByRole('tablist', {
         name: 'Secciones de la ficha',
@@ -280,7 +281,7 @@ describe('ProductDetailView operational data', () => {
 
     render(<ProductDetailView productId={product.id} />);
 
-    expect(await screen.findByRole('heading', { name: product.name })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: product.sku, level: 1 })).toBeInTheDocument();
     expect(screen.getByText('SKU')).toBeInTheDocument();
     expect(screen.queryByText('No pudimos mostrar esta ficha')).not.toBeInTheDocument();
   });
@@ -295,7 +296,9 @@ describe('ProductDetailView operational data', () => {
     );
 
     const rendered = within(view.container);
-    expect(await rendered.findByRole('heading', { name: product.name })).toBeInTheDocument();
+    expect(
+      await rendered.findByRole('heading', { name: product.sku, level: 1 }),
+    ).toBeInTheDocument();
     expect(rendered.queryByText('Publicado')).not.toBeInTheDocument();
     expect(rendered.queryByText('Regla pendiente')).not.toBeInTheDocument();
     expect(rendered.getByText('Información PIM')).toBeInTheDocument();
@@ -305,7 +308,7 @@ describe('ProductDetailView operational data', () => {
     const view = render(<ProductDetailView productId={product.id} />);
     const rendered = within(view.container);
 
-    await rendered.findByRole('heading', { name: product.name });
+    await rendered.findByRole('heading', { name: product.sku, level: 1 });
     fireEvent.click(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' }));
 
     const dialog = rendered.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
@@ -414,6 +417,272 @@ describe('ProductDetailView operational data', () => {
         'Cambios guardados y heredados a 1 SKU del mismo código unificador.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('opens the technical sheet in direct edit mode with versions while keeping ERP values read-only', async () => {
+    const editableSheet: ProductAttributeSheetDto = {
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    };
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue(editableSheet);
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+
+    expect(rendered.queryByRole('textbox', { name: 'Código unificador' })).not.toBeInTheDocument();
+    fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
+      target: { value: 'Pastilla semimetálica' },
+    });
+    fireEvent.click(rendered.getByRole('button', { name: 'Guardar atributos' }));
+
+    await waitFor(() =>
+      expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
+        updates: [
+          {
+            attributeKey: 'descripcion_interna',
+            value: 'Pastilla semimetálica',
+            expectedVersion: 1,
+          },
+        ],
+      }),
+    );
+    expect(await rendered.findByText('Cambios guardados para este SKU.')).toBeInTheDocument();
+  });
+
+  it('preserves unsaved technical edits when switching between product tabs', async () => {
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+    fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
+      target: { value: 'Borrador sin guardar' },
+    });
+    fireEvent.click(rendered.getByRole('tab', { name: 'Aplicaciones' }));
+    expect(await rendered.findByText('Toyota · Hilux')).toBeVisible();
+    fireEvent.click(rendered.getByRole('tab', { name: 'Información técnica' }));
+
+    expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Borrador sin guardar',
+    );
+    expect(patchProductAttributes).not.toHaveBeenCalled();
+  });
+
+  it('keeps a discarded direct editor closed when switching tabs and allows explicitly reopening it', async () => {
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+    const input = await rendered.findByRole('textbox', { name: 'Descripción interna' });
+    fireEvent.change(input, { target: { value: 'Cambio descartado' } });
+    fireEvent.click(rendered.getByRole('button', { name: 'Cancelar edición' }));
+    expect(
+      rendered.queryByRole('textbox', { name: 'Descripción interna' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(rendered.getByRole('tab', { name: 'Aplicaciones' }));
+    fireEvent.click(rendered.getByRole('tab', { name: 'Información técnica' }));
+    expect(
+      rendered.queryByRole('textbox', { name: 'Descripción interna' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(rendered.getByRole('button', { name: 'Editar enriquecimiento' }));
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+    expect(patchProductAttributes).not.toHaveBeenCalled();
+  });
+
+  it('keeps inline drafts visible on a concurrency conflict and does not overwrite newer values', async () => {
+    const { DynamicCatalogApiError } = await import('@/lib/dynamic-catalog-api');
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    vi.mocked(patchProductAttributes).mockRejectedValue(
+      new DynamicCatalogApiError('Conflict', 409),
+    );
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+    fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
+      target: { value: 'Valor en conflicto' },
+    });
+    fireEvent.click(rendered.getByRole('button', { name: 'Guardar atributos' }));
+
+    expect(await rendered.findByRole('alert')).toHaveTextContent(
+      'Otro usuario actualizó estos atributos',
+    );
+    expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Valor en conflicto',
+    );
+    expect(patchProductAttributes).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps administrator enrichment shortcuts in the existing draft and blocks subtype changes until it is resolved', async () => {
+    const alternativeTemplateId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    vi.mocked(fetchCatalogCategories).mockResolvedValue([
+      {
+        id: sheet.schema.category.id,
+        slug: sheet.schema.category.slug,
+        name: sheet.schema.category.name,
+        path: sheet.schema.category.name,
+        templateId: sheet.schema.template.id,
+        templateVariantKey: sheet.schema.template.variantKey,
+        templateName: sheet.schema.template.name,
+        templateVersion: 1,
+      },
+      {
+        id: sheet.schema.category.id,
+        slug: sheet.schema.category.slug,
+        name: sheet.schema.category.name,
+        path: sheet.schema.category.name,
+        templateId: alternativeTemplateId,
+        templateVariantKey: '15.2',
+        templateName: 'Otra plantilla',
+        templateVersion: 1,
+      },
+    ]);
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+    const selector = await rendered.findByRole('combobox', { name: 'Subtipo de plantilla' });
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+    fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
+      target: { value: 'Borrador preservado' },
+    });
+    fireEvent.click(rendered.getByRole('button', { name: 'Editar enriquecimiento' }));
+
+    expect(rendered.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Borrador preservado',
+    );
+    expect(selector).toBeDisabled();
+    fireEvent.change(selector, { target: { value: alternativeTemplateId } });
+    expect(reassignProductTemplate).not.toHaveBeenCalled();
+    expect(patchProductAttributes).not.toHaveBeenCalled();
+    expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Borrador preservado',
+    );
+    fireEvent.click(rendered.getByRole('button', { name: 'Cancelar edición' }));
+    expect(selector).toBeEnabled();
+  });
+
+  it('opens administrator enrichment deep links directly in the technical editor', async () => {
+    window.history.replaceState({}, '', `/products/${product.id}?edit=enrichment`);
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    const view = render(
+      <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
+    );
+    const rendered = within(view.container);
+
+    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Pastilla cerámica',
+    );
+    expect(rendered.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(window.location.search).not.toContain('edit=');
+    expect(rendered.getByRole('tab', { name: 'Información técnica' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('uses official readiness in both completeness meters while reporting visible coverage separately', async () => {
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({ ...sheet, completeness: 50 });
+    const view = render(<ProductDetailView productId={product.id} showCompleteness />);
+    const rendered = within(view.container);
+
+    expect(
+      await rendered.findByRole('progressbar', { name: `Completitud de ${product.sku}` }),
+    ).toHaveAttribute('aria-valuenow', '50');
+    expect(rendered.getByRole('progressbar', { name: 'Completitud de plantilla' })).toHaveAttribute(
+      'aria-valuenow',
+      '50',
+    );
+    expect(rendered.getByText('Cobertura visible: 2/2 atributos con valor')).toBeInTheDocument();
+  });
+
+  it('preserves an official unmeasured score instead of falling back to an older product score', async () => {
+    vi.mocked(fetchProduct).mockResolvedValue({ ...product, completeness: 85 });
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({ ...sheet, completeness: null });
+    const view = render(<ProductDetailView productId={product.id} showCompleteness />);
+    const rendered = within(view.container);
+    await rendered.findByRole('heading', { name: product.sku, level: 1 });
+
+    expect(
+      rendered.queryByRole('progressbar', { name: `Completitud de ${product.sku}` }),
+    ).not.toBeInTheDocument();
+    expect(
+      rendered.queryByRole('progressbar', { name: 'Completitud de plantilla' }),
+    ).not.toBeInTheDocument();
   });
 
   it('reassigns an explicit template variant without changing the product category', async () => {

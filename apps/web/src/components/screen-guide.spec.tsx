@@ -30,9 +30,8 @@ describe('ScreenGuide', () => {
     const details = summary?.closest('details');
 
     expect(details).not.toHaveAttribute('open');
-    expect(summary?.querySelector('.truncate')).toHaveTextContent(
-      'Resume el alcance funcional de la pantalla.',
-    );
+    expect(summary).not.toHaveTextContent(props.objective);
+    expect(rendered.getByText(props.objective)).toBeInTheDocument();
   });
 
   it('opens on demand and persists the preference for the current screen', async () => {

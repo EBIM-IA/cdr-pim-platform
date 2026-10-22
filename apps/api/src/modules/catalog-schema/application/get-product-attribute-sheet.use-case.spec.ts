@@ -5,10 +5,39 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { DynamicCatalogRepositoryPort } from '../domain/ports/dynamic-catalog.repository.port';
 import { GetProductAttributeSheetUseCase } from './get-product-attribute-sheet.use-case';
+import { toProductAttributeSheetDto } from '../presentation/dynamic-catalog.presenter';
 
 const id = (): Uuid => randomUUID() as Uuid;
 
 describe('GetProductAttributeSheetUseCase', () => {
+  it('preserves canonical completeness in the product sheet response', async () => {
+    const productId = id();
+    const getProductSheet = vi.fn().mockResolvedValue({
+      schema: {
+        category: { id: id(), slug: 'rodamientos', name: 'Rodamientos' },
+        template: { id: id(), variantKey: '22.1', name: 'Plantilla', version: 1 },
+        attributes: [],
+      },
+      product: {
+        id: productId,
+        sku: '6205',
+        name: 'Rodamiento',
+        brand: null,
+        status: 'in_review',
+        attributes: {},
+      },
+      completeness: 60,
+    });
+    const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
+    const sheet = await new GetProductAttributeSheetUseCase(repository).execute(productId, {
+      id: 'admin-test',
+      email: 'admin@example.test',
+      roles: ['ADMINISTRADOR'],
+    });
+
+    expect(toProductAttributeSheetDto(sheet).completeness).toBe(60);
+  });
+
   it('builds the commercial sheet on the backend from exportable attributes only', async () => {
     const productId = id();
     const exportedId = id();

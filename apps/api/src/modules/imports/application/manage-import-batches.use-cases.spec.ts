@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 
-import { FixedClock, assertUuid } from '@cdr/shared';
+import { FixedClock, ValidationError, assertUuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GroupApplicationRepositoryPort } from '../../applications/domain/ports/group-application-repository.port';
 import { GroupApplication } from '../../applications/domain/entities/group-application';
 import type { ExternalHomologRepositoryPort } from '../../equivalences/domain/ports/external-homolog-repository.port';
+import { ExternalHomolog } from '../../equivalences/domain/entities/external-homolog';
 import type { GroupOemCode } from '../../equivalences/domain/entities/group-oem-code';
 import type { GroupOemCodeRepositoryPort } from '../../equivalences/domain/ports/group-oem-code-repository.port';
 import type {
@@ -61,6 +62,7 @@ describe('OEM imports', () => {
       emptyHomologs(),
       createOemRepository(true),
       emptyCategoryImports(),
+      externalHomologPolicy(),
     ).execute(
       {
         target: 'oem',
@@ -88,6 +90,7 @@ describe('OEM imports', () => {
       homologs,
       oemRepository,
       emptyCategoryImports(),
+      externalHomologPolicy(),
     );
     const confirmUseCase = new ConfirmImportBatchUseCase(
       imports,
@@ -96,6 +99,7 @@ describe('OEM imports', () => {
       homologs,
       oemRepository,
       emptyCategoryImports(),
+      externalHomologPolicy(),
     );
 
     const preview = await previewUseCase.execute(
@@ -142,6 +146,7 @@ describe('OEM imports', () => {
       emptyHomologs(),
       repository,
       emptyCategoryImports(),
+      externalHomologPolicy(),
     ).execute(
       {
         target: 'oem',
@@ -155,6 +160,119 @@ describe('OEM imports', () => {
     expect(preview.toSnapshot().rows[0]).toMatchObject({
       valid: false,
       errors: ['Los códigos OEM solo se permiten en grupos automotrices'],
+    });
+  });
+});
+
+describe('homolog imports', () => {
+  it('rejects catalogue SKU rows and warns when an external reference belongs to another group', async () => {
+    const homologs = {
+      ...emptyHomologs(),
+      findGroupByCode: vi.fn(async (code: string) => ({ id: groupId, code })),
+      list: vi.fn(async () => [
+        ExternalHomolog.create(
+          {
+            groupId,
+            unifiedCode: 'OTHER-GROUP',
+            externalCode: 'QC1672',
+            externalBrand: 'WAGNER',
+          },
+          now,
+        ),
+      ]),
+    };
+    const policy = {
+      assertExternalReference: vi.fn(async (code: string) => {
+        if (code === 'D1672') throw new ValidationError('Ya es un SKU del catálogo');
+      }),
+    };
+    const preview = await new PreviewImportBatchUseCase(
+      new MemoryImportBatchRepository(),
+      new FixedClock(now),
+      emptyApplications(),
+      homologs,
+      createOemRepository(true),
+      emptyCategoryImports(),
+      policy,
+    ).execute(
+      {
+        target: 'homologs',
+        format: 'json',
+        idempotencyKey: 'homolog-catalogue-preview',
+        records: [
+          { unifiedCode: 'D1672', externalCode: 'D1672', externalBrand: 'AKEBONO' },
+          { unifiedCode: 'D1672', externalCode: 'QC1672', externalBrand: 'wagner' },
+        ],
+      },
+      actor,
+    );
+
+    expect(preview.toSnapshot().rows).toMatchObject([
+      { valid: false, errors: ['Ya es un SKU del catálogo'] },
+      {
+        valid: true,
+        errors: [],
+        warnings: ['El homólogo también está asociado a OTHER-GROUP'],
+      },
+    ]);
+    expect(homologs.saveImported).not.toHaveBeenCalled();
+    expect(homologs.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks catalogue ownership at confirmation and imports only rows still valid', async () => {
+    const imports = new MemoryImportBatchRepository();
+    const homologs = {
+      ...emptyHomologs(),
+      findGroupByCode: vi.fn(async (code: string) => ({ id: groupId, code })),
+    };
+    let catalogueChanged = false;
+    const policy = {
+      assertExternalReference: vi.fn(async (code: string) => {
+        if (catalogueChanged && code === 'D1672') {
+          throw new ValidationError('El SKU fue recibido desde AX después de la previsualización');
+        }
+      }),
+    };
+    const common = [
+      imports,
+      new FixedClock(now),
+      emptyApplications(),
+      homologs,
+      createOemRepository(true),
+      emptyCategoryImports(),
+      policy,
+    ] as const;
+    const preview = await new PreviewImportBatchUseCase(...common).execute(
+      {
+        target: 'homologs',
+        format: 'json',
+        idempotencyKey: 'homolog-catalogue-confirm',
+        records: [
+          { unifiedCode: 'D1672', externalCode: 'D1672', externalBrand: 'AKEBONO' },
+          { unifiedCode: 'D1672', externalCode: 'QC1672', externalBrand: 'WAGNER' },
+        ],
+      },
+      actor,
+    );
+    expect(preview.toSnapshot().rows.every((row) => row.valid)).toBe(true);
+    catalogueChanged = true;
+
+    const confirmed = await new ConfirmImportBatchUseCase(...common).execute(
+      preview.toSnapshot().id,
+      actor,
+    );
+
+    expect(confirmed.toSnapshot()).toMatchObject({
+      status: 'confirmed',
+      rows: [
+        { valid: false, errors: ['El SKU fue recibido desde AX después de la previsualización'] },
+        { valid: true, errors: [] },
+      ],
+    });
+    expect(homologs.saveImported).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(homologs.saveImported).mock.calls[0]?.[0].toSnapshot()).toMatchObject({
+      externalCode: 'QC1672',
+      externalBrand: 'WAGNER',
     });
   });
 });
@@ -187,6 +305,7 @@ describe('application imports', () => {
       emptyHomologs(),
       createOemRepository(true),
       emptyCategoryImports(),
+      externalHomologPolicy(),
     ] as const;
     const preview = await new PreviewImportBatchUseCase(...common).execute(
       {
@@ -271,6 +390,7 @@ describe('category imports', () => {
       emptyHomologs(),
       createOemRepository(true),
       categoryImports,
+      externalHomologPolicy(),
     ).execute(legacy.toSnapshot().id, actor);
 
     expect(confirmed.toSnapshot().status).toBe('confirmed');
@@ -323,6 +443,7 @@ describe('category imports', () => {
       emptyHomologs(),
       createOemRepository(true),
       categoryImports,
+      externalHomologPolicy(),
     ] as const;
     const preview = await new PreviewImportBatchUseCase(...common).execute(
       {
@@ -473,4 +594,8 @@ function createOemRepository(automotive: boolean, onSave?: (oem: GroupOemCode) =
       value: oem,
     })),
   } satisfies GroupOemCodeRepositoryPort;
+}
+
+function externalHomologPolicy() {
+  return { assertExternalReference: vi.fn(async () => undefined) };
 }

@@ -113,17 +113,17 @@ export interface CatalogWorkbookProduct {
   readonly brand: string | null;
   readonly status: string;
   readonly updatedAt: Date;
-  readonly category: { readonly id: Uuid; readonly name: string };
+  readonly category: { readonly id: Uuid; readonly name: string } | null;
   readonly template: {
     readonly id: Uuid;
     readonly variantKey: string;
     readonly name: string;
     readonly version: number;
-  };
+  } | null;
   readonly providerCode: string | null;
   readonly unifiedCode: string | null;
   readonly applicationTypes: readonly string[];
-  readonly completeness: number;
+  readonly completeness: number | null;
   readonly attributes: Readonly<Record<string, CatalogWorkbookCell>>;
 }
 

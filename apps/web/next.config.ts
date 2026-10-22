@@ -5,6 +5,8 @@ import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 
 const config = (phase: string): NextConfig => ({
   reactStrictMode: true,
+  // Keep the development badge from covering the account control in the compact sidebar.
+  devIndicators: false,
   // Dev and production builds must never share output. Running `next build` while the local
   // server is active otherwise replaces manifests that `next dev` still has open.
   distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next-build',

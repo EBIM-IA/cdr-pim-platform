@@ -6,13 +6,14 @@ import type {
   AdminTemplateDto,
   UpdateTemplateAttributeInput,
 } from '@cdr/contracts';
-import { Pencil, RefreshCw, Search, Settings2, X } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Pencil, RefreshCw, Search, Settings2 } from 'lucide-react';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -118,8 +119,47 @@ function toDraft(attribute: AdminTemplateAttributeDto): AttributeDraft {
   };
 }
 
-function flagLabel(value: boolean, positive: string): string {
-  return value ? positive : 'No';
+function AttributeSwitch({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs disabled:cursor-not-allowed disabled:opacity-50',
+        checked ? 'text-emerald-800' : 'text-slate-500',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'inline-flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+          checked ? 'bg-emerald-600' : 'bg-slate-300',
+        )}
+      >
+        <span
+          className={cn(
+            'size-3 rounded-full bg-white shadow-sm transition-transform',
+            checked && 'translate-x-3',
+          )}
+        />
+      </span>
+      {checked ? 'Sí' : 'No'}
+    </button>
+  );
 }
 
 export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTemplate: boolean }) {
@@ -138,6 +178,12 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
   const [editing, setEditing] = useState<AdminTemplateAttributeDto | null>(null);
   const [draft, setDraft] = useState<AttributeDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const templateRequest = useRef(0);
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('template');
+    if (requested) setTemplateId(requested);
+  }, []);
 
   useEffect(() => {
     void listAdminCategories(true)
@@ -179,15 +225,19 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
   useEffect(() => void loadTemplates(), [loadTemplates]);
 
   const loadTemplate = useCallback(async (selectedId: string) => {
+    const requestId = ++templateRequest.current;
     if (!selectedId) {
       setTemplate(null);
+      setLoadingTemplate(false);
       return;
     }
     setLoadingTemplate(true);
     setError(null);
     try {
-      setTemplate(await getAdminTemplate(selectedId));
+      const result = await getAdminTemplate(selectedId);
+      if (requestId === templateRequest.current) setTemplate(result);
     } catch (requestError) {
+      if (requestId !== templateRequest.current) return;
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -195,7 +245,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
       );
       setTemplate(null);
     } finally {
-      setLoadingTemplate(false);
+      if (requestId === templateRequest.current) setLoadingTemplate(false);
     }
   }, []);
 
@@ -242,9 +292,25 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
     );
   };
 
+  const hasUnsavedChanges = Boolean(
+    editing && draft && JSON.stringify(toDraft(editing)) !== JSON.stringify(draft),
+  );
+  const closeEditor = () => {
+    if (
+      saving ||
+      (hasUnsavedChanges &&
+        !window.confirm(
+          'Tienes cambios sin guardar. ¿Quieres descartarlos y cerrar la configuración?',
+        ))
+    )
+      return;
+    setEditing(null);
+    setDraft(null);
+  };
+
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!template || !editing || !draft) return;
+    if (saving || !template || !editing || !draft) return;
     const position = Number(draft.position);
     if (!Number.isInteger(position) || position < 0) {
       setError('La posición debe ser un número entero mayor o igual a cero.');
@@ -269,6 +335,48 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
         await loadTemplate(template.id);
         setError(
           'Otra persona modificó este atributo. Recargamos la plantilla vigente; vuelve a intentar tu cambio.',
+        );
+      } else {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : 'No fue posible guardar el atributo.',
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateFromTable = async (
+    attribute: AdminTemplateAttributeDto,
+    input: Omit<UpdateTemplateAttributeInput, 'expectedUpdatedAt'>,
+  ) => {
+    if (!template || !canManageTemplate || saving) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await updateAdminTemplateAttribute(template.id, attribute.id, {
+        ...input,
+        expectedUpdatedAt: attribute.updatedAt,
+      });
+      setTemplate((current) =>
+        current
+          ? {
+              ...current,
+              attributes: current.attributes?.map((item) =>
+                item.id === updated.id ? updated : item,
+              ),
+            }
+          : current,
+      );
+      setNotice(`${attribute.label}: configuración actualizada y auditada.`);
+    } catch (requestError) {
+      if (requestError instanceof CatalogAdminApiError && requestError.status === 409) {
+        await loadTemplate(template.id);
+        setError(
+          'Otra persona modificó este atributo. Recargamos la configuración vigente; vuelve a intentar tu cambio.',
         );
       } else {
         setError(
@@ -338,9 +446,27 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
         </div>
       ) : null}
 
-      <div className="mb-[18px] grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <Card className="p-4">
-          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-primary">
+      <div className="mb-[18px] grid items-start gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+        <Card className="p-4 xl:sticky xl:top-4">
+          <Select
+            label="Categoría"
+            value={categoryId}
+            disabled={saving}
+            onChange={(event) => {
+              setCategoryId(event.target.value);
+              setTemplateId('');
+              setEditing(null);
+            }}
+          >
+            <option value="">Todas las categorías</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+                {category.active ? '' : ' · inactiva'}
+              </option>
+            ))}
+          </Select>
+          <label className="mt-4 grid gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-primary">
             Buscar plantilla
             <span className="relative block">
               <Search
@@ -360,6 +486,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
               <button
                 key={item.id}
                 type="button"
+                disabled={saving}
                 aria-pressed={item.id === templateId}
                 onClick={() => {
                   setTemplateId(item.id);
@@ -391,434 +518,445 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             ) : null}
           </div>
         </Card>
-        {template ? (
-          <Card className="p-5 sm:p-7">
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_260px]">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary">
-                  Plantilla PIM · versión {template.version}
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight">{template.name}</h2>
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-                  <span className="rounded bg-slate-100 px-2 py-1">
-                    Categoría: {template.categoryName}
-                  </span>
-                  <span className="rounded bg-orange-50 px-2 py-1 text-orange-800">
-                    Variante: {template.variantKey}
-                  </span>
-                  <span className="rounded bg-slate-100 px-2 py-1">Estado: {template.status}</span>
+        <div className="min-w-0 space-y-4">
+          {template ? (
+            <Card className="p-4 sm:p-5">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px]">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary">
+                    Plantilla PIM · versión {template.version}
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight">{template.name}</h2>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                    <span className="rounded bg-slate-100 px-2 py-1">
+                      Categoría: {template.categoryName}
+                    </span>
+                    <span className="rounded bg-orange-50 px-2 py-1 text-orange-800">
+                      Variante: {template.variantKey}
+                    </span>
+                    <span className="rounded bg-slate-100 px-2 py-1">
+                      Estado: {template.status}
+                    </span>
+                  </div>
+                  <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    {[
+                      ['Atributos', template.attributes?.length ?? 0],
+                      [
+                        'Inactivos',
+                        (template.attributes ?? []).filter((item) => !item.active).length,
+                      ],
+                      [
+                        'Obligatorios activos',
+                        (template.attributes ?? []).filter((item) => item.active && item.required)
+                          .length,
+                      ],
+                      [
+                        'Opcionales',
+                        (template.attributes ?? []).filter((item) => item.active && !item.required)
+                          .length,
+                      ],
+                      [
+                        'Replicables',
+                        (template.attributes ?? []).filter((item) => item.active && item.replicable)
+                          .length,
+                      ],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border p-3">
+                        <dt className="text-[10px] uppercase leading-tight text-muted-foreground">
+                          {label}
+                        </dt>
+                        <dd className="mt-1 text-2xl font-bold">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
-                <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  {[
-                    ['Atributos', template.attributes?.length ?? 0],
-                    [
-                      'Inactivos',
-                      (template.attributes ?? []).filter((item) => !item.active).length,
-                    ],
-                    [
-                      'Obligatorios activos',
-                      (template.attributes ?? []).filter((item) => item.active && item.required)
-                        .length,
-                    ],
-                    [
-                      'Opcionales',
-                      (template.attributes ?? []).filter((item) => item.active && !item.required)
-                        .length,
-                    ],
-                    [
-                      'Replicables',
-                      (template.attributes ?? []).filter((item) => item.active && item.replicable)
-                        .length,
-                    ],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-lg border p-3">
-                      <dt className="text-[10px] uppercase leading-tight text-muted-foreground">
-                        {label}
-                      </dt>
-                      <dd className="mt-1 text-2xl font-bold">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <aside className="border-t pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+                  <h3 className="text-sm font-semibold">Autoridades de fuente</h3>
+                  <ol className="mt-4 space-y-3 text-xs">
+                    {[
+                      ...new Set(
+                        (template.attributes ?? [])
+                          .filter((attribute) => attribute.active)
+                          .map((attribute) => attribute.sourceAuthority),
+                      ),
+                    ].map((source, index) => (
+                      <li key={source} className="flex items-center gap-3">
+                        <span className="grid size-6 place-items-center rounded-full bg-orange-50 font-bold text-primary">
+                          {index + 1}
+                        </span>
+                        {source}
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
+                    Fuentes declaradas por los atributos persistidos. El contrato actual no publica
+                    un orden global de prioridad, por lo que no se infiere uno.
+                  </p>
+                </aside>
               </div>
-              <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
-                <h3 className="text-sm font-semibold">Autoridades de fuente</h3>
-                <ol className="mt-4 space-y-3 text-xs">
-                  {[
-                    ...new Set(
-                      (template.attributes ?? [])
-                        .filter((attribute) => attribute.active)
-                        .map((attribute) => attribute.sourceAuthority),
-                    ),
-                  ].map((source, index) => (
-                    <li key={source} className="flex items-center gap-3">
-                      <span className="grid size-6 place-items-center rounded-full bg-orange-50 font-bold text-primary">
-                        {index + 1}
-                      </span>
-                      {source}
-                    </li>
-                  ))}
-                </ol>
-                <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
-                  Fuentes declaradas por los atributos persistidos. El contrato actual no publica un
-                  orden global de prioridad, por lo que no se infiere uno.
-                </p>
-              </aside>
-            </div>
-          </Card>
-        ) : (
-          <Card className="grid min-h-64 place-items-center p-6 text-center text-sm text-muted-foreground">
-            Selecciona una plantilla para consultar su definición.
-          </Card>
-        )}
-      </div>
-
-      <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,0.8fr)_minmax(300px,1.2fr)_minmax(260px,1fr)_auto] xl:items-end">
-          <Select
-            label="Categoría"
-            value={categoryId}
-            onChange={(event) => {
-              setCategoryId(event.target.value);
-              setTemplateId('');
-              setEditing(null);
-            }}
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-                {category.active ? '' : ' · inactiva'}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Variante y versión de plantilla"
-            value={templateId}
-            disabled={loadingList || templates.length === 0}
-            onChange={(event) => {
-              setTemplateId(event.target.value);
-              setEditing(null);
-            }}
-          >
-            {templates.length === 0 ? <option value="">Sin plantillas</option> : null}
-            {templates.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.categoryName} · {item.variantKey} · {item.name} v{item.version} ·{' '}
-                {item.status}
-              </option>
-            ))}
-          </Select>
-          <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-            Buscar atributos
-            <span className="relative block">
-              <Search
-                aria-hidden="true"
-                className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
-              />
-              <Input
-                className="pl-9"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Nombre, clave, tipo o fuente"
-              />
-            </span>
-          </label>
-          <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(event) => setShowInactive(event.target.checked)}
-            />
-            Mostrar inactivos
-          </label>
-        </div>
-        {template ? (
-          <div className="mt-4 flex flex-wrap gap-2 border-t pt-4 text-xs text-muted-foreground">
-            <StatusBadge
-              tone={
-                template.status === 'active'
-                  ? 'success'
-                  : template.status === 'draft'
-                    ? 'warning'
-                    : 'neutral'
-              }
-            >
-              {template.status === 'active'
-                ? 'Activa'
-                : template.status === 'draft'
-                  ? 'Borrador'
-                  : 'Retirada'}
-            </StatusBadge>
-            <span>{template.attributes?.length ?? 0} atributos asignados</span>
-            <span>Actualizada {new Date(template.updatedAt).toLocaleString('es-PE')}</span>
-          </div>
-        ) : null}
-      </Card>
-
-      {canManageTemplate && editing && draft ? (
-        <Card className="mb-5 border-primary/40 p-5">
-          <form onSubmit={save}>
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">
-                  Configurar atributo
-                </p>
-                <h2 className="mt-1 text-xl font-semibold">{editing.label}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {editing.key} · {editing.dataType}
-                  {editing.unit ? ` · ${editing.unit}` : ''} · fuente {editing.sourceAuthority}
-                </p>
-              </div>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                onClick={() => {
-                  setEditing(null);
-                  setDraft(null);
-                }}
-                aria-label="Cerrar configuración"
-              >
-                <X className="size-4" aria-hidden="true" />
-              </Button>
-            </div>
-
-            <fieldset>
-              <legend className="mb-2 text-sm font-semibold">Comportamiento</legend>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
-                {(
-                  [
-                    ['active', 'Activo'],
-                    ['required', 'Obligatorio'],
-                    ['replicable', 'Replicable'],
-                    ['searchable', 'Buscable'],
-                    ['includeInTechnicalSheet', 'Incluir en ficha técnica'],
-                  ] as const
-                ).map(([field, label]) => (
-                  <label
-                    key={field}
-                    className="flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={draft[field]}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current ? { ...current, [field]: event.target.checked } : current,
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
-                <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
-                  Posición
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={draft.position}
-                    onChange={(event) =>
-                      setDraft((current) =>
-                        current ? { ...current, position: event.target.value } : current,
-                      )
-                    }
+            </Card>
+          ) : (
+            <Card className="grid min-h-64 place-items-center p-6 text-center text-sm text-muted-foreground">
+              Selecciona una plantilla para consultar su definición.
+            </Card>
+          )}
+          <Card className="mb-5 p-4 sm:p-5">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
+                Buscar atributos
+                <span className="relative block">
+                  <Search
+                    aria-hidden="true"
+                    className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
                   />
-                </label>
+                  <Input
+                    className="pl-9"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Nombre, clave, tipo o fuente"
+                  />
+                </span>
+              </label>
+              <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={showInactive}
+                  onChange={(event) => setShowInactive(event.target.checked)}
+                />
+                Mostrar inactivos
+              </label>
+            </div>
+            {template ? (
+              <div className="mt-4 flex flex-wrap gap-2 border-t pt-4 text-xs text-muted-foreground">
+                <StatusBadge
+                  tone={
+                    template.status === 'active'
+                      ? 'success'
+                      : template.status === 'draft'
+                        ? 'warning'
+                        : 'neutral'
+                  }
+                >
+                  {template.status === 'active'
+                    ? 'Activa'
+                    : template.status === 'draft'
+                      ? 'Borrador'
+                      : 'Retirada'}
+                </StatusBadge>
+                <span>{template.attributes?.length ?? 0} atributos asignados</span>
+                <span>Actualizada {new Date(template.updatedAt).toLocaleString('es-PE')}</span>
               </div>
-            </fieldset>
+            ) : null}
+          </Card>
 
-            <fieldset className="mt-5">
-              <legend className="mb-2 text-sm font-semibold">Permisos por rol</legend>
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[600px] text-sm">
-                  <thead className="border-b bg-slate-50 text-left text-xs text-muted-foreground">
+          {canManageTemplate && editing && draft ? (
+            <WorkspaceDrawer
+              title="Configurar atributo"
+              busy={saving}
+              unsavedChanges={hasUnsavedChanges}
+              onClose={closeEditor}
+            >
+              <form onSubmit={save}>
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                      Configurar atributo
+                    </p>
+                    <h2 className="mt-1 text-xl font-semibold">{editing.label}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {editing.key} · {editing.dataType}
+                      {editing.unit ? ` · ${editing.unit}` : ''} · fuente {editing.sourceAuthority}
+                    </p>
+                  </div>
+                </div>
+
+                {error ? (
+                  <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                    {error}
+                  </p>
+                ) : null}
+
+                <fieldset disabled={saving}>
+                  <legend className="mb-2 text-sm font-semibold">Comportamiento</legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        ['active', 'Activo'],
+                        ['required', 'Obligatorio'],
+                        ['replicable', 'Replicable'],
+                        ['searchable', 'Buscable'],
+                        ['includeInTechnicalSheet', 'Incluir en ficha técnica'],
+                      ] as const
+                    ).map(([field, label]) => (
+                      <label
+                        key={field}
+                        className="flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={draft[field]}
+                          onChange={(event) =>
+                            setDraft((current) =>
+                              current ? { ...current, [field]: event.target.checked } : current,
+                            )
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                    <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+                      Posición
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={draft.position}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current ? { ...current, position: event.target.value } : current,
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset className="mt-5" disabled={saving}>
+                  <legend className="mb-2 text-sm font-semibold">Permisos por rol</legend>
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full min-w-[600px] text-sm">
+                      <thead className="border-b bg-slate-50 text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-3">Rol</th>
+                          {(Object.keys(permissionLabels) as Permission[]).map((permission) => (
+                            <th key={permission} className="px-4 py-3 text-center">
+                              {permissionLabels[permission]}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {draft.roleAccess.map((access) => (
+                          <tr key={access.role}>
+                            <th scope="row" className="px-4 py-3 text-left font-semibold">
+                              {roleLabels[access.role]}
+                            </th>
+                            {(Object.keys(permissionLabels) as Permission[]).map((permission) => (
+                              <td key={permission} className="px-4 py-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${permissionLabels[permission]} para ${roleLabels[access.role]}`}
+                                  checked={access[permission]}
+                                  onChange={(event) =>
+                                    changeRolePermission(
+                                      access.role,
+                                      permission,
+                                      event.target.checked,
+                                    )
+                                  }
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Activar edición, importación o exportación concede también visibilidad. Quitar
+                    visibilidad revoca las demás operaciones del rol.
+                  </p>
+                </fieldset>
+
+                <div className="mt-5 flex justify-end gap-2">
+                  <Button type="button" variant="outline" disabled={saving} onClick={closeEditor}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    {saving ? (
+                      <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Settings2 className="size-4" aria-hidden="true" />
+                    )}
+                    {saving ? 'Guardando…' : 'Guardar configuración'}
+                  </Button>
+                </div>
+              </form>
+            </WorkspaceDrawer>
+          ) : null}
+
+          {loadingList || loadingTemplate ? (
+            <Skeleton className="h-96 rounded-xl" />
+          ) : error && !template ? (
+            <StatePanel
+              variant="error"
+              title="No pudimos cargar la plantilla"
+              description={error}
+              actionLabel="Reintentar"
+              onAction={() => void loadTemplates()}
+            />
+          ) : !template ? (
+            <StatePanel
+              variant="empty"
+              title="Sin plantillas"
+              description="No hay versiones de plantilla para la categoría seleccionada."
+            />
+          ) : attributes.length === 0 ? (
+            <StatePanel
+              variant="empty"
+              title="Sin atributos"
+              description="No hay atributos que coincidan con la búsqueda y el estado seleccionados."
+            />
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="border-b px-4 py-3">
+                <h2 className="font-semibold">
+                  Atributos · {attributes.length} de {template.attributes?.length ?? 0}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Los interruptores guardan cada cambio con auditoría. Un atributo inactivo conserva
+                  sus valores y deja de contar en la completitud. Los permisos detallados se ajustan
+                  en Configurar.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1400px] text-left text-sm">
+                  <caption className="sr-only">Atributos y permisos de {template.name}</caption>
+                  <thead className="border-b bg-slate-50 text-xs tracking-wide text-muted-foreground">
                     <tr>
-                      <th className="px-4 py-3">Rol</th>
-                      {(Object.keys(permissionLabels) as Permission[]).map((permission) => (
-                        <th key={permission} className="px-4 py-3 text-center">
-                          {permissionLabels[permission]}
+                      <th scope="col" className="px-4 py-3">
+                        Atributo
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Tipo / fuente
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        Posición
+                      </th>
+                      {['Activo', 'Obligatorio', 'Replicable', 'Buscable', 'Ficha técnica'].map(
+                        (label) => (
+                          <th key={label} scope="col" className="px-4 py-3">
+                            {label}
+                          </th>
+                        ),
+                      )}
+                      {roles.map((role) => (
+                        <th key={role} scope="col" className="px-4 py-3">
+                          {roleLabels[role]}
                         </th>
                       ))}
+                      <th scope="col" className="px-4 py-3 text-right">
+                        Acción
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {draft.roleAccess.map((access) => (
-                      <tr key={access.role}>
-                        <th scope="row" className="px-4 py-3 text-left font-semibold">
-                          {roleLabels[access.role]}
-                        </th>
-                        {(Object.keys(permissionLabels) as Permission[]).map((permission) => (
-                          <td key={permission} className="px-4 py-3 text-center">
-                            <input
-                              type="checkbox"
-                              aria-label={`${permissionLabels[permission]} para ${roleLabels[access.role]}`}
-                              checked={access[permission]}
-                              onChange={(event) =>
-                                changeRolePermission(access.role, permission, event.target.checked)
-                              }
-                            />
+                    {attributes.map((attribute) => {
+                      const matrix = completeRoleAccess(attribute.roleAccess);
+                      return (
+                        <tr
+                          key={attribute.id}
+                          className={cn(
+                            'align-top hover:bg-orange-50/40',
+                            !attribute.active && 'bg-slate-50 text-slate-500',
+                          )}
+                        >
+                          <td className="px-4 py-3">
+                            <strong className="block">{attribute.label}</strong>
+                            <span className="text-xs text-muted-foreground">{attribute.key}</span>
+                            <span className="mt-1 block">
+                              <StatusBadge tone={attribute.active ? 'success' : 'neutral'}>
+                                {attribute.active ? 'Activo' : 'Inactivo'}
+                              </StatusBadge>
+                            </span>
                           </td>
-                        ))}
-                      </tr>
-                    ))}
+                          <td className="px-4 py-3">
+                            <span className="block">{attribute.dataType}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {attribute.sourceAuthority}
+                              {attribute.unit ? ` · ${attribute.unit}` : ''}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">{attribute.position}</td>
+                          {(
+                            [
+                              ['active', 'Activo'],
+                              ['required', 'Obligatorio'],
+                              ['replicable', 'Replicable'],
+                              ['searchable', 'Buscable'],
+                              ['includeInTechnicalSheet', 'Ficha técnica'],
+                            ] as const
+                          ).map(([field, label]) => (
+                            <td key={field} className="px-4 py-3">
+                              <AttributeSwitch
+                                checked={attribute[field]}
+                                disabled={!canManageTemplate || saving}
+                                label={`${label}: ${attribute.label}`}
+                                onChange={() =>
+                                  void updateFromTable(attribute, { [field]: !attribute[field] })
+                                }
+                              />
+                            </td>
+                          ))}
+                          {matrix.map((access) => (
+                            <td key={access.role} className="px-4 py-3 text-xs leading-6">
+                              <AttributeSwitch
+                                checked={access.canView}
+                                disabled={!canManageTemplate || saving}
+                                label={`Visible para ${roleLabels[access.role]}: ${attribute.label}`}
+                                onChange={() =>
+                                  void updateFromTable(attribute, {
+                                    roleAccess: updateRolePermission(
+                                      attribute.roleAccess,
+                                      access.role,
+                                      'canView',
+                                      !access.canView,
+                                    ),
+                                  })
+                                }
+                              />
+                              {!access.canView ? (
+                                <span className="block text-muted-foreground">Sin acceso</span>
+                              ) : (
+                                <>
+                                  <span className="block text-muted-foreground">
+                                    {[
+                                      access.canEdit && 'Editar',
+                                      access.canImport && 'Importar',
+                                      access.canExport && 'Exportar',
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' · ') || 'Solo lectura'}
+                                  </span>
+                                </>
+                              )}
+                            </td>
+                          ))}
+                          <td className="px-4 py-3 text-right">
+                            {canManageTemplate ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={saving}
+                                onClick={() => beginEdit(attribute)}
+                              >
+                                <Pencil className="size-4" aria-hidden="true" />
+                                Configurar
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Solo lectura</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Activar edición, importación o exportación concede también visibilidad. Quitar
-                visibilidad revoca las demás operaciones del rol.
-              </p>
-            </fieldset>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={() => {
-                  setEditing(null);
-                  setDraft(null);
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? (
-                  <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Settings2 className="size-4" aria-hidden="true" />
-                )}
-                {saving ? 'Guardando…' : 'Guardar configuración'}
-              </Button>
-            </div>
-          </form>
-        </Card>
-      ) : null}
-
-      {loadingList || loadingTemplate ? (
-        <Skeleton className="h-96 rounded-xl" />
-      ) : error && !template ? (
-        <StatePanel
-          variant="error"
-          title="No pudimos cargar la plantilla"
-          description={error}
-          actionLabel="Reintentar"
-          onAction={() => void loadTemplates()}
-        />
-      ) : !template ? (
-        <StatePanel
-          variant="empty"
-          title="Sin plantillas"
-          description="No hay versiones de plantilla para la categoría seleccionada."
-        />
-      ) : attributes.length === 0 ? (
-        <StatePanel
-          variant="empty"
-          title="Sin atributos"
-          description="No hay atributos que coincidan con la búsqueda y el estado seleccionados."
-        />
-      ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1200px] text-left text-sm">
-              <caption className="sr-only">Atributos y permisos de {template.name}</caption>
-              <thead className="border-b bg-slate-50 text-xs tracking-wide text-muted-foreground">
-                <tr>
-                  <th scope="col" className="px-4 py-3">
-                    Atributo
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Tipo / fuente
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Posición
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Reglas
-                  </th>
-                  {roles.map((role) => (
-                    <th key={role} scope="col" className="px-4 py-3">
-                      {roleLabels[role]}
-                    </th>
-                  ))}
-                  <th scope="col" className="px-4 py-3 text-right">
-                    Acción
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {attributes.map((attribute) => {
-                  const matrix = completeRoleAccess(attribute.roleAccess);
-                  return (
-                    <tr key={attribute.id} className="align-top hover:bg-orange-50/40">
-                      <td className="px-4 py-3">
-                        <strong className="block">{attribute.label}</strong>
-                        <span className="text-xs text-muted-foreground">{attribute.key}</span>
-                        <span className="mt-1 block">
-                          <StatusBadge tone={attribute.active ? 'success' : 'neutral'}>
-                            {attribute.active ? 'Activo' : 'Inactivo'}
-                          </StatusBadge>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="block">{attribute.dataType}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {attribute.sourceAuthority}
-                          {attribute.unit ? ` · ${attribute.unit}` : ''}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 tabular-nums">{attribute.position}</td>
-                      <td className="px-4 py-3 text-xs leading-6">
-                        <span className="block">
-                          {flagLabel(attribute.required, 'Obligatorio')}
-                        </span>
-                        <span className="block">
-                          {flagLabel(attribute.replicable, 'Replicable')}
-                        </span>
-                        <span className="block">{flagLabel(attribute.searchable, 'Buscable')}</span>
-                        <span className="block">
-                          {flagLabel(attribute.includeInTechnicalSheet, 'Ficha técnica')}
-                        </span>
-                      </td>
-                      {matrix.map((access) => (
-                        <td key={access.role} className="px-4 py-3 text-xs leading-6">
-                          {!access.canView ? (
-                            <span className="text-muted-foreground">Sin acceso</span>
-                          ) : (
-                            <>
-                              <span className="block font-semibold">Ver</span>
-                              <span className="block text-muted-foreground">
-                                {[
-                                  access.canEdit && 'Editar',
-                                  access.canImport && 'Importar',
-                                  access.canExport && 'Exportar',
-                                ]
-                                  .filter(Boolean)
-                                  .join(' · ') || 'Solo lectura'}
-                              </span>
-                            </>
-                          )}
-                        </td>
-                      ))}
-                      <td className="px-4 py-3 text-right">
-                        {canManageTemplate ? (
-                          <Button size="sm" variant="ghost" onClick={() => beginEdit(attribute)}>
-                            <Pencil className="size-4" aria-hidden="true" />
-                            Configurar
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Solo lectura</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+            </Card>
+          )}
+        </div>
+      </div>
     </>
   );
 }

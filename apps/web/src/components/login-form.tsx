@@ -51,12 +51,9 @@ export function LoginForm({ returnTo }: LoginFormProps) {
   };
 
   return (
-    <form className="mt-5" onSubmit={submit} noValidate>
-      <div className="my-5">
-        <label
-          className="mb-1.5 block text-[10px] font-medium text-muted-foreground"
-          htmlFor="email"
-        >
+    <form className="mt-4" onSubmit={submit}>
+      <div className="my-4">
+        <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="email">
           Correo electrónico
         </label>
         <Input
@@ -64,16 +61,16 @@ export function LoginForm({ returnTo }: LoginFormProps) {
           name="email"
           type="email"
           autoComplete="username"
-          placeholder="correo@empresa.com"
+          placeholder="correo@casadelruliman.ec"
           className="h-10 rounded-md text-xs"
           required
           disabled={pending}
         />
       </div>
 
-      <div className="my-5">
+      <div className="my-4">
         <label
-          className="mb-1.5 block text-[10px] font-medium text-muted-foreground"
+          className="mb-1.5 block text-xs font-medium text-muted-foreground"
           htmlFor="password"
         >
           Contraseña

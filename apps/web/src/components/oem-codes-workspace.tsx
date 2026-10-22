@@ -310,7 +310,7 @@ export function OemCodesWorkspace({
           Actualizar
         </Button>
         <Button size="sm" variant="outline" asChild>
-          <Link href="/imports">
+          <Link href="/imports?view=new&target=oem">
             <Upload className="size-4" aria-hidden="true" /> Importar
           </Link>
         </Button>

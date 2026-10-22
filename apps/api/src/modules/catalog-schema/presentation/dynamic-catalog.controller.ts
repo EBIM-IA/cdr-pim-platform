@@ -75,7 +75,10 @@ export class DynamicCatalogController {
   async categories(
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<CatalogCategorySummaryDto[]> {
-    return [...(await this.listCategories.execute(actor))];
+    return (await this.listCategories.execute(actor)).map(({ ancestors, ...category }) => ({
+      ...category,
+      ...(ancestors ? { ancestors: [...ancestors] } : {}),
+    }));
   }
 
   @Get('schema')

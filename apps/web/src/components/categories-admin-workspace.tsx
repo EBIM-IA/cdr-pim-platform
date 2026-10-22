@@ -3,16 +3,12 @@
 import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
 import {
   Check,
-  CheckCircle2,
   ChevronRight,
-  Clock3,
   FolderTree,
-  ListChecks,
   Pencil,
   RefreshCw,
   RotateCcw,
   Search,
-  SlidersHorizontal,
   ToggleLeft,
   X,
 } from 'lucide-react';
@@ -20,11 +16,12 @@ import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
-import { MetricCard } from '@/components/metric-card';
+import { CategoryTreePanel } from '@/components/category-tree-panel';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
 import { TableExportButtons } from '@/components/table-export-buttons';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -159,6 +156,7 @@ export function CategoriesAdminWorkspace() {
   const [draft, setDraft] = useState<CategoryDraft>({ name: '', position: '0' });
   const [savingId, setSavingId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
+  const [view, setView] = useState<'tree' | 'table'>('tree');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -169,13 +167,7 @@ export function CategoriesAdminWorkspace() {
         listAdminTemplates(),
       ]);
       setCategories(categoryRows);
-      setTemplates(
-        await Promise.all(
-          templateHeaders.map((template) =>
-            template.attributes ? Promise.resolve(template) : getAdminTemplate(template.id),
-          ),
-        ),
-      );
+      setTemplates(templateHeaders);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -202,25 +194,45 @@ export function CategoriesAdminWorkspace() {
     ({ category, leaf }) =>
       leaf && category.active && !categoriesWithActiveTemplate.has(category.id),
   ).length;
-  const attributeCount = activeTemplates.reduce(
-    (total, template) =>
-      total + (template.attributes?.filter((attribute) => attribute.active).length ?? 0),
-    0,
-  );
-  const requiredCount = activeTemplates.reduce(
-    (total, template) =>
-      total +
-      (template.attributes?.filter((attribute) => attribute.active && attribute.required).length ??
-        0),
-    0,
-  );
   const categoryTemplates = (categoryId: string) => templatesForCategory(templates, categoryId);
+  const inspectCategory = async (categoryId: string) => {
+    const missing = categoryTemplates(categoryId).filter((template) => !template.attributes);
+    if (missing.length === 0) return;
+    try {
+      const definitions = await Promise.all(
+        missing.map((template) => getAdminTemplate(template.id)),
+      );
+      const byId = new Map(definitions.map((template) => [template.id, template]));
+      setTemplates((current) => current.map((template) => byId.get(template.id) ?? template));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'No fue posible cargar el detalle de las plantillas de esta categoría.',
+      );
+    }
+  };
 
   const beginEdit = (category: AdminCatalogCategoryDto) => {
     setEditingId(category.id);
     setDraft({ name: category.name, position: String(category.position) });
     setError(null);
     setNotice(null);
+  };
+
+  const editingCategory = categories.find((category) => category.id === editingId);
+  const hasUnsavedChanges = Boolean(
+    editingCategory &&
+    (draft.name !== editingCategory.name || draft.position !== String(editingCategory.position)),
+  );
+  const closeEditor = () => {
+    if (
+      savingId ||
+      (hasUnsavedChanges &&
+        !window.confirm('Tienes cambios sin guardar. ¿Quieres descartarlos y cerrar la categoría?'))
+    )
+      return;
+    setEditingId(null);
   };
 
   const recoverConflict = async () => {
@@ -297,7 +309,7 @@ export function CategoriesAdminWorkspace() {
   return (
     <>
       <PageHeader
-        title="Árbol de Categorías"
+        title="Árbol de categorías"
         description="Jerarquía del ERP y relación de cada categoría final con sus variantes de plantilla PIM."
         actions={
           <>
@@ -325,48 +337,32 @@ export function CategoriesAdminWorkspace() {
       />
 
       <section
-        className="mb-[18px] grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground"
         aria-label="Indicadores de categorías"
       >
-        <MetricCard
-          label="Plantillas definidas"
-          value={activeTemplates.length}
-          note="versiones activas persistidas"
-          icon={ListChecks}
-          tone="green"
-          href="/templates"
-        />
-        <MetricCard
-          label="Pendientes de definición"
-          value={pendingDefinitionCount}
-          note="categorías activas sin plantilla"
-          icon={Clock3}
-          tone="orange"
-          href="/templates"
-        />
-        <MetricCard
-          label="Atributos configurados"
-          value={attributeCount}
-          note="asignaciones activas"
-          icon={SlidersHorizontal}
-          href="/templates"
-        />
-        <MetricCard
-          label="Obligatorios"
-          value={requiredCount}
-          note="atributos requeridos"
-          icon={CheckCircle2}
-          tone="orange"
-          href="/templates"
-        />
+        <span>
+          {treeRows.filter((row) => row.depth === 0).length} de nivel 1 ·{' '}
+          {treeRows.filter((row) => row.depth === 1).length} de nivel 2 ·{' '}
+          {treeRows.filter((row) => row.depth === 2).length} de nivel 3
+        </span>
+        <span>{treeRows.filter((row) => row.leaf).length} categorías finales</span>
+        <span>{activeTemplates.length} plantillas activas</span>
+        <span className={pendingDefinitionCount ? 'text-amber-800' : ''}>
+          {pendingDefinitionCount} pendientes de definición
+        </span>
       </section>
 
-      <div className="mb-[18px] rounded-lg bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
-        Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
-        interpreta como una sola categoría, no como un nodo duplicado. Si esa categoría tiene varios
-        subtipos, se muestran como variantes de plantilla y la asignación se realiza por producto,
-        sin agregar otro nivel al árbol.
-      </div>
+      <details className="mb-4 rounded-lg border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+        <summary className="cursor-pointer text-sm text-cdr-ink">
+          Cómo llega la categoría desde el ERP
+        </summary>
+        <p className="mt-2">
+          Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
+          interpreta como una sola categoría, no como un nodo duplicado. Si esa categoría tiene
+          varios subtipos, se muestran como variantes de plantilla y la asignación se realiza por
+          producto, sin agregar otro nivel al árbol.
+        </p>
+      </details>
 
       {notice ? (
         <div
@@ -386,6 +382,27 @@ export function CategoriesAdminWorkspace() {
       ) : null}
 
       <Card className="mb-5 p-4 sm:p-5">
+        <nav className="mb-4 flex gap-1 border-b pb-3" aria-label="Vista de categorías">
+          {(
+            [
+              ['tree', 'Árbol de categorías'],
+              ['table', 'Tabla de categorías'],
+            ] as const
+          ).map(([id, label]) => (
+            <Button
+              key={id}
+              size="sm"
+              variant={view === id ? 'dark' : 'ghost'}
+              aria-current={view === id ? 'page' : undefined}
+              onClick={() => {
+                setView(id);
+                setEditingId(null);
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+        </nav>
         <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto_auto] md:items-end">
           <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
             Buscar categorías
@@ -440,7 +457,7 @@ export function CategoriesAdminWorkspace() {
         </div>
       </Card>
 
-      {loading ? (
+      {loading && categories.length === 0 ? (
         <Skeleton className="h-80 rounded-xl" />
       ) : error && categories.length === 0 ? (
         <StatePanel
@@ -455,6 +472,16 @@ export function CategoriesAdminWorkspace() {
           variant="empty"
           title="Sin categorías"
           description="No hay categorías que coincidan con la búsqueda y el estado seleccionados."
+        />
+      ) : view === 'tree' ? (
+        <CategoryTreePanel
+          rows={visibleTreeRows}
+          templatesForCategory={categoryTemplates}
+          searching={Boolean(query.trim())}
+          savingId={savingId}
+          onEdit={beginEdit}
+          onInspectCategory={(categoryId) => void inspectCategory(categoryId)}
+          onSetActive={(category, active) => void setActive(category, active)}
         />
       ) : (
         <Card id="category-table" className="overflow-hidden">
@@ -520,6 +547,9 @@ export function CategoriesAdminWorkspace() {
                   const activeAttributes = visibleVariants.flatMap(
                     (template) =>
                       template.attributes?.filter((attribute) => attribute.active) ?? [],
+                  );
+                  const attributesLoaded = visibleVariants.every((template) =>
+                    Boolean(template.attributes),
                   );
                   return (
                     <Fragment key={category.id}>
@@ -619,9 +649,13 @@ export function CategoriesAdminWorkspace() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-semibold">{activeAttributes.length}</td>
                         <td className="px-4 py-3 font-semibold">
-                          {activeAttributes.filter((attribute) => attribute.required).length}
+                          {attributesLoaded ? activeAttributes.length : '—'}
+                        </td>
+                        <td className="px-4 py-3 font-semibold">
+                          {attributesLoaded
+                            ? activeAttributes.filter((attribute) => attribute.required).length
+                            : '—'}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge
@@ -703,6 +737,71 @@ export function CategoriesAdminWorkspace() {
           </div>
         </Card>
       )}
+      {view === 'tree' && editingId && categories.find((category) => category.id === editingId) ? (
+        <WorkspaceDrawer
+          title="Editar categoría"
+          busy={savingId !== null}
+          unsavedChanges={hasUnsavedChanges}
+          onClose={closeEditor}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const category = categories.find((item) => item.id === editingId);
+              if (category) void save(category);
+            }}
+            className="space-y-5"
+          >
+            <p className="text-sm text-muted-foreground">
+              Actualiza el nombre y el orden de la categoría. El cambio conserva su jerarquía y
+              queda registrado en auditoría.
+            </p>
+            {error ? (
+              <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                {error}
+              </p>
+            ) : null}
+            <label className="grid gap-1.5 text-sm">
+              Nombre
+              <Input
+                value={draft.name}
+                disabled={savingId !== null}
+                required
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              Posición
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                value={draft.position}
+                disabled={savingId !== null}
+                required
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, position: event.target.value }))
+                }
+              />
+            </label>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={savingId !== null}
+                onClick={closeEditor}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={savingId !== null}>
+                {savingId ? 'Guardando…' : 'Guardar categoría'}
+              </Button>
+            </div>
+          </form>
+        </WorkspaceDrawer>
+      ) : null}
     </>
   );
 }

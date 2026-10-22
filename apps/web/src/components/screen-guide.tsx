@@ -2,7 +2,8 @@
 
 import { ChevronDown, CircleHelp } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export function ScreenGuide({
   objective,
@@ -18,20 +19,48 @@ export function ScreenGuide({
   limitation?: string;
 }) {
   const pathname = usePathname();
+  const guideId = useId();
+  const anchor = useRef<HTMLSpanElement>(null);
+  const details = useRef<HTMLDetailsElement>(null);
+  const [helpTarget, setHelpTarget] = useState<Element | null>(null);
+
+  useEffect(() => {
+    setHelpTarget(anchor.current?.closest('main')?.querySelector('[data-page-help-slot]') ?? null);
+  }, [pathname]);
   const storageKey = `cdr:screen-guide:${pathname}`;
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(storageKey);
-      if (stored !== null) setOpen(stored === 'open');
+      setOpen(stored === 'open');
     } catch {
       // Storage may be disabled; the guide remains available for the current render.
     }
   }, [storageKey]);
 
-  return (
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!details.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        details.current?.querySelector('summary')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+
+  const guide = (
     <details
+      ref={details}
       open={open}
       onToggle={(event) => {
         const nextOpen = event.currentTarget.open;
@@ -42,32 +71,31 @@ export function ScreenGuide({
           // Persisting this optional UI preference must never block the screen.
         }
       }}
-      className="group mb-4 rounded-lg border border-[#ffd1af] bg-[#fff8f2] text-xs text-slate-700"
+      className={
+        helpTarget
+          ? 'group text-xs text-slate-700'
+          : 'group relative mb-3 w-fit max-w-full text-xs text-slate-700'
+      }
     >
-      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2.5 rounded-lg px-3 py-2 marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-        <CircleHelp aria-hidden="true" className="size-4 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 sm:flex sm:gap-2">
-          <strong className="block shrink-0 text-cdr-ink">¿Qué es esta pantalla?</strong>
-          <span className="mt-0.5 hidden truncate leading-relaxed text-[#69727b] sm:mt-0 sm:block">
-            {objective}
-          </span>
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
-          <span className="hidden group-open:hidden sm:inline">Ver guía</span>
-          <span className="hidden sm:group-open:inline">Ocultar</span>
+      <summary className="flex min-h-6 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground marker:content-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <CircleHelp aria-hidden="true" className="size-3.5 shrink-0" />
+        <span className={helpTarget ? 'sr-only' : undefined}>¿Qué es esta pantalla?</span>
+        {!helpTarget ? (
           <ChevronDown
             aria-hidden="true"
-            className="size-4 transition-transform group-open:rotate-180"
+            className="size-3 transition-transform group-open:rotate-180"
           />
-        </span>
+        ) : null}
       </summary>
 
-      <div className="grid gap-5 border-t border-[#ffe3cf] px-4 pb-4 pt-3 sm:px-10 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-8">
-        <p className="leading-relaxed text-[#69727b] sm:hidden">{objective}</p>
-        <section aria-labelledby="screen-guide-actions">
+      <div
+        className={`${helpTarget ? 'absolute left-0 top-full z-40' : 'relative z-10'} mt-2 grid w-[min(720px,calc(100vw-40px))] max-w-full gap-4 rounded-xl border bg-white p-4 shadow-lg sm:grid-cols-2`}
+      >
+        <p className="leading-relaxed text-muted-foreground sm:col-span-2">{objective}</p>
+        <section aria-labelledby={`${guideId}-actions`}>
           <h2
-            id="screen-guide-actions"
-            className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-orange-900"
+            id={`${guideId}-actions`}
+            className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-foreground"
           >
             {actionsLabel}
           </h2>
@@ -78,10 +106,10 @@ export function ScreenGuide({
           </ul>
         </section>
 
-        <section aria-labelledby="screen-guide-data">
+        <section aria-labelledby={`${guideId}-data`}>
           <h2
-            id="screen-guide-data"
-            className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-orange-900"
+            id={`${guideId}-data`}
+            className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-foreground"
           >
             De dónde salen los datos
           </h2>
@@ -94,5 +122,12 @@ export function ScreenGuide({
         </section>
       </div>
     </details>
+  );
+
+  return (
+    <>
+      <span ref={anchor} className="contents" />
+      {helpTarget ? createPortal(guide, helpTarget) : guide}
+    </>
   );
 }

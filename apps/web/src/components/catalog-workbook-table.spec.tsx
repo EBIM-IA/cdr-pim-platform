@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -132,6 +132,40 @@ beforeEach(() => {
 });
 
 describe('CatalogWorkbookTable', () => {
+  it('keeps unclassified SKU accessible without inventing completeness or editable attributes', async () => {
+    mocks.fetchWorkbook.mockResolvedValue({
+      ...workbook,
+      items: [
+        {
+          ...workbook.items[0],
+          sku: 'SKU-PENDING',
+          category: null,
+          template: null,
+          completeness: null,
+        },
+      ],
+      total: 1,
+    });
+    render(<CatalogWorkbookTable canEdit showCompleteness />);
+    const link = await screen.findByRole('link', { name: 'SKU-PENDING' });
+    const row = within(link.closest('tr') as HTMLTableRowElement);
+
+    expect(link).toHaveAttribute('href', `/products/${productOne}`);
+    expect(row.getAllByText('Pendiente de clasificación')).toHaveLength(2);
+    expect(row.getByText('Sin indicador')).toBeVisible();
+    expect(await row.findByLabelText('Descripción técnica: no aplica')).toBeVisible();
+    expect(
+      row.queryByRole('button', { name: /Editar Descripción técnica/u }),
+    ).not.toBeInTheDocument();
+    expect(mocks.patchAttribute).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /CSV · 1 fila$/u }));
+    await waitFor(() => expect(mocks.downloadCsv).toHaveBeenCalled());
+    const data = mocks.downloadCsv.mock.calls.at(-1)?.[0];
+    expect(data.rows[0].join(' ')).not.toContain('null%');
+    expect(data.rows[0]).toContain('Pendiente de clasificación');
+  });
+
   it('reorders the catalog columns and keeps the same order in the export', async () => {
     const { container } = render(<CatalogWorkbookTable canEdit />);
     await screen.findByRole('link', { name: 'SKU-1' });

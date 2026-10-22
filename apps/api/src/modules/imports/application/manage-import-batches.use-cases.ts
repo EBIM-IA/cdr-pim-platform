@@ -28,6 +28,10 @@ import {
   EXTERNAL_HOMOLOG_REPOSITORY,
   type ExternalHomologRepositoryPort,
 } from '../../equivalences/domain/ports/external-homolog-repository.port';
+import {
+  EXTERNAL_HOMOLOG_REFERENCE_POLICY,
+  type ExternalHomologReferencePolicyPort,
+} from '../../equivalences/domain/ports/external-homolog-reference-policy.port';
 import { GroupOemCode, OemApprovalStatus } from '../../equivalences/domain/entities/group-oem-code';
 import {
   GROUP_OEM_CODE_REPOSITORY,
@@ -67,6 +71,8 @@ export class PreviewImportBatchUseCase {
     private readonly oemCodes: GroupOemCodeRepositoryPort,
     @Inject(CATEGORY_ATTRIBUTE_IMPORT)
     private readonly categoryAttributes: CategoryAttributeImportPort,
+    @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
+    private readonly homologReferencePolicy: ExternalHomologReferencePolicyPort,
   ) {}
 
   async execute(input: PreviewImportInput, actor: AuthenticatedActor): Promise<ImportBatch> {
@@ -146,9 +152,21 @@ export class PreviewImportBatchUseCase {
       vehicleType?: ApplicationVehicleType | null;
     };
     const groups = new Map<string, Promise<RelationGroup | null>>();
+    const references = new Map<string, Promise<string | null>>();
+    // One read per file keeps warnings consistent across its rows and avoids a query per row.
+    const existingHomologs = target === 'homologs' ? await this.homologs.list(undefined, true) : [];
+    const existingHomologGroups = new Map<string, Set<string>>();
+    for (const homolog of existingHomologs) {
+      const snapshot = homolog.toSnapshot();
+      const identity = homologReferenceKey(snapshot.externalCode, snapshot.externalBrand);
+      const codes = existingHomologGroups.get(identity) ?? new Set<string>();
+      codes.add(snapshot.unifiedCode.trim().toUpperCase());
+      existingHomologGroups.set(identity, codes);
+    }
     const result: ImportRow[] = [];
     for (const row of rows) {
       const errors = [...row.errors];
+      const warnings = [...row.warnings];
       let data = row.data;
       if (row.valid) {
         const unifiedCode = text(row.data.unifiedCode).toUpperCase();
@@ -160,6 +178,32 @@ export class PreviewImportBatchUseCase {
         if (!group) errors.push(`El código unificador ${unifiedCode || 'vacío'} no existe`);
         if (target === 'oem' && group && !group.automotive) {
           errors.push('Los códigos OEM solo se permiten en grupos automotrices');
+        }
+        if (target === 'homologs') {
+          const externalCode = text(row.data.externalCode);
+          const externalBrand = text(row.data.externalBrand);
+          const identity = homologReferenceKey(externalCode, externalBrand);
+          const referenceError = await memoized(references, identity, async () => {
+            try {
+              await this.homologReferencePolicy.assertExternalReference(
+                externalCode,
+                externalBrand,
+              );
+              return null;
+            } catch (error) {
+              if (!isDomainError(error)) throw error;
+              return error.message;
+            }
+          });
+          if (referenceError) errors.push(referenceError);
+          const otherGroups = [...(existingHomologGroups.get(identity) ?? [])].filter(
+            (code) => code !== unifiedCode,
+          );
+          if (otherGroups.length > 0) {
+            warnings.push(
+              `El homólogo también está asociado a ${[...new Set(otherGroups)].sort().join(', ')}`,
+            );
+          }
         }
         if (target === 'applications' && group) {
           const suppliedType = text(row.data.vehicleType).toUpperCase();
@@ -184,7 +228,7 @@ export class PreviewImportBatchUseCase {
         if (seen.has(key)) errors.push('Fila duplicada dentro del archivo');
         else seen.add(key);
       }
-      result.push({ ...row, data, valid: errors.length === 0, errors });
+      result.push({ ...row, data, valid: errors.length === 0, errors, warnings });
     }
     return result;
   }
@@ -216,6 +260,8 @@ export class ConfirmImportBatchUseCase {
     private readonly oemCodes: GroupOemCodeRepositoryPort,
     @Inject(CATEGORY_ATTRIBUTE_IMPORT)
     private readonly categoryAttributes: CategoryAttributeImportPort,
+    @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
+    private readonly homologReferencePolicy: ExternalHomologReferencePolicyPort,
   ) {}
 
   async execute(id: string, actor: AuthenticatedActor): Promise<ImportBatch> {
@@ -373,6 +419,11 @@ export class ConfirmImportBatchUseCase {
       this.homologs.findGroupByCode(unifiedCode),
     );
     if (!group) throw new NotFoundError('EquivalenceGroup', unifiedCode);
+    // The catalogue can change after preview; reject a now-owned SKU before persisting.
+    await this.homologReferencePolicy.assertExternalReference(
+      text(data.externalCode),
+      text(data.externalBrand),
+    );
     const homologs = await memoized(cache.homologs, unifiedCode, () =>
       this.homologs.list(unifiedCode, true),
     );
@@ -573,6 +624,10 @@ function homologKey(data: {
   readonly externalBrand?: unknown;
 }): string {
   return [data.unifiedCode, data.externalCode, data.externalBrand].map(normalized).join('|');
+}
+
+function homologReferenceKey(externalCode: string, externalBrand: string): string {
+  return JSON.stringify([externalCode, externalBrand].map((value) => value.trim().toUpperCase()));
 }
 
 function oemKey(data: { readonly unifiedCode?: unknown; readonly oemCode?: unknown }): string {

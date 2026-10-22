@@ -22,6 +22,10 @@ import {
   type EligibleHomologMatch,
   type ExternalHomologRepositoryPort,
 } from '../domain/ports/external-homolog-repository.port';
+import {
+  EXTERNAL_HOMOLOG_REFERENCE_POLICY,
+  type ExternalHomologReferencePolicyPort,
+} from '../domain/ports/external-homolog-reference-policy.port';
 
 @Injectable()
 export class ListExternalHomologsUseCase {
@@ -41,6 +45,8 @@ export class CreateExternalHomologUseCase {
     @Inject(EXTERNAL_HOMOLOG_REPOSITORY)
     private readonly repository: ExternalHomologRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
+    private readonly referencePolicy: ExternalHomologReferencePolicyPort,
   ) {}
 
   async execute(
@@ -49,6 +55,7 @@ export class CreateExternalHomologUseCase {
   ): Promise<ExternalHomolog> {
     const group = await this.repository.findGroupByCode(input.unifiedCode);
     if (!group) throw new NotFoundError('EquivalenceGroup', input.unifiedCode);
+    await this.referencePolicy.assertExternalReference(input.externalCode, input.externalBrand);
     const occurredAt = this.clock.now();
     const homolog = ExternalHomolog.create(
       {
@@ -77,6 +84,8 @@ export class UpdateExternalHomologUseCase {
     @Inject(EXTERNAL_HOMOLOG_REPOSITORY)
     private readonly repository: ExternalHomologRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
+    private readonly referencePolicy: ExternalHomologReferencePolicyPort,
   ) {}
 
   async execute(
@@ -89,6 +98,17 @@ export class UpdateExternalHomologUseCase {
     const { expectedUpdatedAt, ...fields } = input;
     const occurredAt = this.clock.now();
     homolog.update(fields, occurredAt);
+    const snapshot = homolog.toSnapshot();
+    if (
+      snapshot.active ||
+      fields.externalCode !== undefined ||
+      fields.externalBrand !== undefined
+    ) {
+      await this.referencePolicy.assertExternalReference(
+        snapshot.externalCode,
+        snapshot.externalBrand,
+      );
+    }
     const result = await this.repository.updateWithAudit(homolog, new Date(expectedUpdatedAt), {
       action: AuditAction.Updated,
       actorId: actor.id,

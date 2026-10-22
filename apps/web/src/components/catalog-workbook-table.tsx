@@ -125,14 +125,15 @@ const baseColumns: readonly WorkbookColumn[] = [
     label: 'Plantilla',
     group: 'identity',
     exportable: true,
-    getValue: (row) => row.template.name,
+    getValue: (row) => row.template?.name ?? 'Pendiente de clasificación',
   },
   {
     key: 'base:status',
     label: 'Estado · completitud',
     group: 'identity',
     exportable: true,
-    getValue: (row) => `${statusLabel(row.status as ProductStatus)} · ${row.completeness}%`,
+    getValue: (row) =>
+      `${statusLabel(row.status as ProductStatus)} · ${row.completeness === null ? 'Sin indicador' : `${row.completeness}%`}`,
   },
   {
     key: 'base:provider',
@@ -153,7 +154,7 @@ const baseColumns: readonly WorkbookColumn[] = [
     label: 'Línea / categoría',
     group: 'erp',
     exportable: true,
-    getValue: (row) => row.category.name,
+    getValue: (row) => row.category?.name ?? 'Pendiente de clasificación',
   },
   {
     key: 'base:brand',
@@ -173,7 +174,7 @@ const baseColumns: readonly WorkbookColumn[] = [
 
 function attributeCell(row: CatalogWorkbookProductDto, key: string): ExcelTableCell {
   const cell = row.attributes[key];
-  return !cell || !cell.applicable ? EXCEL_NOT_APPLICABLE : cell.value;
+  return !row.template || !cell || !cell.applicable ? EXCEL_NOT_APPLICABLE : cell.value;
 }
 
 function displayCell(value: ExcelTableCell): string {
@@ -265,6 +266,7 @@ export function CatalogWorkbookTable({
   const [editing, setEditing] = useState<EditingCell | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [columnExpressions, setColumnExpressions] = useState<Record<string, string>>({});
 
@@ -479,6 +481,16 @@ export function CatalogWorkbookTable({
 
   const saveEdit = async (column: CatalogWorkbookColumnDto) => {
     if (!editing || saving) return;
+    const product = rows.find((row) => row.id === editing.productId);
+    const cell = product?.attributes[editing.attributeKey];
+    if (!canEdit || !product?.template || !cell?.applicable || !cell.permissions.edit) {
+      setEditing(null);
+      setNotice({
+        tone: 'error',
+        message: 'Este atributo ya no está disponible para edición. Actualiza la vista.',
+      });
+      return;
+    }
     const parsed = parseWorkbookDraft(column, editing.draft);
     if (parsed.kind === 'noop') {
       setEditing(null);
@@ -648,16 +660,12 @@ export function CatalogWorkbookTable({
             Tabla dinámica del catálogo con atributos de las plantillas activas
           </caption>
           <thead className="sticky top-0 z-10 border-b bg-white text-[11px] text-muted-foreground">
-            <tr className="border-b text-[10px] font-extrabold tracking-[0.06em] text-orange-700">
+            <tr className="border-b text-[10px] text-muted-foreground">
               {groupedOrderedColumns.map((segment, index) => (
                 <th
                   key={`${segment.group}:${index}`}
                   colSpan={segment.count}
-                  className={cn(
-                    'px-3 py-2.5',
-                    index > 0 && 'border-l',
-                    segment.group === 'attribute' ? 'bg-slate-50' : 'bg-orange-50',
-                  )}
+                  className={cn('px-3 py-2.5', index > 0 && 'border-l', 'bg-white')}
                 >
                   {workbookGroupLabels[segment.group]}
                 </th>
@@ -706,9 +714,10 @@ export function CatalogWorkbookTable({
                   reorder={columnOrder.getColumnControl(column.key, column.label)}
                   className={cn(
                     'max-w-[240px] border-r last:border-r-0',
+                    column.key === 'base:sku' && 'sticky left-0 z-20 bg-white',
                     index > 0 &&
                       orderedColumns[index - 1]?.group !== column.group &&
-                      'border-l-2 border-l-orange-200',
+                      'border-l-2 border-l-slate-200',
                   )}
                 />
               ))}
@@ -719,7 +728,15 @@ export function CatalogWorkbookTable({
           </thead>
           <tbody className="divide-y">
             {table.visibleRows.map((row) => (
-              <tr key={row.id} className="hover:bg-orange-50/40">
+              <tr
+                key={row.id}
+                aria-selected={selectedRowId === row.id}
+                onClick={() => setSelectedRowId(row.id)}
+                className={cn(
+                  'group/row hover:bg-orange-50/40',
+                  selectedRowId === row.id && 'bg-[#fff1e6]',
+                )}
+              >
                 {orderedColumns.map((column, index) => {
                   if (!column.attribute) {
                     const value = column.getValue(row);
@@ -728,9 +745,14 @@ export function CatalogWorkbookTable({
                         key={column.key}
                         className={cn(
                           'max-w-[280px] border-r px-3 py-2.5',
+                          column.key === 'base:sku' &&
+                            'sticky left-0 z-10 border-r bg-white group-hover/row:bg-orange-50',
+                          column.key === 'base:sku' &&
+                            selectedRowId === row.id &&
+                            'bg-[#fff1e6] shadow-[inset_3px_0_0_var(--color-primary)]',
                           index > 0 &&
                             orderedColumns[index - 1]?.group !== column.group &&
-                            'border-l-2 border-l-orange-200',
+                            'border-l-2 border-l-slate-200',
                         )}
                       >
                         {column.key === 'base:sku' ? (
@@ -747,7 +769,9 @@ export function CatalogWorkbookTable({
                             </StatusBadge>
                             {showCompleteness ? (
                               <span className="font-semibold tabular-nums">
-                                {row.completeness}%
+                                {row.completeness === null
+                                  ? 'Sin indicador'
+                                  : `${row.completeness}%`}
                               </span>
                             ) : null}
                           </span>
@@ -767,7 +791,7 @@ export function CatalogWorkbookTable({
                   }
                   const attribute = column.attribute;
                   const cell = row.attributes[attribute.key];
-                  if (!cell || !cell.applicable) {
+                  if (!row.template || !cell || !cell.applicable) {
                     return (
                       <td
                         key={column.key}
@@ -776,7 +800,7 @@ export function CatalogWorkbookTable({
                           'min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500',
                           index > 0 &&
                             orderedColumns[index - 1]?.group !== column.group &&
-                            'border-l-2 border-l-orange-200',
+                            'border-l-2 border-l-slate-200',
                         )}
                       >
                         No aplica
@@ -793,8 +817,7 @@ export function CatalogWorkbookTable({
                         'min-w-36 border-r px-2 py-1.5',
                         index > 0 &&
                           orderedColumns[index - 1]?.group !== column.group &&
-                          'border-l-2 border-l-orange-200',
-                        editable && 'bg-blue-50/35',
+                          'border-l-2 border-l-slate-200',
                         cell.required && cell.value === null && 'bg-red-50',
                       )}
                     >

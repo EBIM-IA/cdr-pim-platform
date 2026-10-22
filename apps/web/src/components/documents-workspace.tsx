@@ -470,8 +470,13 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           onAction={() => setQuery('')}
         />
       ) : (
-        <Card className="mb-[18px] overflow-hidden p-0">
-          <div className="overflow-x-auto">
+        <Card className="mb-[18px] min-w-0 max-w-full overflow-hidden p-0">
+          <div
+            className="max-w-full overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label="Matriz de documentos desplazable"
+          >
             <table className="w-full min-w-[1420px] border-collapse text-left text-xs">
               <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_#e5e7eb]">
                 <tr className="bg-orange-50 text-[10px] font-bold uppercase tracking-[.06em] text-orange-700">
@@ -739,7 +744,7 @@ function AssetSlotCell({
           <span className="block text-[10px] text-amber-700">Pendiente</span>
         )}
         {canWrite ? (
-          <label className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-1 text-[10px] font-semibold text-primary hover:bg-orange-50">
+          <label className="relative inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-1 text-[10px] font-semibold text-primary hover:bg-orange-50">
             <UploadCloud aria-hidden="true" className="size-3" />
             {uploading
               ? 'Subiendo…'
@@ -774,7 +779,7 @@ const BulkUploadPanel = forwardRef<
   }
 >(function BulkUploadPanel({ zipFile, result, busy, error, onFile, onProcess }, ref) {
   return (
-    <Card ref={ref} className="p-[22px]">
+    <Card ref={ref} className="min-w-0 max-w-full p-[22px]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-[17px] font-semibold">Carga masiva de documentos e imágenes</h2>

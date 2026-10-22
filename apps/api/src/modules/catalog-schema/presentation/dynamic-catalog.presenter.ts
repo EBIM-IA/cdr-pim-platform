@@ -92,8 +92,13 @@ export function toWorkbookResultDto(
 export function toProductAttributeSheetDto(input: {
   schema: DynamicCatalogSchema;
   product: CatalogGridProduct;
+  completeness?: number | null;
 }): ProductAttributeSheetDto {
-  return { schema: toGridSchemaDto(input.schema), product: toGridProductDto(input.product) };
+  return {
+    schema: toGridSchemaDto(input.schema),
+    product: toGridProductDto(input.product),
+    ...(input.completeness !== undefined ? { completeness: input.completeness } : {}),
+  };
 }
 
 export function toUpdatedProductAttributeDto(

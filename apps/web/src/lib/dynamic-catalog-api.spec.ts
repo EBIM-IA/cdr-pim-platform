@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   fetchCatalogGrid,
+  fetchCatalogCategories,
   fetchCatalogWorkbook,
   patchProductAttribute,
   reassignProductTemplate,
@@ -101,6 +102,77 @@ describe('dynamic catalog browser client', () => {
     });
     expect(url.searchParams.getAll('filter')).toEqual(['diametro:gte:20']);
     expect(init.credentials).toBe('same-origin');
+  });
+
+  it('preserves unclassified workbook rows through response validation', async () => {
+    const pending = {
+      id: '11111111-1111-4111-8111-111111111111',
+      sku: 'SIN-CLASIFICAR',
+      name: 'Producto sin plantilla',
+      description: null,
+      brand: null,
+      status: 'draft',
+      updatedAt: '2026-10-22T10:00:00.000Z',
+      category: null,
+      template: null,
+      completeness: null,
+      providerCode: null,
+      unifiedCode: null,
+      applicationTypes: [],
+      attributes: {},
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            columns: [],
+            facets: { brands: [], applicationTypes: [], statuses: ['draft'] },
+            items: [pending],
+            page: 1,
+            pageSize: 25,
+            total: 1,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const result = await fetchCatalogWorkbook({ page: 1, pageSize: 25, filter: [] });
+    expect(result.items).toEqual([pending]);
+    expect(result.total).toBe(1);
+  });
+
+  it('preserves persisted category ancestors through response validation', async () => {
+    const category = {
+      id: '33333333-3333-4333-8333-333333333333',
+      slug: 'bolas',
+      name: 'De bolas',
+      path: 'Rodamientos > De bolas',
+      templateId: '44444444-4444-4444-8444-444444444444',
+      templateName: 'De bolas',
+      templateVariantKey: '14',
+      templateVersion: 1,
+      ancestors: [
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          slug: 'rodamientos',
+          name: 'Rodamientos',
+          path: 'Rodamientos',
+        },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([category]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    expect(await fetchCatalogCategories()).toEqual([category]);
   });
 
   it('sends the expected template id when reassigning a product variant', async () => {

@@ -25,10 +25,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="grid min-h-dvh bg-white md:grid-cols-2">
-      <section className="hidden items-center justify-center bg-[#161616] px-12 py-14 text-white md:flex">
+      <section className="hidden items-center justify-center bg-[#1b1f23] px-12 py-14 text-white md:flex">
         <div className="w-[min(510px,90%)] text-center">
           <Image
-            src="/brand/cdr-logo-white.png"
+            src="/brand/cdr-logo.png"
             alt="Casa del Rulimán"
             width={520}
             height={158}
@@ -46,9 +46,16 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
       <section className="flex min-h-dvh items-center justify-center px-5 py-9 sm:px-10 md:px-9">
         <div className="w-full max-w-[390px]">
-          <h2 className="text-[25px] font-semibold tracking-tight">Bienvenido</h2>
-          <p className="mt-[17px] text-center text-xs leading-relaxed text-muted-foreground">
-            Ingresa con tu cuenta autorizada para acceder al catálogo maestro.
+          <Image
+            src="/brand/cdr-logo.png"
+            alt="Casa del Rulimán"
+            width={520}
+            height={158}
+            className="mb-6 h-auto w-[150px] rounded-lg bg-[#1b1f23] px-3 py-2 md:hidden"
+          />
+          <h2 className="text-2xl font-semibold tracking-tight">Iniciar sesión</h2>
+          <p className="mt-1 text-left text-xs leading-relaxed text-muted-foreground">
+            Ingresa para acceder al catálogo de productos.
           </p>
           <LoginForm returnTo={returnTo} />
           <p className="mt-8 text-center text-xs text-muted-foreground">

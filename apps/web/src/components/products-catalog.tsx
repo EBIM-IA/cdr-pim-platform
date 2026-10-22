@@ -3,19 +3,11 @@
 import type {
   CatalogCategorySummaryDto,
   CatalogWorkbookResultDto,
+  CatalogWorkbookProductDto,
+  CatalogWorkbookColumnDto,
   ProductStatus,
 } from '@cdr/contracts';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Columns3,
-  FileUp,
-  List as ListIcon,
-  PackageSearch,
-  Search,
-  SlidersHorizontal,
-  X,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, Columns3, Search, SlidersHorizontal, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -29,15 +21,17 @@ import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge'
 import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { CategoryTreeSelect } from '@/components/ui/category-tree-select';
+import {
+  CategoryTreeSelect,
+  type CategoryTreeSelectOption,
+} from '@/components/ui/category-tree-select';
 import { Input } from '@/components/ui/input';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useProductsData } from '@/components/use-products-data';
-import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
+import { fetchCatalogCategories, fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
 import type { Product } from '@/lib/types';
-import { cn, formatNumber, unique } from '@/lib/utils';
+import { cn, formatNumber } from '@/lib/utils';
 
 type CatalogView = 'catalog' | 'table' | 'sheet';
 type CompletenessFilter = '' | 'complete' | 'attention' | 'critical' | 'unavailable';
@@ -69,10 +63,6 @@ export function catalogFamily(product: Product): string {
   );
 }
 
-function availableCatalogValue(value: string): boolean {
-  return Boolean(value && !/^no disponible/i.test(value));
-}
-
 export function matchesCompleteness(
   completeness: number | null,
   filter: CompletenessFilter,
@@ -97,7 +87,7 @@ function completenessLabel(filter: CompletenessFilter): string {
 
 function CompletenessMeter({ value, sku }: { value: number | null; sku: string }) {
   if (value === null) {
-    return <span className="text-[10px] text-muted-foreground">No medido por el backend</span>;
+    return <span className="text-[10px] text-muted-foreground">Sin indicador de completitud</span>;
   }
   const tone = value >= 90 ? 'bg-emerald-500' : value >= 70 ? 'bg-amber-500' : 'bg-red-500';
   return (
@@ -127,16 +117,16 @@ function ProductCatalogList({
         <li
           key={product.id}
           className={cn(
-            'grid min-w-0 gap-3 rounded-xl border bg-white p-2.5 shadow-sm transition hover:border-orange-200 hover:shadow-md md:items-center md:p-3',
+            'grid min-w-0 grid-cols-[56px_minmax(0,1fr)] gap-3 rounded-xl border bg-white p-2 shadow-sm transition hover:border-orange-200 hover:shadow-md md:items-center md:pr-3',
             showStatus || showCompleteness
-              ? 'md:grid-cols-[72px_minmax(0,1fr)_150px_auto]'
-              : 'md:grid-cols-[72px_minmax(0,1fr)_auto]',
+              ? 'md:grid-cols-[56px_minmax(0,1fr)_150px_auto]'
+              : 'md:grid-cols-[56px_minmax(0,1fr)_auto]',
           )}
         >
           <ProductArtwork
             category={product.category}
             name={product.name}
-            className="aspect-square h-auto min-h-16 rounded-lg"
+            className="aspect-square h-auto min-h-14 rounded-lg"
           />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -146,30 +136,36 @@ function ProductCatalogList({
               >
                 {product.sku}
               </Link>
-              <StatusBadge tone="info">Registro del backend</StatusBadge>
+              {product.classificationPending ? (
+                <StatusBadge tone="warning">Pendiente de clasificación</StatusBadge>
+              ) : null}
             </div>
-            <p className="mt-1 text-sm font-semibold">{product.name}</p>
+            <p className="mt-0.5 text-[13px] font-normal leading-4">
+              {product.name === product.sku
+                ? (product.templateKey ?? product.category)
+                : product.name}
+            </p>
             {product.description ? (
               <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
                 {product.description}
               </p>
             ) : null}
-            <dl className="mt-2 grid gap-x-5 gap-y-1.5 text-xs sm:grid-cols-2 xl:grid-cols-4">
+            <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
               {[
                 ['Marca', product.brand],
-                ['Línea / categoría', product.category],
+                ['Categoría', product.category],
                 ['Aplicación', product.application],
                 ['Código unificador', product.unifiedCode ?? 'Sin código'],
               ].map(([label, value]) => (
-                <div key={label} className="min-w-0">
+                <div key={label} className="flex min-w-0 items-baseline gap-1">
                   <dt className="text-[10px] text-muted-foreground">{label}</dt>
-                  <dd className="mt-0.5 break-words font-semibold">{value}</dd>
+                  <dd className="break-words text-[11px] font-semibold">{value}</dd>
                 </div>
               ))}
             </dl>
           </div>
           {showStatus || showCompleteness ? (
-            <div className="flex flex-col items-start gap-3">
+            <div className="col-span-2 flex flex-wrap items-center gap-3 md:col-span-1 md:flex-col md:items-start">
               {showStatus ? (
                 <StatusBadge tone={statusTone(product.status)}>
                   {statusLabel(product.status)}
@@ -180,11 +176,11 @@ function ProductCatalogList({
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap gap-1.5 md:flex-col">
+          <div className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1">
             <Button asChild size="sm">
               <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
             </Button>
-            {canEdit ? (
+            {canEdit && !product.classificationPending ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
                   Editar enriquecimiento
@@ -215,6 +211,72 @@ function CatalogSkeleton({ count }: { count: number }) {
   );
 }
 
+export function workbookCatalogProduct(
+  row: CatalogWorkbookProductDto,
+  columns: readonly CatalogWorkbookColumnDto[],
+): Product {
+  const labels = new Map(columns.map((column) => [column.key, column]));
+  return {
+    id: row.id,
+    sku: row.sku,
+    name: row.name,
+    description: row.description ?? undefined,
+    brand: row.brand ?? 'Sin marca',
+    brandFilter: row.brand ?? undefined,
+    category: row.category?.name ?? 'Pendiente de clasificación',
+    application:
+      row.applicationTypes
+        .map((type) =>
+          type === 'AUTOMOTRIZ' ? 'Automotriz' : type === 'INDUSTRIAL' ? 'Industrial' : type,
+        )
+        .join(' e ') || 'Sin aplicación',
+    status: row.status as ProductStatus,
+    completeness: row.completeness,
+    unifiedCode: row.unifiedCode ?? undefined,
+    providerCode: row.providerCode ?? undefined,
+    templateKey: row.template?.name,
+    classificationPending: !row.template,
+    updatedAt: row.updatedAt,
+    attributes: Object.entries(row.attributes).flatMap(([key, cell]) => {
+      if (!row.template || !cell.applicable) return [];
+      const column = labels.get(key);
+      return [
+        {
+          key,
+          label: column?.label ?? key,
+          value: cell.value === null ? 'Pendiente' : String(cell.value),
+          rawValue: cell.value ?? '',
+          unit: column?.unit ?? undefined,
+          required: cell.required,
+        },
+      ];
+    }),
+  };
+}
+
+export function catalogFilterCategories(
+  categories: readonly CatalogCategorySummaryDto[],
+): CategoryTreeSelectOption[] {
+  const options = new Map<string, CategoryTreeSelectOption>();
+  for (const category of categories) {
+    for (const ancestor of category.ancestors ?? []) {
+      options.set(ancestor.id, {
+        value: ancestor.id,
+        label: ancestor.name,
+        path: ancestor.path,
+        keywords: [ancestor.slug],
+      });
+    }
+    options.set(category.id, {
+      value: category.id,
+      label: category.name,
+      path: category.path,
+      keywords: [category.slug, category.templateName, category.templateVariantKey],
+    });
+  }
+  return [...options.values()];
+}
+
 export function ProductsCatalog({
   initialSearch = '',
   initialBrand = '',
@@ -240,90 +302,84 @@ export function ProductsCatalog({
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [brand, setBrand] = useState(initialBrand);
   const [status, setStatus] = useState<ProductStatus | ''>(showProductStatus ? initialStatus : '');
-  const [family, setFamily] = useState('');
   const [category, setCategory] = useState('');
   const [application, setApplication] = useState('');
   const [completeness, setCompleteness] = useState<CompletenessFilter>('');
-  const [requestedPage, setRequestedPage] = useState(1);
-  const [requestedPageSize, setRequestedPageSize] = useState(25);
-  const [view, setView] = useState<CatalogView>('table');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [view, setView] = useState<CatalogView>('catalog');
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialBrand || initialStatus),
   );
   const [urlReady, setUrlReady] = useState(false);
   const [catalogCategories, setCatalogCategories] = useState<CatalogCategorySummaryDto[]>([]);
-  const [workbookFacets, setWorkbookFacets] = useState<CatalogWorkbookResultDto['facets']>({
+  const [facets, setFacets] = useState<CatalogWorkbookResultDto['facets']>({
     brands: [],
     applicationTypes: [],
     statuses: [],
   });
-  const updateWorkbookFacets = useCallback((facets: CatalogWorkbookResultDto['facets']) => {
-    setWorkbookFacets(facets);
-    setApplication((current) =>
-      current && !facets.applicationTypes.includes(current) ? '' : current,
-    );
-  }, []);
+  const [result, setResult] = useState<CatalogWorkbookResultDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const updateFacets = useCallback(
+    (next: CatalogWorkbookResultDto['facets']) => setFacets(next),
+    [],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchCatalogCategories(controller.signal)
-      .then(setCatalogCategories)
-      .catch(() => setCatalogCategories([]));
+      .then((categories) => {
+        if (!controller.signal.aborted) setCatalogCategories(categories);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCatalogCategories([]);
+      });
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const urlFamily = params.get('family') ?? '';
-    const urlCategory = params.get('category') ?? '';
-    const urlApplication = params.get('application') ?? '';
-    setFamily(urlFamily);
-    setCategory(urlCategory);
-    setApplication(urlApplication);
-    const completenessParam = params.get('completeness');
+    const categoryValue = params.get('category') ?? '';
+    const applicationValue = params.get('application') ?? '';
+    const completenessValue = params.get('completeness');
+    setCategory(categoryValue);
+    setApplication(applicationValue);
+    if (params.get('view') === 'table') setView('table');
     if (
       showCompleteness &&
-      (completenessParam === 'complete' ||
-        completenessParam === 'attention' ||
-        completenessParam === 'critical' ||
-        completenessParam === 'unavailable')
-    ) {
-      setCompleteness(completenessParam);
-    }
-    if (urlFamily || urlCategory || urlApplication || (showCompleteness && completenessParam)) {
+      (completenessValue === 'complete' ||
+        completenessValue === 'attention' ||
+        completenessValue === 'critical')
+    )
+      setCompleteness(completenessValue);
+    if (categoryValue || applicationValue || (showCompleteness && completenessValue))
       setAdvancedFiltersOpen(true);
-    }
     setUrlReady(true);
   }, [showCompleteness]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setDebouncedSearch(searchInput.trim());
-      setRequestedPage(1);
+      setPage(1);
     }, 300);
     return () => window.clearTimeout(timeout);
   }, [searchInput]);
 
   useEffect(() => {
-    setRequestedPage(1);
-  }, [application, category, completeness, family]);
-
-  useEffect(() => {
     if (!urlReady) return;
     const params = new URLSearchParams(window.location.search);
-    const update = (key: string, value: string) => {
-      if (value) params.set(key, value);
-      else params.delete(key);
-    };
-
+    const update = (key: string, value: string) =>
+      value ? params.set(key, value) : params.delete(key);
     update('q', debouncedSearch);
     update('brand', brand);
     update('status', showProductStatus ? status : '');
-    update('family', family);
     update('category', category);
     update('application', application);
     update('completeness', showCompleteness ? completeness : '');
-
+    update('view', view === 'table' ? 'table' : '');
+    params.delete('family');
     const query = params.toString();
     window.history.replaceState(
       window.history.state,
@@ -336,187 +392,181 @@ export function ProductsCatalog({
     category,
     completeness,
     debouncedSearch,
-    family,
     showCompleteness,
     showProductStatus,
     status,
     urlReady,
+    view,
   ]);
 
-  const { products, total, page, pageSize, totalPages, loading, error, reload } = useProductsData({
-    q: debouncedSearch || undefined,
-    brand: brand || undefined,
-    status: showProductStatus ? status || undefined : undefined,
-    page: requestedPage,
-    pageSize: requestedPageSize,
-  });
+  useEffect(() => {
+    if (!urlReady || view !== 'catalog') return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    void fetchCatalogWorkbook(
+      {
+        filter: [],
+        q: debouncedSearch || undefined,
+        brand: brand || undefined,
+        status: showProductStatus ? status || undefined : undefined,
+        categoryId: category || undefined,
+        applicationType:
+          application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL' ? application : undefined,
+        completeness:
+          showCompleteness &&
+          (completeness === 'complete' ||
+            completeness === 'attention' ||
+            completeness === 'critical')
+            ? completeness
+            : undefined,
+        page,
+        pageSize,
+      },
+      controller.signal,
+    )
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setResult(next);
+        setFacets(next.facets);
+      })
+      .catch((requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : 'No fue posible consultar el catálogo.',
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [
+    application,
+    brand,
+    category,
+    completeness,
+    debouncedSearch,
+    page,
+    pageSize,
+    revision,
+    showCompleteness,
+    showProductStatus,
+    urlReady,
+    view,
+  ]);
 
-  const brands = useMemo(
-    () =>
-      unique([
-        ...products.map((product) => product.brandFilter),
-        ...workbookFacets.brands,
-        brand || undefined,
-      ]).sort(),
-    [brand, products, workbookFacets.brands],
+  const products = useMemo(
+    () => result?.items.map((row) => workbookCatalogProduct(row, result.columns)) ?? [],
+    [result],
   );
-  const statuses = useMemo<ProductStatus[]>(
-    () =>
-      Array.from(
-        new Set([
-          ...products.map((product) => product.status),
-          ...workbookFacets.statuses,
-          ...(status ? [status] : []),
-        ]),
-      ).sort(),
-    [products, status, workbookFacets.statuses],
-  );
+  const total = result?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const categoryOptions = useMemo(
-    () =>
-      catalogCategories.map((item) => ({
-        value: item.id,
-        label: item.name,
-        path: item.path,
-        keywords: [item.slug, item.templateName, item.templateVariantKey],
-      })),
+    () => catalogFilterCategories(catalogCategories),
     [catalogCategories],
   );
-  const catalogApplications = useMemo(
-    () =>
-      unique(products.map((product) => product.application).filter(availableCatalogValue)).sort(),
-    [products],
-  );
-  const applicationOptions =
-    view === 'table' ? workbookFacets.applicationTypes : catalogApplications;
-  const hasCompletenessData = products.some((product) => product.completeness !== null);
+  const selectedCategory = categoryOptions.find((item) => item.value === category);
   const activeFilterCount = [
     brand,
     showProductStatus ? status : '',
-    family,
     category,
     application,
     showCompleteness ? completeness : '',
   ].filter(Boolean).length;
-  const hasCriteria = Boolean(searchInput.trim() || debouncedSearch || activeFilterCount);
-  const firstVisible = total > 0 ? (page - 1) * pageSize + 1 : 0;
-  const lastVisible = Math.min(page * pageSize, total);
-  const searchPending = searchInput.trim() !== debouncedSearch;
-  const familyCounts = useMemo(
-    () =>
-      catalogFamilies.map((item) => ({
-        name: item.name,
-        count: products.filter((product) => catalogFamily(product) === item.name).length,
-      })),
-    [products],
-  );
-  const visibleProducts = useMemo(
-    () =>
-      products.filter(
-        (product) =>
-          (!family || catalogFamily(product) === family) &&
-          (!application || product.application === application) &&
-          matchesCompleteness(product.completeness, showCompleteness ? completeness : ''),
-      ),
-    [application, completeness, family, products, showCompleteness],
-  );
-  const hasClientFilters = Boolean(family || application || (showCompleteness && completeness));
-  const visibleTotal = hasClientFilters ? visibleProducts.length : total;
-  const visibleFirst = visibleTotal > 0 ? (hasClientFilters ? 1 : firstVisible) : 0;
-  const visibleLast = hasClientFilters ? visibleProducts.length : lastVisible;
-  const exportRows = useMemo(
-    () =>
-      visibleProducts.map((product) => [
-        product.sku,
-        ...(showTableDescriptionAndTemplate ? [product.name] : []),
-        product.brand,
-        product.category,
-        product.application,
-        ...(showProductStatus ? [statusLabel(product.status)] : []),
-        ...(showCompleteness ? [product.completeness] : []),
-        product.providerCode,
-        product.unifiedCode,
-      ]),
-    [showCompleteness, showProductStatus, showTableDescriptionAndTemplate, visibleProducts],
-  );
+  const clearSearch = () => {
+    setSearchInput('');
+    setDebouncedSearch('');
+    setPage(1);
+  };
+  const clearFilters = () => {
+    clearSearch();
+    setBrand('');
+    setStatus('');
+    setCategory('');
+    setApplication('');
+    setCompleteness('');
+  };
   const exportHeaders = [
     'SKU',
     ...(showTableDescriptionAndTemplate ? ['Descripción'] : []),
     'Marca',
-    'Línea / categoría',
+    'Categoría',
     'Aplicación',
     ...(showProductStatus ? ['Estado'] : []),
     ...(showCompleteness ? ['Completitud (%)'] : []),
     'Código proveedor',
     'Código unificador',
   ];
-
-  const changeBrand = (value: string) => {
-    setBrand(value);
-    setRequestedPage(1);
-  };
-  const changeStatus = (value: ProductStatus | '') => {
-    setStatus(value);
-    setRequestedPage(1);
-  };
-  const clearSearch = () => {
-    setSearchInput('');
-    setDebouncedSearch('');
-    setRequestedPage(1);
-  };
-  const clearFilters = () => {
-    clearSearch();
-    setBrand('');
-    setStatus('');
-    setFamily('');
-    setCategory('');
-    setApplication('');
-    setCompleteness('');
-  };
+  const exportRows = products.map((product) => [
+    product.sku,
+    ...(showTableDescriptionAndTemplate ? [product.name] : []),
+    product.brand,
+    product.category,
+    product.application,
+    ...(showProductStatus ? [statusLabel(product.status)] : []),
+    ...(showCompleteness ? [product.completeness] : []),
+    product.providerCode,
+    product.unifiedCode,
+  ]);
+  const filterChip = (value: string, label: string, clear: () => void) =>
+    value ? (
+      <button
+        type="button"
+        className={activeChipClass}
+        onClick={clear}
+        aria-label={`Quitar filtro ${label}`}
+      >
+        {label}
+        <X aria-hidden="true" className="size-3" />
+      </button>
+    ) : null;
 
   return (
     <>
-      <nav
-        aria-label="Ruta del catálogo"
-        className="mb-4 flex items-center gap-2 text-[11px] text-muted-foreground"
-      >
-        <Link href="/" className="hover:text-primary">
-          Inicio
-        </Link>
-        <span aria-hidden="true">/</span>
-        <button type="button" onClick={clearFilters} className="hover:text-primary">
-          Catálogo maestro
-        </button>
-        {family ? (
-          <>
-            <span aria-hidden="true">/</span>
-            <strong className="text-foreground">{family}</strong>
-          </>
-        ) : null}
-      </nav>
       <PageHeader
         title="Catálogo maestro de productos"
-        description={`${formatNumber(total || products.length)} SKU disponibles en el catálogo conectado. Los filtros sin contrato persistente se muestran bloqueados, no simulados.`}
+        description={
+          view === 'catalog' && result
+            ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
+            : 'Productos sincronizados desde ERP (Sismetic / AX)'
+        }
         actions={
           <>
-            {canViewQuality ? (
-              <Button asChild variant="secondary">
-                <Link href="/quality?view=search">
-                  <Search aria-hidden="true" className="size-4" />
-                  Búsqueda inteligente
-                </Link>
-              </Button>
-            ) : null}
+            <div
+              className="flex rounded-lg border bg-white p-0.5"
+              role="group"
+              aria-label="Vista del listado"
+            >
+              {(
+                [
+                  ['catalog', 'Catálogo'],
+                  ['table', 'Tabla'],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={view === value ? 'outline' : 'ghost'}
+                  size="sm"
+                  aria-pressed={view === value}
+                  onClick={() => setView(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
             {canViewImports ? (
-              <Button asChild variant="secondary">
-                <Link href="/imports">
-                  <FileUp aria-hidden="true" className="size-4" />
-                  Importaciones
-                </Link>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/imports">Importaciones</Link>
               </Button>
             ) : null}
             {canEditAttributes ? (
               <Button
+                type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => setView('sheet')}
                 aria-pressed={view === 'sheet'}
               >
@@ -536,437 +586,311 @@ export function ProductsCatalog({
           </>
         }
       />
-
       <ScreenGuide
-        objective="Catálogo maestro: reúne los SKU recibidos desde ERP para buscarlos, filtrarlos y abrirlos. El PIM no crea SKU; los enriquece."
+        objective="Catálogo maestro: busca los SKU recibidos desde ERP, consulta sus especificaciones y completa sus atributos."
         actions={[
-          'Busca por SKU, descripción o marca y combina la consulta con los filtros disponibles.',
-          'La vista Tabla reúne la unión real de atributos visibles; usa los encabezados para filtrar y ordenar.',
-          'Haz clic en una celda editable y pulsa Enter; «-» vacía un atributo opcional y un blanco no modifica nada.',
+          'Busca por SKU, descripción, marca o atributos y combina filtros.',
+          'La vista Tabla permite ordenar, filtrar por columna y editar los atributos autorizados.',
+          'El SKU y los datos ERP son de solo lectura; los atributos dependen de la plantilla activa.',
         ]}
-        dataSource="Los productos, plantillas, columnas, permisos y valores provienen de la API del catálogo. Las búsquedas, filtros y ediciones se ejecutan en el backend."
-        limitation="La tabla se pagina en el backend; filtros de encabezado y exportación operan sobre las filas visibles de la página. Los valores ERP permanecen de solo lectura."
+        dataSource="Catálogo ERP y atributos de las plantillas activas."
       />
-
-      {view === 'catalog' ? (
-        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Familias de producto">
-          <button
-            type="button"
-            onClick={() => setFamily('')}
-            aria-pressed={!family}
-            className={cn(
-              'inline-flex min-h-8 items-center gap-2 rounded-full border px-3 text-xs font-semibold',
-              !family
-                ? 'border-primary bg-orange-50 text-orange-700'
-                : 'border-slate-200 bg-white hover:border-orange-200',
-            )}
-          >
-            Todas{' '}
-            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">
-              {products.length}
-            </span>
-          </button>
-          {familyCounts.map((item) => (
-            <button
-              key={item.name}
-              type="button"
-              onClick={() => setFamily(item.name)}
-              aria-pressed={family === item.name}
-              className={cn(
-                'inline-flex min-h-8 items-center gap-2 rounded-full border px-3 text-xs font-semibold',
-                family === item.name
-                  ? 'border-primary bg-orange-50 text-orange-700'
-                  : 'border-slate-200 bg-white hover:border-orange-200',
-              )}
-            >
-              {item.name}
-              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">
-                {item.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       {view === 'sheet' ? (
-        <Card className="mb-5 flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
-          <div>
-            <p className="text-sm font-semibold">Actualización masiva por plantilla</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Las columnas, permisos y cambios provienen del backend del catálogo dinámico.
-            </p>
-          </div>
-          <Button type="button" variant="outline" onClick={() => setView('catalog')}>
-            Volver al catálogo
-          </Button>
-        </Card>
+        <>
+          <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
+            <div>
+              <p className="text-sm font-semibold">Actualización masiva por plantilla</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Selecciona una plantilla para actualizar los atributos permitidos de sus productos.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setView('catalog')}>
+              Volver al catálogo
+            </Button>
+          </Card>
+          <DynamicCatalogSheet />
+        </>
       ) : (
-        <Card className="mb-5 overflow-hidden">
-          <div className="flex flex-wrap items-end gap-2 p-3">
-            <label className="min-w-0 flex-[1_1_280px] text-xs font-semibold text-muted-foreground">
-              <span className="sr-only">Buscar en el catálogo</span>
-              <span className="relative block">
-                <Search
-                  aria-hidden="true"
-                  className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
-                />
+        <>
+          <Card className="mb-3 overflow-visible">
+            <div className="flex flex-wrap items-center gap-2 p-2.5">
+              <label className="relative min-w-0 flex-[1_1_320px]">
+                <span className="sr-only">Buscar en el catálogo</span>
                 <Input
                   type="search"
                   aria-label="Buscar en el catálogo"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="SKU, marca, categoría o cualquier atributo: 2RS, caucho, C3, FMSI…"
-                  className="h-10 pl-10 pr-9 [&::-webkit-search-cancel-button]:appearance-none"
-                  aria-describedby="catalog-search-status"
+                  placeholder="Buscar por SKU, marca, categoría o cualquier atributo: 2RS, caucho, C3, FMSI…"
+                  className="h-9 bg-slate-50 pr-9 text-xs [&::-webkit-search-cancel-button]:appearance-none"
                 />
                 {searchInput ? (
                   <button
                     type="button"
                     onClick={clearSearch}
                     aria-label="Limpiar búsqueda"
-                    className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                    className="absolute right-1 top-1 grid size-7 place-items-center rounded hover:bg-slate-100"
                   >
-                    <X aria-hidden="true" className="size-4" />
+                    <X aria-hidden="true" className="size-3.5" />
                   </button>
                 ) : null}
-              </span>
-              <span id="catalog-search-status" className="sr-only" aria-live="polite">
-                {searchPending
-                  ? 'Preparando búsqueda'
-                  : loading
-                    ? 'Buscando productos'
-                    : 'Búsqueda actualizada'}
-              </span>
-            </label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={cn('h-10 shrink-0', activeFilterCount > 0 && 'border-orange-300')}
-              aria-expanded={advancedFiltersOpen}
-              aria-controls="catalog-advanced-filters"
-              onClick={() => setAdvancedFiltersOpen((current) => !current)}
-            >
-              <SlidersHorizontal aria-hidden="true" className="size-4" />
-              Filtros
-              <span
-                className={cn(
-                  'grid min-w-4 place-items-center rounded-full px-1 text-[10px] leading-4',
-                  activeFilterCount > 0
-                    ? 'bg-primary text-white'
-                    : 'bg-slate-100 text-muted-foreground',
-                )}
-                aria-label={`${activeFilterCount} filtros activos`}
-              >
-                {activeFilterCount}
-              </span>
-            </Button>
-            <div className="shrink-0">
-              <div
-                className="flex rounded-lg border bg-slate-50 p-1"
-                role="group"
-                aria-label="Vista del listado"
-              >
-                <Button
-                  variant={view === 'catalog' ? 'dark' : 'ghost'}
-                  size="sm"
-                  onClick={() => {
-                    setView('catalog');
-                  }}
-                  aria-pressed={view === 'catalog'}
-                >
-                  <PackageSearch aria-hidden="true" className="size-4" /> Catálogo
+              </label>
+              {canViewQuality ? (
+                <Button asChild variant="secondary" size="sm">
+                  <Link href="/quality?view=search">
+                    <Search aria-hidden="true" className="size-3.5" />
+                    Búsqueda inteligente
+                  </Link>
                 </Button>
-                <Button
-                  variant={view === 'table' ? 'dark' : 'ghost'}
-                  size="sm"
-                  onClick={() => {
-                    setFamily('');
-                    setView('table');
-                  }}
-                  aria-pressed={view === 'table'}
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-expanded={advancedFiltersOpen}
+                aria-controls="catalog-advanced-filters"
+                onClick={() => setAdvancedFiltersOpen((current) => !current)}
+              >
+                <SlidersHorizontal aria-hidden="true" className="size-3.5" />
+                Filtros
+                <span
+                  aria-label={`${activeFilterCount} filtros activos`}
+                  className={cn(
+                    'rounded-full px-1 text-[10px]',
+                    activeFilterCount > 0 && 'bg-primary text-white',
+                  )}
                 >
-                  <ListIcon aria-hidden="true" className="size-4" /> Tabla
-                </Button>
-              </div>
+                  {activeFilterCount || ''}
+                </span>
+              </Button>
             </div>
-          </div>
-
-          {advancedFiltersOpen ? (
-            <div id="catalog-advanced-filters" className="border-t bg-slate-50/50">
-              <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            {advancedFiltersOpen ? (
+              <div
+                id="catalog-advanced-filters"
+                className="grid gap-3 border-t bg-white p-3 sm:grid-cols-2 xl:grid-cols-5"
+              >
                 <CategoryTreeSelect
                   label="Línea / categoría"
                   value={category}
                   placeholder="Todas las categorías"
                   options={categoryOptions}
-                  disabled={view === 'catalog' || catalogCategories.length === 0}
-                  title={
-                    view === 'catalog'
-                      ? 'La categoría se conserva y se aplica en la vista Tabla, donde el backend filtra por su ID persistido.'
-                      : catalogCategories.length === 0
-                        ? 'No hay categorías visibles para tu rol.'
-                        : undefined
-                  }
-                  onValueChange={setCategory}
+                  disabled={catalogCategories.length === 0}
+                  onValueChange={(value) => {
+                    setCategory(value);
+                    setPage(1);
+                  }}
                 />
                 <SearchableSelect
                   label="Marca"
                   value={brand}
                   placeholder="Todas las marcas"
-                  options={brands.map((item) => ({ value: item, label: item }))}
-                  onValueChange={changeBrand}
+                  options={Array.from(new Set([...facets.brands, ...(brand ? [brand] : [])])).map(
+                    (item) => ({ value: item, label: item }),
+                  )}
+                  onValueChange={(value) => {
+                    setBrand(value);
+                    setPage(1);
+                  }}
                 />
                 <SearchableSelect
                   label="Aplicación"
                   value={application}
-                  placeholder={
-                    applicationOptions.length === 0
-                      ? 'Sin aplicaciones activas'
-                      : 'Todas las aplicaciones'
-                  }
-                  options={applicationOptions.map((item) => ({ value: item, label: item }))}
-                  disabled={applicationOptions.length === 0}
-                  title={
-                    applicationOptions.length === 0
-                      ? 'No hay aplicaciones activas para el alcance seleccionado.'
-                      : undefined
-                  }
-                  onValueChange={setApplication}
+                  placeholder="Todas las aplicaciones"
+                  options={facets.applicationTypes.map((item) => ({
+                    value: item,
+                    label:
+                      item === 'AUTOMOTRIZ'
+                        ? 'Automotriz'
+                        : item === 'INDUSTRIAL'
+                          ? 'Industrial'
+                          : item,
+                  }))}
+                  onValueChange={(value) => {
+                    setApplication(value);
+                    setPage(1);
+                  }}
                 />
                 {showProductStatus ? (
                   <SearchableSelect
                     label="Estado"
                     value={status}
                     placeholder="Todos los estados"
-                    options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
-                    onValueChange={(value) => changeStatus(value as ProductStatus | '')}
+                    options={Array.from(
+                      new Set([...facets.statuses, ...(status ? [status] : [])]),
+                    ).map((item) => ({ value: item, label: statusLabel(item) }))}
+                    onValueChange={(value) => {
+                      setStatus(value as ProductStatus | '');
+                      setPage(1);
+                    }}
                   />
                 ) : null}
                 {showCompleteness ? (
                   <SearchableSelect
                     label="Completitud"
                     value={completeness}
-                    placeholder={
-                      view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
-                    }
+                    placeholder="Todas"
                     options={[
                       { value: 'complete', label: '90–100%' },
                       { value: 'attention', label: '70–89%' },
                       { value: 'critical', label: 'Menos de 70%' },
-                      ...(view === 'catalog'
-                        ? [{ value: 'unavailable', label: 'Sin indicador' }]
-                        : []),
                     ]}
-                    disabled={view === 'catalog' && !hasCompletenessData}
-                    title={
-                      view === 'table' || hasCompletenessData
-                        ? undefined
-                        : 'El backend todavía no publica completitud en el listado general.'
-                    }
-                    onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
+                    onValueChange={(value) => {
+                      setCompleteness(value as CompletenessFilter);
+                      setPage(1);
+                    }}
                   />
                 ) : null}
-                <Select
-                  label="Origen del dato"
-                  value=""
-                  disabled
-                  title="Cada atributo conserva su propia fuente; falta acordar una regla única de origen por SKU."
-                >
-                  <option value="">Pendiente de regla por SKU</option>
-                </Select>
               </div>
-              <p className="border-t px-3 py-2 text-[11px] leading-5 text-muted-foreground">
-                En Tabla, búsqueda, categoría, marca, estado, aplicación y completitud se procesan
-                en el backend. En Catálogo, familia, aplicación y completitud se aplican únicamente
-                a la página cargada; la categoría se conserva para volver a Tabla porque el listado
-                de tarjetas todavía no expone su ID persistido.
-              </p>
-            </div>
+            ) : null}
+            {searchInput || activeFilterCount ? (
+              <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2">
+                <span className="text-[11px] text-muted-foreground">Filtros activos</span>
+                {filterChip(searchInput, `“${searchInput}”`, clearSearch)}
+                {filterChip(category, selectedCategory?.label ?? category, () => {
+                  setCategory('');
+                  setPage(1);
+                })}
+                {filterChip(brand, brand, () => {
+                  setBrand('');
+                  setPage(1);
+                })}
+                {filterChip(
+                  application,
+                  application === 'AUTOMOTRIZ'
+                    ? 'Automotriz'
+                    : application === 'INDUSTRIAL'
+                      ? 'Industrial'
+                      : application,
+                  () => {
+                    setApplication('');
+                    setPage(1);
+                  },
+                )}
+                {showProductStatus
+                  ? filterChip(status, status ? statusLabel(status) : '', () => {
+                      setStatus('');
+                      setPage(1);
+                    })
+                  : null}
+                {showCompleteness
+                  ? filterChip(completeness, completenessLabel(completeness), () => {
+                      setCompleteness('');
+                      setPage(1);
+                    })
+                  : null}
+                <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                  Limpiar todo
+                </Button>
+              </div>
+            ) : null}
+          </Card>
+          {view === 'table' ? (
+            <CatalogWorkbookTable
+              q={debouncedSearch || undefined}
+              brand={brand || undefined}
+              status={showProductStatus ? status || undefined : undefined}
+              categoryId={category || undefined}
+              applicationType={
+                application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL'
+                  ? application
+                  : undefined
+              }
+              completeness={
+                showCompleteness &&
+                (completeness === 'complete' ||
+                  completeness === 'attention' ||
+                  completeness === 'critical')
+                  ? completeness
+                  : undefined
+              }
+              canEdit={canEditAttributes}
+              showCompleteness={showCompleteness}
+              showStatus={showProductStatus}
+              showDescriptionAndTemplate={showTableDescriptionAndTemplate}
+              onFacetsChange={updateFacets}
+            />
           ) : null}
-
-          {searchInput || activeFilterCount ? (
-            <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
-              <span className="text-xs text-muted-foreground">Filtros activos</span>
-              {searchInput ? (
-                <button type="button" className={activeChipClass} onClick={clearSearch}>
-                  “{searchInput}” <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {family ? (
-                <button type="button" className={activeChipClass} onClick={() => setFamily('')}>
-                  {family} <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {category ? (
-                <button type="button" className={activeChipClass} onClick={() => setCategory('')}>
-                  {view === 'catalog' ? 'Categoría (Tabla): ' : ''}
-                  {catalogCategories.find((item) => item.id === category)?.name ?? category}{' '}
-                  <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {brand ? (
-                <button type="button" className={activeChipClass} onClick={() => changeBrand('')}>
-                  {brand} <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {application ? (
-                <button
-                  type="button"
-                  className={activeChipClass}
-                  onClick={() => setApplication('')}
-                >
-                  {application} <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {showProductStatus && status ? (
-                <button type="button" className={activeChipClass} onClick={() => changeStatus('')}>
-                  {statusLabel(status)} <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              {showCompleteness && completeness ? (
-                <button
-                  type="button"
-                  className={activeChipClass}
-                  onClick={() => setCompleteness('')}
-                >
-                  {completenessLabel(completeness)} <X aria-hidden="true" className="size-3" />
-                </button>
-              ) : null}
-              <Button variant="ghost" size="sm" onClick={clearFilters}>
-                Limpiar todo
-              </Button>
-            </div>
-          ) : null}
-        </Card>
-      )}
-
-      {view === 'sheet' ? <DynamicCatalogSheet /> : null}
-      {view === 'table' ? (
-        <CatalogWorkbookTable
-          q={debouncedSearch || undefined}
-          brand={brand || undefined}
-          status={showProductStatus ? status || undefined : undefined}
-          categoryId={category || undefined}
-          applicationType={
-            application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL' ? application : undefined
-          }
-          completeness={
-            showCompleteness &&
-            (completeness === 'complete' ||
-              completeness === 'attention' ||
-              completeness === 'critical')
-              ? completeness
-              : undefined
-          }
-          canEdit={canEditAttributes}
-          showCompleteness={showCompleteness}
-          showStatus={showProductStatus}
-          showDescriptionAndTemplate={showTableDescriptionAndTemplate}
-          onFacetsChange={updateWorkbookFacets}
-        />
-      ) : null}
-      {view === 'catalog' && loading ? <CatalogSkeleton count={requestedPageSize} /> : null}
-      {view === 'catalog' && !loading && error ? (
-        <StatePanel
-          variant="error"
-          title="No pudimos cargar los productos"
-          description={error}
-          actionLabel="Reintentar"
-          onAction={reload}
-        />
-      ) : null}
-      {view === 'catalog' && !loading && !error && visibleProducts.length === 0 ? (
-        <StatePanel
-          variant="empty"
-          title={
-            hasCriteria ? 'Sin resultados para estos criterios' : 'No hay productos disponibles'
-          }
-          description={
-            hasCriteria
-              ? hasClientFilters && totalPages > 1
-                ? 'No hay coincidencias en esta página. Puedes avanzar a otra página o limpiar los filtros locales; no se modificó ningún dato.'
-                : 'Ajusta la búsqueda o elimina uno de los filtros. No se modificó ningún dato del catálogo.'
-              : 'La API respondió correctamente, pero todavía no contiene registros de producto.'
-          }
-          actionLabel={hasCriteria ? 'Limpiar criterios' : undefined}
-          onAction={hasCriteria ? clearFilters : undefined}
-        />
-      ) : null}
-
-      {view === 'catalog' && !loading && !error && visibleProducts.length > 0 ? (
-        <>
-          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-semibold" aria-live="polite">
-              {hasClientFilters ? (
-                <>
-                  {formatNumber(visibleProducts.length)} coincidencias en esta página ·{' '}
-                  {formatNumber(total)} productos en la consulta
-                </>
+          {view === 'catalog' ? (
+            <>
+              {loading ? (
+                <CatalogSkeleton count={pageSize} />
+              ) : error ? (
+                <StatePanel
+                  variant="error"
+                  title="No pudimos cargar los productos"
+                  description={error}
+                  actionLabel="Reintentar"
+                  onAction={() => setRevision((value) => value + 1)}
+                />
+              ) : products.length === 0 ? (
+                <StatePanel
+                  variant="empty"
+                  title={
+                    searchInput || activeFilterCount
+                      ? 'Sin resultados para estos criterios'
+                      : 'No hay productos disponibles'
+                  }
+                  description="Ajusta los filtros o la búsqueda para consultar otros productos."
+                  actionLabel={searchInput || activeFilterCount ? 'Limpiar criterios' : undefined}
+                  onAction={searchInput || activeFilterCount ? clearFilters : undefined}
+                />
               ) : (
-                <>
-                  Mostrando {formatNumber(visibleFirst)}–{formatNumber(visibleLast)} de{' '}
-                  {formatNumber(visibleTotal)} productos
-                </>
+                <ProductCatalogList
+                  products={products}
+                  showStatus={showProductStatus}
+                  showCompleteness={showCompleteness}
+                  canEdit={canEditAttributes}
+                />
               )}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Página {page} de {totalPages}
-            </p>
-          </div>
-
-          <ProductCatalogList
-            products={visibleProducts}
-            showStatus={showProductStatus}
-            showCompleteness={showCompleteness}
-            canEdit={canEditAttributes}
-          />
+              {!loading && !error ? (
+                <nav
+                  className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2"
+                  aria-label="Paginación del catálogo"
+                >
+                  <p className="text-xs text-muted-foreground" aria-live="polite">
+                    {formatNumber(total)} productos · página {page} de {totalPages}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      label="Resultados por página"
+                      aria-label="Resultados por página"
+                      value={pageSize}
+                      onChange={(event) => {
+                        setPageSize(Number(event.target.value));
+                        setPage(1);
+                      }}
+                    >
+                      <option value={25}>25 productos</option>
+                      <option value={50}>50 productos</option>
+                      <option value={100}>100 productos</option>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={page <= 1}
+                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                      aria-label="Página anterior"
+                    >
+                      <ChevronLeft aria-hidden="true" className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={page >= totalPages}
+                      onClick={() => setPage((value) => value + 1)}
+                      aria-label="Página siguiente"
+                    >
+                      <ChevronRight aria-hidden="true" className="size-3.5" />
+                    </Button>
+                  </div>
+                </nav>
+              ) : null}
+            </>
+          ) : null}
         </>
-      ) : null}
-      {view === 'catalog' && !loading && !error && totalPages > 0 ? (
-        <nav
-          className="mt-6 flex flex-col gap-4 rounded-xl border bg-slate-50 p-4 sm:flex-row sm:items-end sm:justify-between"
-          aria-label="Paginación del catálogo"
-        >
-          <div className="w-full sm:w-44">
-            <Select
-              label="Resultados por página"
-              value={requestedPageSize}
-              onChange={(event) => {
-                setRequestedPageSize(Number(event.target.value));
-                setRequestedPage(1);
-              }}
-            >
-              <option value={25}>25 productos</option>
-              <option value={50}>50 productos</option>
-              <option value={100}>100 productos</option>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between gap-3 sm:justify-end">
-            <Button
-              variant="outline"
-              onClick={() => setRequestedPage(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              aria-label={`Ir a la página ${Math.max(1, page - 1)}`}
-            >
-              <ChevronLeft aria-hidden="true" className="size-4" />
-              Anterior
-            </Button>
-            <span className="min-w-20 text-center text-sm font-semibold tabular-nums">
-              {page} / {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              onClick={() => setRequestedPage(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              aria-label={`Ir a la página ${Math.min(totalPages, page + 1)}`}
-            >
-              Siguiente
-              <ChevronRight aria-hidden="true" className="size-4" />
-            </Button>
-          </div>
-        </nav>
-      ) : null}
+      )}
     </>
   );
 }

@@ -210,8 +210,15 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [view, setView] = useState<'context' | 'all'>('context');
+  const [view, setView] = useState<'context' | 'all'>('all');
   const [selectedCode, setSelectedCode] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('unifiedCode');
+    if (params.get('view') === 'context' || code) setView('context');
+    if (code) setSelectedCode(code);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -477,7 +484,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           <Download aria-hidden="true" className="size-4" /> Plantilla CSV
         </Button>
         <Button size="sm" variant="outline" asChild>
-          <Link href="/imports">
+          <Link href="/imports?view=new&target=applications">
             <Upload aria-hidden="true" className="size-4" /> Importar
           </Link>
         </Button>
@@ -544,32 +551,26 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         </span>
       </div>
 
-      <nav className="mb-5 grid gap-3 sm:grid-cols-2" aria-label="Vistas de aplicaciones">
+      <nav className="mb-4 flex flex-wrap gap-1 border-b" aria-label="Vistas de aplicaciones">
         <button
           type="button"
-          className={`rounded-xl border p-4 text-left ${view === 'context' ? 'border-primary bg-orange-50/50 ring-1 ring-primary' : 'bg-white'}`}
-          onClick={() => setView('context')}
+          aria-current={view === 'all' ? 'page' : undefined}
+          className={`inline-flex min-h-10 items-center gap-2 border-b-2 px-4 py-2 text-sm ${view === 'all' ? 'border-primary bg-white text-primary' : 'border-transparent text-muted-foreground hover:bg-slate-50'}`}
+          onClick={() => setView('all')}
         >
-          <strong className="text-sm">Código unificador en contexto</strong>
-          <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
-            {contextRows.length}
-          </span>
-          <small className="mt-1 block text-muted-foreground">
-            Aplicaciones heredadas por todos los SKU del grupo
-          </small>
+          Todas las aplicaciones · tabla
+          <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600">{items.length}</span>
         </button>
         <button
           type="button"
-          className={`rounded-xl border p-4 text-left ${view === 'all' ? 'border-primary bg-orange-50/50 ring-1 ring-primary' : 'bg-white'}`}
-          onClick={() => setView('all')}
+          aria-current={view === 'context' ? 'page' : undefined}
+          className={`inline-flex min-h-10 items-center gap-2 border-b-2 px-4 py-2 text-sm ${view === 'context' ? 'border-primary bg-white text-primary' : 'border-transparent text-muted-foreground hover:bg-slate-50'}`}
+          onClick={() => setView('context')}
         >
-          <strong className="text-sm">Todas las aplicaciones</strong>
-          <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
-            {items.length}
+          Código unificador en contexto
+          <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600">
+            {contextRows.length}
           </span>
-          <small className="mt-1 block text-muted-foreground">
-            Vista de catálogo y mantenimiento masivo
-          </small>
         </button>
       </nav>
 

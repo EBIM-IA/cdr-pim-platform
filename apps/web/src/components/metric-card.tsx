@@ -31,27 +31,25 @@ export function MetricCard({
   const content = (
     <Card
       className={cn(
-        'relative flex min-h-[104px] items-start gap-3 p-4',
+        'relative flex min-h-[62px] items-center gap-3 px-3 py-2',
         href &&
           'h-full transition-[border-color,box-shadow,transform] group-hover:-translate-y-0.5 group-hover:border-primary/35 group-hover:shadow-md',
       )}
     >
-      <span className={cn('grid size-8 shrink-0 place-items-center rounded-full', tones[tone])}>
+      <span className={cn('grid size-7 shrink-0 place-items-center rounded-full', tones[tone])}>
         <Icon aria-hidden="true" className="size-4" />
       </span>
       <div className="min-w-0 pt-0.5">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <strong className="mt-0.5 block break-words text-[22px] font-semibold leading-none tracking-[-0.035em] text-cdr-ink">
+        <p className="text-[10px] leading-tight text-muted-foreground">{label}</p>
+        <strong className="mt-0.5 block break-words text-lg font-semibold leading-none tracking-[-0.035em] text-cdr-ink">
           {value}
         </strong>
-        <p className="mt-1.5 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">
-          {note}
-        </p>
+        <p className="mt-0.5 line-clamp-2 text-[9px] leading-tight text-muted-foreground">{note}</p>
       </div>
       {href ? (
         <ChevronRight
           aria-hidden="true"
-          className="absolute right-4 top-4 size-4 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+          className="absolute right-3 top-3 size-3 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
         />
       ) : null}
     </Card>
