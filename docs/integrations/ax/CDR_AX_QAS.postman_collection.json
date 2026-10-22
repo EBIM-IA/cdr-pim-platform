@@ -2,7 +2,7 @@
   "info": {
     "name": "CDR PIM — AX Integration (QAS Inbound)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Contrato Sismetic / Dynamics AX → CDR PIM v1.1. AX envía y el PIM recibe. El lote queda guardado antes del 202; reintentos idénticos son idempotentes y existe consulta de estado. La aplicación al catálogo maestro se mantiene separada hasta aprobar el mapeo.\n\nConfigure la variable accessToken con el token entregado por canal seguro. NUNCA guarde el token real en la colección exportada ni lo comparta por correo o chat."
+    "description": "Guía operativa v1.2 para el contrato Sismetic / Dynamics AX → CDR PIM API v1.1. AX envía y el PIM recibe. El lote queda guardado antes del 202; reintentos idénticos son idempotentes y existe consulta de estado. La aplicación al catálogo maestro se mantiene separada hasta aprobar el mapeo.\n\nConfigure la variable accessToken con el token entregado por canal seguro. NUNCA guarde el token real en la colección exportada ni lo comparta por correo o chat."
   },
   "auth": {
     "type": "bearer",
@@ -38,6 +38,18 @@
     },
     {
       "key": "lastBatchId",
+      "value": ""
+    },
+    {
+      "key": "idempotencyBatchId",
+      "value": ""
+    },
+    {
+      "key": "idempotencySentAt",
+      "value": ""
+    },
+    {
+      "key": "idempotencyReceivedAt",
       "value": ""
     }
   ],
@@ -78,7 +90,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-VALID\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"2026-09-28T15:00:00Z\"\n    },\n    {\n      \"codigoArticulo\": \"000456\",\n      \"codigoProveedor\": \"PRV-002\",\n      \"codigoLinea\": \"SELLOS\",\n      \"tipoAplicacion\": \"INDUSTRIAL\",\n      \"marca\": \"NTN\",\n      \"fechaModificacion\": \"2026-09-28T10:00:00-05:00\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-VALID\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    },\n    {\n      \"codigoArticulo\": \"000456\",\n      \"codigoProveedor\": \"PRV-002\",\n      \"codigoLinea\": \"SELLOS\",\n      \"tipoAplicacion\": \"INDUSTRIAL\",\n      \"marca\": \"NTN\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -133,7 +145,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-MIN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoLinea\": \"RODAMIENTOS\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-MIN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoLinea\": \"RODAMIENTOS\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -189,7 +201,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-TWO\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"2026-09-28T15:00:00Z\"\n    },\n    {\n      \"codigoArticulo\": \"000456\",\n      \"codigoProveedor\": \"PRV-002\",\n      \"codigoLinea\": \"SELLOS\",\n      \"tipoAplicacion\": \"INDUSTRIAL\",\n      \"marca\": \"NTN\",\n      \"fechaModificacion\": \"2026-09-28T10:00:00-05:00\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-TWO\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    },\n    {\n      \"codigoArticulo\": \"000456\",\n      \"codigoProveedor\": \"PRV-002\",\n      \"codigoLinea\": \"SELLOS\",\n      \"tipoAplicacion\": \"INDUSTRIAL\",\n      \"marca\": \"NTN\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -244,7 +256,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-ZEROS\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"0000789\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"2026-09-28T15:00:00Z\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-ZEROS\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"0000789\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -298,7 +310,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-NOTOKEN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"2026-09-28T15:00:00Z\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-NOTOKEN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -345,7 +357,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-BADTOKEN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"2026-09-28T15:00:00Z\"\n    }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-BADTOKEN\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{fechaEnvio}}\"\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -399,7 +411,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-INVALID-JSON\",\n  \"fechaEnvio\": \"2026-09-28T15:30:00Z\",\n",
+          "raw": "{\n  \"idLote\": \"AX-QAS-INVALID-JSON\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n",
           "options": {
             "raw": {
               "language": "json"
@@ -453,7 +465,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idLote\": \"AX-QAS-{{$timestamp}}-NUMBER\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"productos\": [\n    { \"codigoArticulo\": 123, \"codigoProveedor\": \"PRV-001\", \"codigoLinea\": \"RODAMIENTOS\" }\n  ]\n}",
+          "raw": "{\n  \"idLote\": \"AX-QAS-{{$guid}}-NUMBER\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"productos\": [\n    { \"codigoArticulo\": 123, \"codigoProveedor\": \"PRV-001\", \"codigoLinea\": \"RODAMIENTOS\" }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -477,6 +489,343 @@
           ]
         }
       }
+    },
+    {
+      "name": "Idempotencia y límites del contrato",
+      "description": "Ejecute en orden. La primera solicitud congela idLote y fechaEnvio; el reintento usa exactamente el mismo contenido. La prueba 429 es deliberadamente manual para no afectar a otros usuarios de QAS.",
+      "item": [
+        {
+          "name": "1. Primera entrega idempotente",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyBatchId', `AX-QAS-IDEMP-${pm.variables.replaceIn('{{$guid}}')}`);",
+                  "pm.collectionVariables.set('idempotencySentAt', new Date().toISOString());",
+                  "pm.collectionVariables.unset('idempotencyReceivedAt');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('estado RECIBIDO', () => pm.expect(body.estado).to.eql('RECIBIDO'));",
+                  "pm.collectionVariables.set('idempotencyReceivedAt', body.fechaRecepcion);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idLote\": \"{{idempotencyBatchId}}\",\n  \"fechaEnvio\": \"{{idempotencySentAt}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{idempotencySentAt}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizar"]
+            },
+            "description": "Crea un lote y congela su identidad y contenido para las dos pruebas siguientes.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Reintento exacto sin duplicación",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('devuelve el recibo original', () => pm.expect(body.fechaRecepcion).to.eql(pm.collectionVariables.get('idempotencyReceivedAt')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idLote\": \"{{idempotencyBatchId}}\",\n  \"fechaEnvio\": \"{{idempotencySentAt}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"SKF\",\n      \"fechaModificacion\": \"{{idempotencySentAt}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizar"]
+            },
+            "description": "Reenvía exactamente el mismo JSON. Esperado 202 y la misma fechaRecepcion.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "3. Mismo idLote con contenido diferente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('CONFLICT', () => pm.expect(pm.response.json().error.code).to.eql('CONFLICT'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idLote\": \"{{idempotencyBatchId}}\",\n  \"fechaEnvio\": \"{{idempotencySentAt}}\",\n  \"sistemaOrigen\": \"SISMETIC_AX\",\n  \"productos\": [\n    {\n      \"codigoArticulo\": \"000123\",\n      \"codigoProveedor\": \"PRV-001\",\n      \"codigoUnificador\": \"UNI-6205\",\n      \"codigoLinea\": \"RODAMIENTOS\",\n      \"tipoAplicacion\": \"AUTOMOTRIZ\",\n      \"marca\": \"NTN\",\n      \"fechaModificacion\": \"{{idempotencySentAt}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizar"]
+            },
+            "description": "Conserva idLote y cambia marca. Esperado 409 CONFLICT.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Consultar lote inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizaciones/AX-QAS-NOT-FOUND-{{$guid}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizaciones", "AX-QAS-NOT-FOUND-{{$guid}}"]
+            },
+            "description": "El token es válido, pero el lote no existe. Esperado 404 NOT_FOUND.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Campo desconocido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('VALIDATION_FAILED', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_FAILED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idLote\": \"AX-QAS-UNKNOWN-{{$guid}}\",\n  \"fechaEnvio\": \"{{fechaEnvio}}\",\n  \"productos\": [{\n    \"codigoArticulo\": \"000123\",\n    \"codigoProveedor\": \"PRV-001\",\n    \"codigoLinea\": \"RODAMIENTOS\",\n    \"campoNoDefinido\": \"rechazar\"\n  }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizar"]
+            },
+            "description": "Los objetos son estrictos. Esperado 400 VALIDATION_FAILED.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "6. Cuerpo mayor a 100 KiB",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = `AX-QAS-LARGE-${pm.variables.replaceIn('{{$guid}}')}`;",
+                  "const payload = { idLote: id, fechaEnvio: new Date().toISOString(), sistemaOrigen: 'X'.repeat(103000), productos: [{ codigoArticulo: '000123', codigoProveedor: 'PRV-001', codigoLinea: 'RODAMIENTOS' }] };",
+                  "pm.variables.set('oversizedPayload', JSON.stringify(payload));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 413', () => pm.response.to.have.status(413));",
+                  "pm.test('PAYLOAD_TOO_LARGE', () => pm.expect(pm.response.json().error.code).to.eql('PAYLOAD_TOO_LARGE'));",
+                  "pm.variables.unset('oversizedPayload');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{oversizedPayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/sincronizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "productos", "sincronizar"]
+            },
+            "description": "Supera deliberadamente el límite del parser. Esperado 413.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     {
       "name": "Consultar último lote recibido",
