@@ -223,6 +223,8 @@ describe('CatalogWorkbookTable', () => {
     expect(await screen.findByLabelText('Descripción técnica: no aplica')).toHaveTextContent(
       'No aplica',
     );
+    expect(screen.getByText('Tramado: no aplica a la plantilla')).toBeVisible();
+    expect(screen.getByText('Rosado: atributo obligatorio sin valor')).toBeVisible();
     expect(mocks.fetchWorkbook).toHaveBeenCalledWith(
       expect.objectContaining({
         q: 'C3',
@@ -244,6 +246,30 @@ describe('CatalogWorkbookTable', () => {
         }),
         'catalogo-pim-vista-filtrada',
       );
+    });
+  });
+
+  it('omits restricted sales columns from the table and export', async () => {
+    render(
+      <CatalogWorkbookTable
+        canEdit={false}
+        showStatus={false}
+        showCompleteness={false}
+        showDescriptionAndTemplate={false}
+      />,
+    );
+    await screen.findByRole('link', { name: 'SKU-1' });
+
+    expect(screen.queryByRole('columnheader', { name: 'Descripción' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Plantilla' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /Estado/u })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /CSV · 2 filas$/u }));
+    await waitFor(() => {
+      const headers = mocks.downloadCsv.mock.calls.at(-1)?.[0].headers as string[];
+      expect(headers).not.toContain('Descripción');
+      expect(headers).not.toContain('Plantilla');
+      expect(headers).not.toContain('Estado · completitud');
     });
   });
 

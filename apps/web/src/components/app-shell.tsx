@@ -394,6 +394,7 @@ function Sidebar({
   capabilities: readonly AuthCapability[];
 }) {
   const pathname = usePathname();
+  const homeHref = capabilities.includes('menu:home:view') ? '/' : '/products';
   const closeButton = useRef<HTMLButtonElement>(null);
   const [desktop, setDesktop] = useState(false);
 
@@ -449,7 +450,7 @@ function Sidebar({
           )}
         >
           <Link
-            href="/"
+            href={homeHref}
             onClick={onClose}
             aria-label="CDR PIM, ir al inicio"
             className="flex items-center justify-center"

@@ -35,7 +35,7 @@ describe('DrizzleProductTemplateAssignmentRepository', () => {
   });
   afterAll(() => database.close());
 
-  it('reassigns within the category, preserves values and audits a published product', async () => {
+  it('reassigns within the category, preserves values and keeps a published product published', async () => {
     const fixture = await findVariantFixture(database);
     const productId = assertUuid(fixture.productId);
     const currentTemplateId = assertUuid(fixture.currentTemplateId);
@@ -84,7 +84,7 @@ describe('DrizzleProductTemplateAssignmentRepository', () => {
     ).toEqual(beforeValues);
     await expect(
       database.db.select().from(products).where(eq(products.id, productId)),
-    ).resolves.toMatchObject([{ status: 'in_review' }]);
+    ).resolves.toMatchObject([{ status: 'published' }]);
     await expect(
       database.db.select().from(auditEntries).where(eq(auditEntries.correlationId, correlationId)),
     ).resolves.toMatchObject([
@@ -93,7 +93,6 @@ describe('DrizzleProductTemplateAssignmentRepository', () => {
         resourceId: productId,
         changes: {
           templateId: { before: currentTemplateId, after: alternateTemplateId },
-          status: { before: 'published', after: 'in_review' },
         },
       },
     ]);

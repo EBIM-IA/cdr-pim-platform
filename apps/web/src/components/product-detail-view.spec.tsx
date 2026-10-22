@@ -285,6 +285,22 @@ describe('ProductDetailView operational data', () => {
     expect(screen.queryByText('No pudimos mostrar esta ficha')).not.toBeInTheDocument();
   });
 
+  it('hides lifecycle status and completeness from the sales detail', async () => {
+    const view = render(
+      <ProductDetailView
+        productId={product.id}
+        showProductStatus={false}
+        showCompleteness={false}
+      />,
+    );
+
+    const rendered = within(view.container);
+    expect(await rendered.findByRole('heading', { name: product.name })).toBeInTheDocument();
+    expect(rendered.queryByText('Publicado')).not.toBeInTheDocument();
+    expect(rendered.queryByText('Regla pendiente')).not.toBeInTheDocument();
+    expect(rendered.getByText('Información PIM')).toBeInTheDocument();
+  });
+
   it('previews a technical sheet using only attributes enabled by the template', async () => {
     const view = render(<ProductDetailView productId={product.id} />);
     const rendered = within(view.container);

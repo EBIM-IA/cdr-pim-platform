@@ -63,40 +63,26 @@ const ALL_CAPABILITIES = Object.values(Capability);
 
 const VIEWING_CAPABILITIES: readonly Capability[] = [
   Capability.IdentitySelfRead,
-  Capability.MenuHomeView,
   Capability.MenuProductsView,
   Capability.MenuApplicationsView,
   Capability.MenuEquivalencesView,
   Capability.MenuDocumentsView,
   Capability.MenuCatalogsView,
-  Capability.MenuReportsView,
   Capability.CatalogRead,
   Capability.AttributesRead,
   Capability.ApplicationsRead,
   Capability.EquivalencesRead,
-  Capability.ReportsRead,
 ];
 
 const PURCHASING_CAPABILITIES: readonly Capability[] = [
   ...VIEWING_CAPABILITIES,
-  Capability.MenuCategoriesView,
-  Capability.MenuTemplatesView,
-  Capability.MenuImportsView,
-  Capability.MenuAiQualityView,
   Capability.CatalogWrite,
   Capability.AttributesWrite,
   Capability.ApplicationsWrite,
   Capability.EquivalencesWrite,
-  Capability.ImportsExecute,
-  Capability.AiQualityExecute,
-  Capability.AiDocumentExtract,
 ];
 
-const SALES_CAPABILITIES: readonly Capability[] = [
-  ...VIEWING_CAPABILITIES,
-  Capability.MenuPublicationView,
-  Capability.PublicationExecute,
-];
+const SALES_CAPABILITIES: readonly Capability[] = [...VIEWING_CAPABILITIES];
 
 /** Explicit grants: adding a capability to one role never grants it to another role. */
 const ROLE_CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> = {
@@ -136,6 +122,10 @@ export function assertRole(value: string): Role {
 
 export function roleHasCapability(role: Role, capability: Capability): boolean {
   return ROLE_CAPABILITIES[role].has(capability);
+}
+
+export function capabilitiesForRole(role: Role): Capability[] {
+  return [...ROLE_CAPABILITIES[role]].sort();
 }
 
 /** Compatibility helper preserving the old hierarchy only for legacy `@RequireRole` routes. */

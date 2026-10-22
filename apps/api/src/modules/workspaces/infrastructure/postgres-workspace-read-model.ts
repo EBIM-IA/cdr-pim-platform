@@ -1960,6 +1960,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Gestionar usuarios',
           'Falta decidir Microsoft Entra/AD u otra fuente de identidad y su ciclo de altas y bajas.',
         ),
+        blockedAction(
+          'configure-role-modules',
+          'Parametrizar módulos por rol',
+          'La matriz aprobada ya se aplica en código. Su edición desde esta pantalla requiere persistir políticas, auditar cambios y refrescar sesiones con el proveedor de identidad definitivo.',
+        ),
       ],
     });
   }

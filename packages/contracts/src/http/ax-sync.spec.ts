@@ -12,6 +12,7 @@ const product = {
   codigoProveedor: 'PRV-01',
   codigoUnificador: 'UNI-9',
   codigoLinea: 'RODAMIENTOS',
+  categoriaNivel3: 'RODAMIENTOS DE BOLAS RÍGIDOS',
   tipoAplicacion: 'AUTOMOTRIZ',
   marca: 'SKF',
   fechaModificacion: '2026-09-28T15:00:00Z',

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { productListQuerySchema, type ProductStatus } from '@cdr/contracts';
 
 import { ProductsCatalog } from '@/components/products-catalog';
+import { isAdministrator, isSalesOnly } from '@/lib/auth';
 import { getCurrentActor } from '@/lib/server-auth';
 
 export const metadata: Metadata = {
@@ -28,14 +29,22 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const initialBrand = parsed.success ? (parsed.data.brand ?? '') : '';
   const initialStatus: ProductStatus | '' = parsed.success ? (parsed.data.status ?? '') : '';
   const actor = await getCurrentActor();
+  const roles = actor?.roles ?? [];
+  const administrator = isAdministrator(roles);
+  const salesOnly = isSalesOnly(roles);
 
   return (
     <ProductsCatalog
       key={JSON.stringify([initialSearch, initialBrand, initialStatus])}
       initialSearch={initialSearch}
       initialBrand={initialBrand}
-      initialStatus={initialStatus}
+      initialStatus={salesOnly ? '' : initialStatus}
       canEditAttributes={actor?.capabilities.includes('attributes:write') ?? false}
+      canViewQuality={actor?.capabilities.includes('menu:ai-quality:view') ?? false}
+      canViewImports={actor?.capabilities.includes('menu:imports:view') ?? false}
+      showCompleteness={administrator}
+      showProductStatus={!salesOnly}
+      showTableDescriptionAndTemplate={!salesOnly}
     />
   );
 }

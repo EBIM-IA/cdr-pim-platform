@@ -26,21 +26,12 @@ Los puntos 1–3 ya están representados por `attribute_templates.variant_key` y
 `product_template_assignments`. El flujo operativo añade una reasignación manual auditable para
 que esa relación no dependa exclusivamente de los datos de demostración.
 
-## Regla automática pendiente
+## Regla confirmada posteriormente
 
-La transcripción no permite activar de forma segura la selección automática de plantilla. Antes
-se necesita una matriz aprobada con:
-
-- categoría;
-- clave, tipo y autoridad del atributo diferenciador;
-- valor exacto que selecciona cada variante de plantilla;
-- precedencia entre AX, importación y corrección manual;
-- comportamiento cuando no hay coincidencia o hay más de una;
-- significado funcional de «no aplica» (valor, plantilla genérica o caso en revisión).
-
-Hasta recibir esa matriz, el sistema admite selección explícita de una variante activa de la
-misma categoría. No mueve el producto a otra categoría, no elimina valores dinámicos y registra
-el cambio en auditoría.
+Las respuestas del 22 de octubre cerraron la regla principal: la categoría de tercer nivel de AX
+determina la categoría final y su plantilla. Si la categoría no permite resolver una plantilla
+activa, el producto queda en revisión. «No aplica» es sólo la representación de un atributo que no
+pertenece a la plantilla del SKU. El detalle está en `CLIENT_RESPONSES_2026-10-22.md`.
 
 ## Criterios de aceptación del ajuste seguro
 
@@ -51,8 +42,8 @@ el cambio en auditoría.
   para los roles del actor y actualizaciones concurrentes.
 - El cambio conserva valores existentes y genera una entrada de auditoría con la plantilla
   anterior y la nueva.
-- Si el producto estaba publicado, el cambio lo devuelve a `in_review`: la obligatoriedad y la
-  completitud se recalculan con la nueva plantilla antes de permitir otra publicación.
+- Si el producto estaba publicado, conserva `published`; el cambio autorizado queda disponible de
+  inmediato y el futuro adaptador del canal debe republicarlo automáticamente.
 - La importación de una categoría con varias variantes exige un `templateId` explícito y lo
   conserva dentro del plan de confirmación; nunca intenta deducirlo por el nombre del archivo o
   por un valor no aprobado.

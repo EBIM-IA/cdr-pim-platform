@@ -218,6 +218,8 @@ export const axProductSchema = z
     codigoProveedor: axRequiredCode,
     codigoUnificador: axOptionalText,
     codigoLinea: axRequiredCode,
+    /** Third-level AX category; authoritative input for selecting the PIM category/template. */
+    categoriaNivel3: axOptionalText,
     tipoAplicacion: axOptionalText,
     marca: axOptionalText,
     fechaModificacion: axIsoDateTime.nullable().optional(),

@@ -237,6 +237,9 @@ export function CatalogWorkbookTable({
   applicationType,
   completeness,
   canEdit,
+  showCompleteness = false,
+  showStatus = true,
+  showDescriptionAndTemplate = true,
   onFacetsChange,
 }: {
   readonly q?: string;
@@ -246,6 +249,9 @@ export function CatalogWorkbookTable({
   readonly applicationType?: 'AUTOMOTRIZ' | 'INDUSTRIAL';
   readonly completeness?: 'complete' | 'attention' | 'critical';
   readonly canEdit: boolean;
+  readonly showCompleteness?: boolean;
+  readonly showStatus?: boolean;
+  readonly showDescriptionAndTemplate?: boolean;
   readonly onFacetsChange?: (facets: CatalogWorkbookResultDto['facets']) => void;
 }) {
   const [rows, setRows] = useState<CatalogWorkbookProductDto[]>([]);
@@ -264,7 +270,23 @@ export function CatalogWorkbookTable({
 
   const columns = useMemo<WorkbookColumn[]>(
     () => [
-      ...baseColumns,
+      ...baseColumns
+        .filter(
+          (column) =>
+            (showDescriptionAndTemplate ||
+              (column.key !== 'base:name' && column.key !== 'base:template')) &&
+            (showStatus || column.key !== 'base:status'),
+        )
+        .map((column) =>
+          column.key === 'base:status' && !showCompleteness
+            ? {
+                ...column,
+                label: 'Estado',
+                getValue: (row: CatalogWorkbookProductDto) =>
+                  statusLabel(row.status as ProductStatus),
+              }
+            : column,
+        ),
       ...dynamicColumns.map((attribute) => ({
         key: `attribute:${attribute.key}`,
         label: `${attribute.label}${attribute.unit ? ` (${attribute.unit})` : ''}`,
@@ -274,7 +296,7 @@ export function CatalogWorkbookTable({
         getValue: (row: CatalogWorkbookProductDto) => attributeCell(row, attribute.key),
       })),
     ],
-    [dynamicColumns],
+    [dynamicColumns, showCompleteness, showDescriptionAndTemplate, showStatus],
   );
   const columnOrder = usePersistentColumnOrder({
     screenKey: 'products-catalog',
@@ -516,10 +538,23 @@ export function CatalogWorkbookTable({
   return (
     <Card className="min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-[11px] text-muted-foreground">
-        <div className="flex flex-wrap gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <span>Identidad y base ERP · solo lectura</span>
           <span>Haz clic en una celda PIM editable y pulsa Enter para guardar.</span>
-          <span>“—” · vacío · tramado · no aplica</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-3 rounded-sm border bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_3px,#e2e8f0_3px,#e2e8f0_4px)]"
+            />
+            Tramado: no aplica a la plantilla
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-3 rounded-sm border border-red-200 bg-red-50"
+            />
+            Rosado: atributo obligatorio sin valor
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -710,7 +745,11 @@ export function CatalogWorkbookTable({
                             <StatusBadge tone={statusTone(row.status as ProductStatus)}>
                               {statusLabel(row.status as ProductStatus)}
                             </StatusBadge>
-                            <span className="font-semibold tabular-nums">{row.completeness}%</span>
+                            {showCompleteness ? (
+                              <span className="font-semibold tabular-nums">
+                                {row.completeness}%
+                              </span>
+                            ) : null}
                           </span>
                         ) : (
                           <span

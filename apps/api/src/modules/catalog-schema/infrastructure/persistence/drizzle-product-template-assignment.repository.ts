@@ -34,7 +34,6 @@ export class DrizzleProductTemplateAssignmentRepository implements ProductTempla
           templateId: productTemplateAssignments.templateId,
           assignedAt: productTemplateAssignments.assignedAt,
           categoryId: attributeTemplates.categoryId,
-          productStatus: products.status,
         })
         .from(productTemplateAssignments)
         .innerJoin(products, eq(products.id, productTemplateAssignments.productId))
@@ -87,12 +86,6 @@ export class DrizzleProductTemplateAssignmentRepository implements ProductTempla
           .update(productTemplateAssignments)
           .set({ templateId: target.id, assignedAt: input.now })
           .where(eq(productTemplateAssignments.productId, input.productId));
-        if (current.productStatus === 'published') {
-          await transaction
-            .update(products)
-            .set({ status: 'in_review', updatedAt: input.now })
-            .where(eq(products.id, input.productId));
-        }
         await recordAuditWithin(
           transaction,
           createAuditEntry({
@@ -105,9 +98,6 @@ export class DrizzleProductTemplateAssignmentRepository implements ProductTempla
             occurredAt: input.now,
             changes: {
               templateId: { before: current.templateId, after: target.id },
-              ...(current.productStatus === 'published'
-                ? { status: { before: 'published', after: 'in_review' } }
-                : {}),
             },
           }),
         );

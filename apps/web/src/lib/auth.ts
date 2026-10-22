@@ -116,6 +116,22 @@ export function actorRoleLabel(roles: readonly string[]): string {
   return roles.length > 0 ? roles.join(' · ') : 'Sin rol asignado';
 }
 
+const ADMINISTRATOR_ROLES = new Set(['ADMINISTRADOR', 'ADMIN']);
+const PURCHASING_ROLES = new Set(['COMPRAS', 'EDITOR']);
+const SALES_ROLES = new Set(['VENTAS', 'VIEWER']);
+
+export function isAdministrator(roles: readonly string[]): boolean {
+  return roles.some((role) => ADMINISTRATOR_ROLES.has(role));
+}
+
+/** A mixed-role actor keeps the least restrictive business profile assigned to it. */
+export function isSalesOnly(roles: readonly string[]): boolean {
+  return (
+    roles.some((role) => SALES_ROLES.has(role)) &&
+    !roles.some((role) => ADMINISTRATOR_ROLES.has(role) || PURCHASING_ROLES.has(role))
+  );
+}
+
 /**
  * Keeps authentication failures understandable without rendering arbitrary text returned by an
  * upstream service. In particular, a 401 is a credential failure, not a technical API message.
