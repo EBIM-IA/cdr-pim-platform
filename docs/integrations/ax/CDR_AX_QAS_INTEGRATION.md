@@ -207,5 +207,6 @@ documenta ni se versiona. Si se comparte por chat, correo, ticket o captura, deb
 
 - [OpenAPI](./openapi-ax-v1.json)
 - [Colección Postman](./CDR_AX_QAS.postman_collection.json)
+- [Guía operativa PDF v1.2](./Guia_Pruebas_API_AX_CDR_PIM_QAS_v1.2.pdf)
 - [Decisiones pendientes de aplicación al catálogo](./NEXT_DB_PHASE.md)
 - Prueba automatizada segura: `pnpm test:ax:qas`
