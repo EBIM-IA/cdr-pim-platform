@@ -9,6 +9,8 @@ import {
   durationToSeconds,
   hasExpectedOrigin,
   loginFailureMessage,
+  isAdministrator,
+  isSalesOnly,
   loginResponseSchema,
   safeReturnTo,
   sessionCookieOptions,
@@ -105,6 +107,15 @@ describe('auth security helpers', () => {
     expect(actorInitials('eva.faustor@cdr.example')).toBe('EF');
     expect(actorRoleLabel(['catalogador', 'revisor'])).toBe('catalogador · revisor');
     expect(actorRoleLabel([])).toBe('Sin rol asignado');
+  });
+
+  it('derives field visibility from business and legacy role aliases', () => {
+    expect(isAdministrator(['ADMINISTRADOR'])).toBe(true);
+    expect(isAdministrator(['ADMIN'])).toBe(true);
+    expect(isSalesOnly(['VENTAS'])).toBe(true);
+    expect(isSalesOnly(['VIEWER'])).toBe(true);
+    expect(isSalesOnly(['VENTAS', 'COMPRAS'])).toBe(false);
+    expect(isSalesOnly(['VENTAS', 'ADMINISTRADOR'])).toBe(false);
   });
 
   it('localizes login failures without exposing an upstream response body', () => {

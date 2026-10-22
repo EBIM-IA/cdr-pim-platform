@@ -45,7 +45,7 @@
   --color-cdr-red: #dc5555;
   --shadow-card: 0 1px 2px rgb(16 24 40 / 4%);
   --shadow-sidebar: 8px 0 24px rgb(16 24 40 / 10%);
-  --font-sans: Arial, Helvetica, sans-serif;
+  --font-sans: 'Aptos Narrow', 'Arial Narrow', Aptos, Arial, sans-serif;
 }
 
 @layer base {
@@ -66,7 +66,8 @@
     max-width: 100%;
     overflow-x: hidden;
     overflow-x: clip;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: 'Aptos Narrow', 'Arial Narrow', Aptos, Arial, sans-serif;
+    font-size: 11pt;
   }
 
   ::selection {

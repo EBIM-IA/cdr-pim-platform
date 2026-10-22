@@ -110,13 +110,28 @@ function CompletenessMeter({ value, sku }: { value: number | null; sku: string }
   );
 }
 
-function ProductCatalogList({ products }: { products: Product[] }) {
+function ProductCatalogList({
+  products,
+  showStatus,
+  showCompleteness,
+  canEdit,
+}: {
+  products: Product[];
+  showStatus: boolean;
+  showCompleteness: boolean;
+  canEdit: boolean;
+}) {
   return (
     <ul className="space-y-2">
       {products.map((product) => (
         <li
           key={product.id}
-          className="grid min-w-0 gap-3 rounded-xl border bg-white p-2.5 shadow-sm transition hover:border-orange-200 hover:shadow-md md:grid-cols-[72px_minmax(0,1fr)_150px_auto] md:items-center md:p-3"
+          className={cn(
+            'grid min-w-0 gap-3 rounded-xl border bg-white p-2.5 shadow-sm transition hover:border-orange-200 hover:shadow-md md:items-center md:p-3',
+            showStatus || showCompleteness
+              ? 'md:grid-cols-[72px_minmax(0,1fr)_150px_auto]'
+              : 'md:grid-cols-[72px_minmax(0,1fr)_auto]',
+          )}
         >
           <ProductArtwork
             category={product.category}
@@ -153,21 +168,29 @@ function ProductCatalogList({ products }: { products: Product[] }) {
               ))}
             </dl>
           </div>
-          <div className="flex flex-col items-start gap-3">
-            <StatusBadge tone={statusTone(product.status)}>
-              {statusLabel(product.status)}
-            </StatusBadge>
-            <CompletenessMeter value={product.completeness} sku={product.sku} />
-          </div>
+          {showStatus || showCompleteness ? (
+            <div className="flex flex-col items-start gap-3">
+              {showStatus ? (
+                <StatusBadge tone={statusTone(product.status)}>
+                  {statusLabel(product.status)}
+                </StatusBadge>
+              ) : null}
+              {showCompleteness ? (
+                <CompletenessMeter value={product.completeness} sku={product.sku} />
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-1.5 md:flex-col">
             <Button asChild size="sm">
               <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
             </Button>
-            <Button asChild variant="ghost" size="sm">
-              <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
-                Editar enriquecimiento
-              </Link>
-            </Button>
+            {canEdit ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
+                  Editar enriquecimiento
+                </Link>
+              </Button>
+            ) : null}
           </div>
         </li>
       ))}
@@ -197,16 +220,26 @@ export function ProductsCatalog({
   initialBrand = '',
   initialStatus = '',
   canEditAttributes = false,
+  canViewQuality = false,
+  canViewImports = false,
+  showCompleteness = false,
+  showProductStatus = true,
+  showTableDescriptionAndTemplate = true,
 }: {
   initialSearch?: string;
   initialBrand?: string;
   initialStatus?: ProductStatus | '';
   canEditAttributes?: boolean;
+  canViewQuality?: boolean;
+  canViewImports?: boolean;
+  showCompleteness?: boolean;
+  showProductStatus?: boolean;
+  showTableDescriptionAndTemplate?: boolean;
 }) {
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [brand, setBrand] = useState(initialBrand);
-  const [status, setStatus] = useState<ProductStatus | ''>(initialStatus);
+  const [status, setStatus] = useState<ProductStatus | ''>(showProductStatus ? initialStatus : '');
   const [family, setFamily] = useState('');
   const [category, setCategory] = useState('');
   const [application, setApplication] = useState('');
@@ -249,18 +282,19 @@ export function ProductsCatalog({
     setApplication(urlApplication);
     const completenessParam = params.get('completeness');
     if (
-      completenessParam === 'complete' ||
-      completenessParam === 'attention' ||
-      completenessParam === 'critical' ||
-      completenessParam === 'unavailable'
+      showCompleteness &&
+      (completenessParam === 'complete' ||
+        completenessParam === 'attention' ||
+        completenessParam === 'critical' ||
+        completenessParam === 'unavailable')
     ) {
       setCompleteness(completenessParam);
     }
-    if (urlFamily || urlCategory || urlApplication || completenessParam) {
+    if (urlFamily || urlCategory || urlApplication || (showCompleteness && completenessParam)) {
       setAdvancedFiltersOpen(true);
     }
     setUrlReady(true);
-  }, []);
+  }, [showCompleteness]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -284,11 +318,11 @@ export function ProductsCatalog({
 
     update('q', debouncedSearch);
     update('brand', brand);
-    update('status', status);
+    update('status', showProductStatus ? status : '');
     update('family', family);
     update('category', category);
     update('application', application);
-    update('completeness', completeness);
+    update('completeness', showCompleteness ? completeness : '');
 
     const query = params.toString();
     window.history.replaceState(
@@ -296,12 +330,23 @@ export function ProductsCatalog({
       '',
       query ? `/products?${query}` : '/products',
     );
-  }, [application, brand, category, completeness, debouncedSearch, family, status, urlReady]);
+  }, [
+    application,
+    brand,
+    category,
+    completeness,
+    debouncedSearch,
+    family,
+    showCompleteness,
+    showProductStatus,
+    status,
+    urlReady,
+  ]);
 
   const { products, total, page, pageSize, totalPages, loading, error, reload } = useProductsData({
     q: debouncedSearch || undefined,
     brand: brand || undefined,
-    status: status || undefined,
+    status: showProductStatus ? status || undefined : undefined,
     page: requestedPage,
     pageSize: requestedPageSize,
   });
@@ -344,9 +389,14 @@ export function ProductsCatalog({
   const applicationOptions =
     view === 'table' ? workbookFacets.applicationTypes : catalogApplications;
   const hasCompletenessData = products.some((product) => product.completeness !== null);
-  const activeFilterCount = [brand, status, family, category, application, completeness].filter(
-    Boolean,
-  ).length;
+  const activeFilterCount = [
+    brand,
+    showProductStatus ? status : '',
+    family,
+    category,
+    application,
+    showCompleteness ? completeness : '',
+  ].filter(Boolean).length;
   const hasCriteria = Boolean(searchInput.trim() || debouncedSearch || activeFilterCount);
   const firstVisible = total > 0 ? (page - 1) * pageSize + 1 : 0;
   const lastVisible = Math.min(page * pageSize, total);
@@ -365,11 +415,11 @@ export function ProductsCatalog({
         (product) =>
           (!family || catalogFamily(product) === family) &&
           (!application || product.application === application) &&
-          matchesCompleteness(product.completeness, completeness),
+          matchesCompleteness(product.completeness, showCompleteness ? completeness : ''),
       ),
-    [application, completeness, family, products],
+    [application, completeness, family, products, showCompleteness],
   );
-  const hasClientFilters = Boolean(family || application || completeness);
+  const hasClientFilters = Boolean(family || application || (showCompleteness && completeness));
   const visibleTotal = hasClientFilters ? visibleProducts.length : total;
   const visibleFirst = visibleTotal > 0 ? (hasClientFilters ? 1 : firstVisible) : 0;
   const visibleLast = hasClientFilters ? visibleProducts.length : lastVisible;
@@ -377,17 +427,28 @@ export function ProductsCatalog({
     () =>
       visibleProducts.map((product) => [
         product.sku,
-        product.name,
+        ...(showTableDescriptionAndTemplate ? [product.name] : []),
         product.brand,
         product.category,
         product.application,
-        statusLabel(product.status),
-        product.completeness,
+        ...(showProductStatus ? [statusLabel(product.status)] : []),
+        ...(showCompleteness ? [product.completeness] : []),
         product.providerCode,
         product.unifiedCode,
       ]),
-    [visibleProducts],
+    [showCompleteness, showProductStatus, showTableDescriptionAndTemplate, visibleProducts],
   );
+  const exportHeaders = [
+    'SKU',
+    ...(showTableDescriptionAndTemplate ? ['Descripción'] : []),
+    'Marca',
+    'Línea / categoría',
+    'Aplicación',
+    ...(showProductStatus ? ['Estado'] : []),
+    ...(showCompleteness ? ['Completitud (%)'] : []),
+    'Código proveedor',
+    'Código unificador',
+  ];
 
   const changeBrand = (value: string) => {
     setBrand(value);
@@ -437,41 +498,37 @@ export function ProductsCatalog({
         description={`${formatNumber(total || products.length)} SKU disponibles en el catálogo conectado. Los filtros sin contrato persistente se muestran bloqueados, no simulados.`}
         actions={
           <>
-            <Button asChild variant="secondary">
-              <Link href="/quality?view=search">
-                <Search aria-hidden="true" className="size-4" />
-                Búsqueda inteligente
-              </Link>
-            </Button>
-            <Button asChild variant="secondary">
-              <Link href="/imports">
-                <FileUp aria-hidden="true" className="size-4" />
-                Importaciones
-              </Link>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setView('sheet')}
-              aria-pressed={view === 'sheet'}
-            >
-              <Columns3 aria-hidden="true" className="size-4" />
-              Actualización masiva
-            </Button>
+            {canViewQuality ? (
+              <Button asChild variant="secondary">
+                <Link href="/quality?view=search">
+                  <Search aria-hidden="true" className="size-4" />
+                  Búsqueda inteligente
+                </Link>
+              </Button>
+            ) : null}
+            {canViewImports ? (
+              <Button asChild variant="secondary">
+                <Link href="/imports">
+                  <FileUp aria-hidden="true" className="size-4" />
+                  Importaciones
+                </Link>
+              </Button>
+            ) : null}
+            {canEditAttributes ? (
+              <Button
+                variant="outline"
+                onClick={() => setView('sheet')}
+                aria-pressed={view === 'sheet'}
+              >
+                <Columns3 aria-hidden="true" className="size-4" />
+                Actualización masiva
+              </Button>
+            ) : null}
             {view === 'catalog' ? (
               <TableExportButtons
                 filename="catalogo-pim-filtrado"
                 sheetName="Productos"
-                headers={[
-                  'SKU',
-                  'Descripción',
-                  'Marca',
-                  'Línea / categoría',
-                  'Aplicación',
-                  'Estado',
-                  'Completitud (%)',
-                  'Código proveedor',
-                  'Código unificador',
-                ]}
+                headers={exportHeaders}
                 rows={exportRows}
                 disabled={loading}
               />
@@ -677,35 +734,39 @@ export function ProductsCatalog({
                   }
                   onValueChange={setApplication}
                 />
-                <SearchableSelect
-                  label="Estado"
-                  value={status}
-                  placeholder="Todos los estados"
-                  options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
-                  onValueChange={(value) => changeStatus(value as ProductStatus | '')}
-                />
-                <SearchableSelect
-                  label="Completitud"
-                  value={completeness}
-                  placeholder={
-                    view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
-                  }
-                  options={[
-                    { value: 'complete', label: '90–100%' },
-                    { value: 'attention', label: '70–89%' },
-                    { value: 'critical', label: 'Menos de 70%' },
-                    ...(view === 'catalog'
-                      ? [{ value: 'unavailable', label: 'Sin indicador' }]
-                      : []),
-                  ]}
-                  disabled={view === 'catalog' && !hasCompletenessData}
-                  title={
-                    view === 'table' || hasCompletenessData
-                      ? undefined
-                      : 'El backend todavía no publica completitud en el listado general.'
-                  }
-                  onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
-                />
+                {showProductStatus ? (
+                  <SearchableSelect
+                    label="Estado"
+                    value={status}
+                    placeholder="Todos los estados"
+                    options={statuses.map((item) => ({ value: item, label: statusLabel(item) }))}
+                    onValueChange={(value) => changeStatus(value as ProductStatus | '')}
+                  />
+                ) : null}
+                {showCompleteness ? (
+                  <SearchableSelect
+                    label="Completitud"
+                    value={completeness}
+                    placeholder={
+                      view === 'table' || hasCompletenessData ? 'Todas' : 'Indicador no disponible'
+                    }
+                    options={[
+                      { value: 'complete', label: '90–100%' },
+                      { value: 'attention', label: '70–89%' },
+                      { value: 'critical', label: 'Menos de 70%' },
+                      ...(view === 'catalog'
+                        ? [{ value: 'unavailable', label: 'Sin indicador' }]
+                        : []),
+                    ]}
+                    disabled={view === 'catalog' && !hasCompletenessData}
+                    title={
+                      view === 'table' || hasCompletenessData
+                        ? undefined
+                        : 'El backend todavía no publica completitud en el listado general.'
+                    }
+                    onValueChange={(value) => setCompleteness(value as CompletenessFilter)}
+                  />
+                ) : null}
                 <Select
                   label="Origen del dato"
                   value=""
@@ -758,12 +819,12 @@ export function ProductsCatalog({
                   {application} <X aria-hidden="true" className="size-3" />
                 </button>
               ) : null}
-              {status ? (
+              {showProductStatus && status ? (
                 <button type="button" className={activeChipClass} onClick={() => changeStatus('')}>
                   {statusLabel(status)} <X aria-hidden="true" className="size-3" />
                 </button>
               ) : null}
-              {completeness ? (
+              {showCompleteness && completeness ? (
                 <button
                   type="button"
                   className={activeChipClass}
@@ -785,19 +846,23 @@ export function ProductsCatalog({
         <CatalogWorkbookTable
           q={debouncedSearch || undefined}
           brand={brand || undefined}
-          status={status || undefined}
+          status={showProductStatus ? status || undefined : undefined}
           categoryId={category || undefined}
           applicationType={
             application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL' ? application : undefined
           }
           completeness={
-            completeness === 'complete' ||
-            completeness === 'attention' ||
-            completeness === 'critical'
+            showCompleteness &&
+            (completeness === 'complete' ||
+              completeness === 'attention' ||
+              completeness === 'critical')
               ? completeness
               : undefined
           }
           canEdit={canEditAttributes}
+          showCompleteness={showCompleteness}
+          showStatus={showProductStatus}
+          showDescriptionAndTemplate={showTableDescriptionAndTemplate}
           onFacetsChange={updateWorkbookFacets}
         />
       ) : null}
@@ -850,7 +915,12 @@ export function ProductsCatalog({
             </p>
           </div>
 
-          <ProductCatalogList products={visibleProducts} />
+          <ProductCatalogList
+            products={visibleProducts}
+            showStatus={showProductStatus}
+            showCompleteness={showCompleteness}
+            canEdit={canEditAttributes}
+          />
         </>
       ) : null}
       {view === 'catalog' && !loading && !error && totalPages > 0 ? (

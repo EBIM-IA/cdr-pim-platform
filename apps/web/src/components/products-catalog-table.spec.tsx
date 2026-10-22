@@ -103,11 +103,32 @@ describe('ProductsCatalog table view', () => {
   });
 
   it('keeps the dynamic catalog sheet as the real mass-editing surface', () => {
-    render(<ProductsCatalog />);
+    render(<ProductsCatalog canEditAttributes />);
     fireEvent.click(screen.getByRole('button', { name: /Actualización masiva/u }));
 
     expect(screen.getByText('Hoja dinámica real')).toBeVisible();
     expect(screen.getByText(/columnas, permisos y cambios provienen del backend/u)).toBeVisible();
+  });
+
+  it('removes sales-only product metadata and completeness controls from the UI', () => {
+    render(
+      <ProductsCatalog
+        showProductStatus={false}
+        showCompleteness={false}
+        showTableDescriptionAndTemplate={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
+    expect(screen.queryByRole('combobox', { name: 'Estado' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Completitud' })).not.toBeInTheDocument();
+    expect(mocks.workbook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        showStatus: false,
+        showCompleteness: false,
+        showDescriptionAndTemplate: false,
+      }),
+    );
   });
 
   it('collapses advanced filters without losing their values or active count', async () => {

@@ -11,6 +11,12 @@ const actor: AuthenticatedActor = {
   email: 'viewer@casadelruliman.com',
   roles: [Role.Viewer],
 };
+const administrator: AuthenticatedActor = {
+  ...actor,
+  id: 'admin-1',
+  email: 'admin@casadelruliman.com',
+  roles: [Role.Administrator],
+};
 
 const projection: WorkspaceDto = {
   slug: 'reports',
@@ -32,9 +38,9 @@ describe('GetWorkspaceUseCase', () => {
     const useCase = new GetWorkspaceUseCase(port);
 
     await expect(
-      useCase.execute('reports', actor, { report: 'attribute_changes' }),
+      useCase.execute('reports', administrator, { report: 'attribute_changes' }),
     ).resolves.toEqual(projection);
-    expect(read).toHaveBeenCalledWith('reports', actor, { report: 'attribute_changes' });
+    expect(read).toHaveBeenCalledWith('reports', administrator, { report: 'attribute_changes' });
   });
 
   it('rejects a direct workspace request when the actor lacks its menu capability', async () => {

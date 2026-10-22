@@ -101,9 +101,14 @@ Every protected HTTP route declares capabilities; authentication alone is not en
 
 | Role            | Representative grants                                                          |
 | --------------- | ------------------------------------------------------------------------------ |
-| `VENTAS`        | Read catalog/applications/equivalences and execute publication workflows       |
-| `COMPRAS`       | Edit catalog attributes, applications/equivalences and execute imports/AI      |
+| `VENTAS`        | Read products, applications, equivalences, documents and catalogs              |
+| `COMPRAS`       | The same five modules, with catalog/application/equivalence editing            |
 | `ADMINISTRADOR` | All capabilities, including audit, integrations, administration and operations |
+
+The non-administrator menu is deliberately restricted to those five customer-approved modules.
+The web presentation also suppresses product lifecycle status and completeness for Sales, and
+suppresses completeness for every non-administrator. The API remains responsible for action
+authorization; field-level response projection is tracked separately from menu/action RBAC.
 
 Routes should declare `@RequireCapabilities(...)`. `@RequireRole(...)` is retained only as a
 compatibility bridge and must not be used by new endpoints. Login and `/auth/me` return the

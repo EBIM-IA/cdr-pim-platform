@@ -7,6 +7,10 @@
 - Idempotencia técnica: mismo `idLote` + mismo hash devuelve el recibo existente; contenido
   distinto responde `409`.
 - Estado de recepción: `GET /api/v1/productos/sincronizaciones/{idLote}`.
+- La categoría de tercer nivel de AX determina la categoría/plantilla del SKU.
+- Los campos gobernados por AX conservan autoridad ERP; la edición manual se limita a atributos PIM.
+- Un valor distinto entre AX y Excel crea un conflicto, pone el SKU en revisión y exige que un
+  administrador seleccione el candidato correcto.
 
 ## Aún no debe codificarse sin respuesta del cliente
 
@@ -14,10 +18,9 @@
 | --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | 1   | Identidad del producto              | ¿`codigoArticulo` es el SKU, un identificador ERP o ambos?                                                    |
 | 2   | Nombre obligatorio                  | AX no envía nombre y `products.name` es obligatorio. ¿Qué estado/nombre inicial se usa?                       |
-| 3   | Procedencia y prioridad por campo   | Cuando AX y una edición humana tienen valores distintos, ¿cuál prevalece para cada campo?                     |
 | 4   | Ausente / `null` / vacío            | ¿Ausente significa no modificar? ¿`null` o `""` borran el valor o son inválidos?                              |
 | 5   | Mensajes antiguos                   | ¿Se ignora un registro cuya `fechaModificacion` sea anterior a la última aplicada? ¿Qué ocurre si no la trae? |
-| 6   | Campos de plantilla                 | ¿Cómo se asignan línea, aplicación, marca y futuros `atributosErp` a categorías/plantillas?                   |
+| 6   | Mapeo exacto de categoría           | ¿Qué código estable acompaña a `categoriaNivel3` para enlazarlo sin depender del nombre visible?              |
 | 7   | Resultado por producto              | Catálogo de estados y errores: creado, actualizado, sin cambios, antiguo, rechazado, conflicto.               |
 | 8   | Tamaño y frecuencia                 | Máximo de productos/bytes por lote, frecuencia normal y ventana de reintentos.                                |
 | 9   | Seguridad y conectividad productiva | Identidad M2M definitiva, VPN/ALB interno, origen de red permitido y rotación de credenciales.                |

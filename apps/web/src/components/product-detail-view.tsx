@@ -1245,10 +1245,14 @@ export function ProductDetailView({
   productId,
   canWriteAssets = false,
   canReassignTemplate = false,
+  showCompleteness = false,
+  showProductStatus = true,
 }: {
   productId: string;
   canWriteAssets?: boolean;
   canReassignTemplate?: boolean;
+  showCompleteness?: boolean;
+  showProductStatus?: boolean;
 }) {
   const [product, setProduct] = useState<Product | null>(null);
   const [attributeSheet, setAttributeSheet] = useState<ProductAttributeSheetDto | null>(null);
@@ -1686,9 +1690,11 @@ export function ProductDetailView({
             Código de Artículo · Identidad ERP
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge tone={statusTone(product.status)}>
-              {statusLabel(product.status)}
-            </StatusBadge>
+            {showProductStatus ? (
+              <StatusBadge tone={statusTone(product.status)}>
+                {statusLabel(product.status)}
+              </StatusBadge>
+            ) : null}
             {templateLabel ? <StatusBadge tone="neutral">{templateLabel}</StatusBadge> : null}
           </div>
           {attributeSheet && categoryTemplateOptions.length > 1 ? (
@@ -1764,32 +1770,42 @@ export function ProductDetailView({
         <Card className="h-fit border-primary/20">
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
-              <CardTitle>Control PIM</CardTitle>
+              <CardTitle>
+                {showCompleteness || showProductStatus ? 'Control PIM' : 'Información PIM'}
+              </CardTitle>
               <CheckCircle2 aria-hidden="true" className="size-5 text-primary" />
             </div>
-            <CardDescription>Estado e identificación técnica de la ficha.</CardDescription>
+            <CardDescription>
+              {showCompleteness || showProductStatus
+                ? 'Estado e identificación técnica de la ficha.'
+                : 'Identificación técnica de la ficha.'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                <span className="font-semibold">Calidad</span>
-                <strong>
-                  {product.completeness === null ? 'Regla pendiente' : `${product.completeness}%`}
-                </strong>
-              </div>
-              {product.completeness === null ? (
-                <p className="rounded-md bg-slate-50 p-3 text-xs leading-relaxed text-muted-foreground">
-                  El backend todavía no publica un puntaje de calidad aprobado.
-                </p>
-              ) : (
-                <Progress value={product.completeness} label={`Completitud de ${product.sku}`} />
-              )}
-            </div>
-            <dl className="space-y-4 border-y py-4 text-sm">
+            {showCompleteness ? (
               <div>
-                <dt className="text-xs text-muted-foreground">Estado</dt>
-                <dd className="mt-1 font-semibold">{statusLabel(product.status)}</dd>
+                <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold">Calidad</span>
+                  <strong>
+                    {product.completeness === null ? 'Regla pendiente' : `${product.completeness}%`}
+                  </strong>
+                </div>
+                {product.completeness === null ? (
+                  <p className="rounded-md bg-slate-50 p-3 text-xs leading-relaxed text-muted-foreground">
+                    El backend todavía no publica un puntaje de calidad aprobado.
+                  </p>
+                ) : (
+                  <Progress value={product.completeness} label={`Completitud de ${product.sku}`} />
+                )}
               </div>
+            ) : null}
+            <dl className="space-y-4 border-y py-4 text-sm">
+              {showProductStatus ? (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Estado</dt>
+                  <dd className="mt-1 font-semibold">{statusLabel(product.status)}</dd>
+                </div>
+              ) : null}
               <div>
                 <dt className="text-xs text-muted-foreground">Canal de Consulta</dt>
                 <dd className="mt-1 break-words font-semibold">
