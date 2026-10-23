@@ -1,6 +1,12 @@
 'use client';
 
-import type { ReportFormat, WorkspaceDto, WorkspaceMetric, WorkspaceRow } from '@cdr/contracts';
+import type {
+  AuthenticatedActorDto,
+  ReportFormat,
+  WorkspaceDto,
+  WorkspaceMetric,
+  WorkspaceRow,
+} from '@cdr/contracts';
 import {
   Activity,
   AlertTriangle,
@@ -28,6 +34,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { AuditWorkspace } from '@/components/audit-workspace';
+import { CatalogQualityWorkspace } from '@/components/catalog-quality-workspace';
+import {
+  AdministrationReferenceView,
+  CatalogsReferenceView,
+  IntegrationsReferenceView,
+} from '@/components/operations-reference-views';
+import { PublicationWorkspace } from '@/components/publication-workspace';
 import {
   OperationsSecondaryWorkspace,
   type OperationsSecondaryView,
@@ -90,8 +103,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'catalogs',
       label: 'Catálogos PDF',
       title: 'Catálogos de productos',
-      description:
-        'Alcance previsto para registrar, auditar y compartir catálogos PDF cuando se aprueben sus controles operativos y de seguridad.',
+      description: 'Catálogos PDF por marca, vigencia y estado.',
       icon: FileArchive,
       mode: 'capabilities',
     },
@@ -101,8 +113,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'quality',
       label: 'Calidad',
       title: 'Calidad del catálogo',
-      description:
-        'Hallazgos deterministas calculados por el backend sobre el catálogo persistido.',
+      description: 'Completitud, obligatorios, documentos y reglas del catálogo.',
       icon: Gauge,
       mode: 'records',
     },
@@ -179,8 +190,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'prestashop',
       label: 'PrestaShop',
       title: 'Canal PrestaShop',
-      description:
-        'Contrato de consumo, campos expuestos y dependencias de ICOM todavía pendientes.',
+      description: 'Operaciones de consumo y vista previa de los datos de cada SKU.',
       icon: ServerCog,
       mode: 'capabilities',
     },
@@ -199,7 +209,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'monitor',
       label: 'Monitor',
       title: 'Monitor de integraciones',
-      description: 'Estado real de componentes internos y contratos externos del ecosistema PIM.',
+      description: 'Ejecuciones, lotes, errores y seguimiento por conector.',
       icon: Activity,
       mode: 'connectors',
     },
@@ -207,8 +217,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'sources',
       label: 'Fuentes externas',
       title: 'Fuentes externas',
-      description:
-        'Capacidades de enriquecimiento desacopladas, sujetas a licencia y credenciales.',
+      description: 'Fuentes de enriquecimiento, prioridad y candidatos del SKU.',
       icon: Link2,
       mode: 'capabilities',
     },
@@ -216,7 +225,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'batches',
       label: 'Lotes AX',
       title: 'Detalle de lote Sismetic / AX',
-      description: 'PUSH hacia PIM, validación por registro e idempotencia del procesamiento.',
+      description: 'Cabecera del lote y errores por registro recibidos de Sismetic / AX.',
       icon: FileArchive,
       mode: 'capabilities',
     },
@@ -278,8 +287,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'users',
       label: 'Usuarios',
       title: 'Usuarios',
-      description:
-        'Identidad efectiva de la sesión y dependencia del proveedor empresarial definitivo.',
+      description: 'Usuarios, roles y estado de acceso al PIM.',
       icon: Users,
       mode: 'capabilities',
     },
@@ -287,7 +295,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       id: 'roles',
       label: 'Roles y permisos',
       title: 'Roles y permisos',
-      description: 'Matriz de capacidades aplicada por el backend a la sesión autenticada.',
+      description: 'Permisos vigentes para Administración, Compras y Ventas.',
       icon: KeyRound,
       mode: 'records',
     },
@@ -503,7 +511,13 @@ function reportFormatForView(view: string | undefined): ReportFormat {
   return 'summary';
 }
 
-export function ReferenceWorkspace({ definition }: { definition: ModuleDefinition }) {
+export function ReferenceWorkspace({
+  definition,
+  actor,
+}: {
+  definition: ModuleDefinition;
+  actor?: AuthenticatedActorDto;
+}) {
   const views = workspaceViews[definition.slug] ?? [];
   const [selected, setSelected] = useState(views[0]?.id ?? '');
   const active = views.find((view) => view.id === selected) ?? views[0];
@@ -593,7 +607,33 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
         />
       ) : null}
       {!loading && workspace ? (
-        definition.slug === 'quality' && isQualitySecondaryView(active.id) ? (
+        definition.slug === 'quality' && active.id === 'quality' ? (
+          <CatalogQualityWorkspace workspace={workspace} />
+        ) : definition.slug === 'publication' ? (
+          <PublicationWorkspace
+            workspace={workspace}
+            view={active.id as 'channels' | 'prestashop' | 'images'}
+            canManage={actor?.capabilities.includes('administration:manage') ?? false}
+          />
+        ) : definition.slug === 'integrations' ? (
+          <IntegrationsReferenceView
+            workspace={workspace}
+            view={active.id as 'sources' | 'monitor' | 'batches'}
+          />
+        ) : definition.slug === 'administration' &&
+          (active.id === 'users' || active.id === 'roles') ? (
+          <AdministrationReferenceView
+            workspace={workspace}
+            view={active.id}
+            {...(actor ? { actor } : {})}
+          />
+        ) : definition.slug === 'administration' && active.id === 'audit' ? (
+          <AuditWorkspace embedded />
+        ) : definition.slug === 'catalogs' ? (
+          <CatalogsReferenceView />
+        ) : definition.slug === 'quality' && active.id === 'search' ? (
+          <SmartSearchWorkspace />
+        ) : definition.slug === 'quality' && isQualitySecondaryView(active.id) ? (
           <QualitySecondaryWorkspace view={active.id} workspace={workspace} />
         ) : useOperationsSecondary ? (
           <div className="space-y-5">
@@ -631,16 +671,11 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
                 ))}
               </div>
             ) : null}
-            {definition.slug === 'quality' && active.id === 'search' ? (
-              <SmartSearchWorkspace />
-            ) : active.mode === 'records' ? (
-              <RecordTable workspace={workspace} />
-            ) : null}
+            {active.mode === 'records' ? <RecordTable workspace={workspace} /> : null}
             {active.mode === 'connectors' ? <ConnectorCards rows={workspace.rows} /> : null}
             {definition.slug === 'administration' && active.id === 'audit' ? (
               <AuditWorkspace embedded />
-            ) : definition.slug === 'quality' && active.id === 'search' ? null : active.mode ===
-              'capabilities' ? (
+            ) : active.mode === 'capabilities' ? (
               <CapabilityPanel workspace={workspace} view={active} />
             ) : null}
           </div>

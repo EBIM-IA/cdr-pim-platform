@@ -1,3 +1,4 @@
+import { workspaceQueryParams } from '@/lib/workspace-query';
 import {
   API_PREFIX,
   type ApiError,
@@ -204,8 +205,7 @@ export class ApiClient {
   }
 
   getWorkspace(slug: WorkspaceSlug, query: WorkspaceQuery = {}): Promise<WorkspaceDto> {
-    const params = new URLSearchParams();
-    if (query.report) params.set('report', query.report);
+    const params = workspaceQueryParams(query);
     const suffix = params.size > 0 ? `?${params.toString()}` : '';
     return this.get(`/workspaces/${encodeURIComponent(slug)}${suffix}`, workspaceSchema);
   }

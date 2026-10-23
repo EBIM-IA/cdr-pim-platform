@@ -38,6 +38,7 @@ const attribute = {
   replicable: true,
   searchable: true,
   includeInTechnicalSheet: true,
+  publishable: true,
   active: true,
   position: 0,
   updatedAt: now,
@@ -59,6 +60,28 @@ function repository(): CatalogAdministrationRepositoryPort {
 }
 
 describe('UpdateTemplateAttributeUseCase authorization', () => {
+  it('restricts publication selection to administrators and passes false through unchanged', async () => {
+    const catalog = repository();
+    const useCase = new UpdateTemplateAttributeUseCase(catalog, new FixedClock(now));
+    await expect(
+      useCase.execute(
+        templateId,
+        definitionId,
+        { publishable: false, expectedUpdatedAt },
+        purchasingActor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(catalog.updateTemplateAttribute).not.toHaveBeenCalled();
+    await useCase.execute(
+      templateId,
+      definitionId,
+      { publishable: false, expectedUpdatedAt },
+      administratorActor,
+    );
+    expect(catalog.updateTemplateAttribute).toHaveBeenCalledWith(
+      expect.objectContaining({ publishable: false }),
+    );
+  });
   it('rejects COMPRAS template-rule changes before invoking persistence', async () => {
     const catalog = repository();
     const useCase = new UpdateTemplateAttributeUseCase(catalog, new FixedClock(now));

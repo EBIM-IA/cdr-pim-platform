@@ -125,6 +125,7 @@ export const templateAttributeAssignments = pgTable(
     active: boolean('active').notNull().default(true),
     searchable: boolean('searchable').notNull().default(false),
     includeInTechnicalSheet: boolean('include_in_technical_sheet').notNull().default(false),
+    publishable: boolean('publishable').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

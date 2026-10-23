@@ -3,13 +3,19 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkspaceData } from '@/components/use-workspace-data';
-import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
+import { fetchCatalogCategories, fetchCatalogSchema } from '@/lib/dynamic-catalog-api';
 import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
+import { downloadCsv } from '@/lib/tabular-export';
 
 import { ImportsWorkspace } from './imports-workspace';
 
+vi.mock('@/lib/tabular-export', () => ({ downloadCsv: vi.fn() }));
+
 vi.mock('@/components/use-workspace-data', () => ({ useWorkspaceData: vi.fn() }));
-vi.mock('@/lib/dynamic-catalog-api', () => ({ fetchCatalogCategories: vi.fn() }));
+vi.mock('@/lib/dynamic-catalog-api', () => ({
+  fetchCatalogCategories: vi.fn(),
+  fetchCatalogSchema: vi.fn(),
+}));
 vi.mock('@/lib/operational-api', () => ({
   confirmImport: vi.fn(),
   getImport: vi.fn(),
@@ -104,6 +110,36 @@ beforeEach(() => {
   vi.mocked(previewImport).mockResolvedValue(batch);
   vi.mocked(confirmImport).mockResolvedValue(confirmedBatch);
   vi.mocked(getImport).mockResolvedValue(batch);
+  vi.mocked(fetchCatalogSchema).mockResolvedValue({
+    category: {
+      id: '22222222-2222-4222-8222-222222222222',
+      slug: 'filtros-de-aire',
+      name: 'Filtros',
+    },
+    template: {
+      id: '33333333-3333-4333-8333-333333333332',
+      variantKey: '22.2',
+      name: 'Filtro',
+      version: 1,
+    },
+    columns: [
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        key: 'descripcion_tecnica',
+        label: 'Descripción técnica',
+        dataType: 'text',
+        unit: null,
+        allowedValues: [],
+        required: false,
+        replicable: false,
+        searchable: false,
+        includeInTechnicalSheet: false,
+        sourceAuthority: 'pim',
+        position: 0,
+        permissions: { edit: true, import: true, export: true },
+      },
+    ],
+  });
   vi.mocked(fetchCatalogCategories).mockResolvedValue([
     {
       id: '22222222-2222-4222-8222-222222222222',
@@ -145,7 +181,7 @@ describe('ImportsWorkspace', () => {
 
     expect(await screen.findByLabelText('Destino')).toHaveValue('oem');
     expect(screen.getByDisplayValue(/codigo_unificador,codigo_oem,marcas/)).toBeInTheDocument();
-    expect(screen.getByText('Arrastra un archivo XLSX, CSV o JSON')).toBeInTheDocument();
+    expect(screen.getByText('Arrastra un archivo XLSX o CSV')).toBeInTheDocument();
   });
 
   it('opens a persisted result from the history and keeps it addressable by URL', async () => {
@@ -166,7 +202,7 @@ describe('ImportsWorkspace', () => {
     render(<ImportsWorkspace canExecute />);
 
     fireEvent.click(screen.getByRole('button', { name: /Nueva importación/ }));
-    expect(screen.getByText('Arrastra un archivo XLSX, CSV o JSON')).toBeInTheDocument();
+    expect(screen.getByText('Arrastra un archivo XLSX o CSV')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
     expect(screen.getByText('SKU e identidad del lote')).toBeInTheDocument();
@@ -176,7 +212,9 @@ describe('ImportsWorkspace', () => {
 
     await waitFor(() => expect(previewImport).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Validación por registro')).toBeInTheDocument();
-    expect(screen.getByText('Respuesta real de la vista previa persistida.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Revisa los errores y advertencias antes de confirmar.'),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
     expect(screen.getByText('Confirmar procesamiento')).toBeInTheDocument();
@@ -223,6 +261,12 @@ describe('ImportsWorkspace', () => {
       { target: { value: templateId } },
     );
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Destino de descripcion_tecnica')).toHaveValue(
+        'descripcion_tecnica',
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /Continuar/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
 
     await waitFor(() =>
@@ -254,4 +298,98 @@ describe('ImportsWorkspace', () => {
     expect(screen.getByText('Advertencia')).toBeInTheDocument();
     expect(screen.queryByText('Rechazado')).not.toBeInTheDocument();
   });
+});
+
+it('maps customer headers before previewing the actual records and leaves unmapped columns out', async () => {
+  render(<ImportsWorkspace canExecute />);
+  fireEvent.click(screen.getByRole('button', { name: /Nueva importación/u }));
+  fireEvent.change(screen.getByLabelText('Contenido del archivo'), {
+    target: {
+      value:
+        'Grupo cliente,Marca cliente,Modelo cliente,Nota interna\nD1672,Toyota,Hilux,no importar',
+    },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Continuar/u }));
+  fireEvent.click(screen.getByRole('button', { name: /Continuar/u }));
+  fireEvent.change(screen.getByLabelText('Destino de Grupo cliente'), {
+    target: { value: 'unifiedCode' },
+  });
+  fireEvent.change(screen.getByLabelText('Destino de Marca cliente'), {
+    target: { value: 'make' },
+  });
+  fireEvent.change(screen.getByLabelText('Destino de Modelo cliente'), {
+    target: { value: 'model' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Continuar/u }));
+  await waitFor(() =>
+    expect(previewImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: 'json',
+        records: [{ unifiedCode: 'D1672', make: 'Toyota', model: 'Hilux' }],
+      }),
+    ),
+  );
+});
+
+it('accepts a dropped CSV file and rejects JSON as an upload format', async () => {
+  render(<ImportsWorkspace canExecute />);
+  fireEvent.click(screen.getByRole('button', { name: /Nueva importación/u }));
+  const drop = screen.getByText('Arrastra un archivo XLSX o CSV').closest('label')!;
+  fireEvent.drop(drop, {
+    dataTransfer: {
+      files: [
+        {
+          name: 'cliente.csv',
+          size: 60,
+          text: async () => 'unifiedCode,make,model\nD1672,Toyota,Hilux',
+        },
+      ],
+    },
+  });
+  await screen.findByText('cliente.csv');
+  expect(screen.getByLabelText('Contenido del archivo')).toHaveValue(
+    'unifiedCode,make,model\nD1672,Toyota,Hilux',
+  );
+  fireEvent.drop(drop, {
+    dataTransfer: { files: [{ name: 'datos.json', size: 2, text: async () => '[]' }] },
+  });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Selecciona un archivo XLSX o CSV.');
+});
+
+it('opens a rejected row with its real errors and downloads them', async () => {
+  vi.mocked(getImport).mockResolvedValue({
+    ...batch,
+    invalidRows: 1,
+    validRows: 0,
+    rows: [{ ...batch.rows[0]!, valid: false, errors: ['El código unificador no existe'] }],
+  });
+  render(<ImportsWorkspace canExecute />);
+  fireEvent.click(screen.getByRole('button', { name: 'Ver resultado' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle fila 2' }));
+  expect(await screen.findByRole('dialog')).toHaveTextContent('El código unificador no existe');
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar configuración' }));
+  expect(screen.getByRole('button', { name: 'Descargar errores y advertencias' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Descargar errores y advertencias' }));
+  expect(downloadCsv).toHaveBeenCalledWith(
+    expect.objectContaining({
+      headers: expect.arrayContaining(['Errores', 'Advertencias']),
+      rows: [expect.arrayContaining(['El código unificador no existe'])],
+    }),
+    expect.stringContaining('Errores importación'),
+  );
+});
+
+it('preserves a file and mapping when canceling a navigation with unsaved changes', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<ImportsWorkspace canExecute />);
+  fireEvent.click(screen.getByRole('button', { name: /Nueva importación/u }));
+  fireEvent.change(screen.getByLabelText('Contenido del archivo'), {
+    target: { value: 'unifiedCode,make,model\nG1,Toyota,Hilux' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Ver historial' }));
+  expect(confirm).toHaveBeenCalled();
+  expect(screen.getByLabelText('Contenido del archivo')).toHaveValue(
+    'unifiedCode,make,model\nG1,Toyota,Hilux',
+  );
+  confirm.mockRestore();
 });

@@ -3,6 +3,7 @@
 import {
   previewImportSchema,
   type CatalogCategorySummaryDto,
+  type ImportRowDto,
   type ImportBatchDto,
   type ImportFormat,
   type ImportTarget,
@@ -14,12 +15,13 @@ import {
   Clock3,
   FileCheck2,
   FileSpreadsheet,
+  Download,
   Plus,
   ShieldAlert,
   UploadCloud,
   XCircle,
 } from 'lucide-react';
-import { type ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
@@ -34,7 +36,16 @@ import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
 import { formatWorkspaceCell, formatWorkspaceMetric } from '@/lib/workspace-view';
 import { cn } from '@/lib/utils';
 import { readFirstXlsxWorksheet } from '@/lib/xlsx-import';
-import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
+import { fetchCatalogCategories, fetchCatalogSchema } from '@/lib/dynamic-catalog-api';
+import {
+  importFields,
+  mapImportRecords,
+  matchImportField,
+  parseImportSource,
+  type ImportField,
+} from '@/lib/import-mapping';
+import { downloadCsv } from '@/lib/tabular-export';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 
 const wizardSteps = ['Archivo', 'SKU y plantilla', 'Mapeo', 'Validación', 'Confirmación'] as const;
 
@@ -62,12 +73,12 @@ function newKey(target: ImportTarget): string {
 
 function sourceColumns(payload: string, format: ImportFormat): string[] {
   if (format === 'csv') {
-    return csvHeaderColumns(payload).slice(0, 20);
+    return csvHeaderColumns(payload);
   }
   try {
     const value: unknown = JSON.parse(payload);
     if (!Array.isArray(value) || typeof value[0] !== 'object' || value[0] === null) return [];
-    return Object.keys(value[0] as Record<string, unknown>).slice(0, 20);
+    return Object.keys(value[0] as Record<string, unknown>);
   } catch {
     return [];
   }
@@ -158,6 +169,7 @@ function BatchMetrics({ batch, result = false }: { batch: ImportBatchDto; result
 }
 
 function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
+  const [selectedRow, setSelectedRow] = useState<ImportRowDto | null>(null);
   const columns = useMemo(() => {
     const keys = new Set<string>();
     batch.rows.forEach((row) => Object.keys(row.data).forEach((key) => keys.add(key)));
@@ -169,58 +181,127 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-left text-sm">
-        <thead className="border-b bg-slate-50 text-[11px] tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-3">Fila</th>
-            <th className="px-4 py-3">Identificador</th>
-            <th className="px-4 py-3">Campo</th>
-            <th className="px-4 py-3">Validación</th>
-            <th className="px-4 py-3">Estado</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {batch.rows.map((row) => {
-            const identifier =
-              row.data.sku ??
-              row.data.unifiedCode ??
-              row.data.externalCode ??
-              row.data.oemCode ??
-              '—';
-            return (
-              <tr key={row.rowNumber} className={row.valid ? '' : 'bg-red-50/50'}>
-                <td className="px-4 py-3 font-semibold">{row.rowNumber}</td>
-                <td className="px-4 py-3 font-mono text-xs">{String(identifier)}</td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">
-                  {columns.join(', ') || '—'}
-                </td>
-                <td className={cn('px-4 py-3 text-xs', !row.valid && 'text-red-700')}>
-                  {row.errors.length > 0 ? (
-                    row.errors.join(' · ')
-                  ) : row.warnings.length > 0 ? (
-                    <span className="text-amber-700">{row.warnings.join(' · ')}</span>
-                  ) : (
-                    'Sin observaciones'
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge
-                    tone={row.valid ? (row.warnings.length > 0 ? 'warning' : 'success') : 'danger'}
-                  >
-                    {row.valid
-                      ? row.warnings.length > 0
-                        ? 'Advertencia'
-                        : 'Correcto'
-                      : 'Rechazado'}
-                  </StatusBadge>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="border-b bg-slate-50 text-[11px] tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3">Fila</th>
+              <th className="px-4 py-3">Identificador</th>
+              <th className="px-4 py-3">Campo</th>
+              <th className="px-4 py-3">Validación</th>
+              <th className="px-4 py-3">Estado</th>
+              <th className="px-4 py-3">Detalle</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {batch.rows.map((row) => {
+              const identifier =
+                row.data.sku ??
+                row.data.unifiedCode ??
+                row.data.externalCode ??
+                row.data.oemCode ??
+                '—';
+              return (
+                <tr key={row.rowNumber} className={row.valid ? '' : 'bg-red-50/50'}>
+                  <td className="px-4 py-3 font-semibold">{row.rowNumber}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{String(identifier)}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {columns.join(', ') || '—'}
+                  </td>
+                  <td className={cn('px-4 py-3 text-xs', !row.valid && 'text-red-700')}>
+                    {row.errors.length > 0 ? (
+                      row.errors.join(' · ')
+                    ) : row.warnings.length > 0 ? (
+                      <span className="text-amber-700">{row.warnings.join(' · ')}</span>
+                    ) : (
+                      'Sin observaciones'
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge
+                      tone={
+                        row.valid ? (row.warnings.length > 0 ? 'warning' : 'success') : 'danger'
+                      }
+                    >
+                      {row.valid
+                        ? row.warnings.length > 0
+                          ? 'Advertencia'
+                          : 'Correcto'
+                        : 'Rechazado'}
+                    </StatusBadge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedRow(row)}
+                      aria-label={`Ver detalle fila ${row.rowNumber}`}
+                    >
+                      Ver detalle
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {selectedRow ? (
+        <WorkspaceDrawer
+          title={`Detalle de la fila ${selectedRow.rowNumber}`}
+          onClose={() => setSelectedRow(null)}
+        >
+          <p className="mb-4 text-sm">{selectedRow.valid ? 'Fila válida' : 'Fila rechazada'}</p>
+          {selectedRow.errors.map((message, index) => (
+            <p
+              key={`error-${index}`}
+              className="mb-2 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            >
+              {message}
+            </p>
+          ))}
+          {selectedRow.warnings.map((message, index) => (
+            <p
+              key={`warning-${index}`}
+              className="mb-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+            >
+              {message}
+            </p>
+          ))}
+          <dl className="mt-4 divide-y rounded border">
+            {Object.entries(selectedRow.data).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-3 p-3 text-xs">
+                <dt className="font-semibold">{key}</dt>
+                <dd className="break-words">
+                  {Array.isArray(value) ? value.join('; ') : String(value ?? '—')}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </WorkspaceDrawer>
+      ) : null}
+    </>
+  );
+}
+
+function downloadImportErrors(batch: ImportBatchDto) {
+  const rows = batch.rows.filter((row) => !row.valid || row.warnings.length);
+  const fields = [...new Set(rows.flatMap((row) => Object.keys(row.data)))];
+  downloadCsv(
+    {
+      headers: ['Fila', ...fields, 'Errores', 'Advertencias'],
+      rows: rows.map((row) => [
+        row.rowNumber,
+        ...fields.map((field) => {
+          const value = row.data[field];
+          return Array.isArray(value) ? value.join('; ') : value;
+        }),
+        row.errors.join(' · '),
+        row.warnings.join(' · '),
+      ]),
+    },
+    `Errores importación ${batch.id.slice(0, 8)}`,
   );
 }
 
@@ -269,6 +350,19 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ImportMode>('history');
   const [step, setStep] = useState(0);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [categoryFields, setCategoryFields] = useState<ImportField[]>([]);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [schemaError, setSchemaError] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (mode !== 'new' || !dirty) return;
+    const handler = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [mode, dirty]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -289,6 +383,47 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const history = useWorkspaceData('imports');
 
   const columns = useMemo(() => sourceColumns(payload, format), [format, payload]);
+  const fields = useMemo<readonly ImportField[]>(
+    () =>
+      target === 'category'
+        ? [{ key: 'sku', label: 'Código artículo (SKU)', required: true }, ...categoryFields]
+        : importFields[target],
+    [target, categoryFields],
+  );
+  useEffect(() => {
+    setMapping(
+      Object.fromEntries(columns.map((column) => [column, matchImportField(column, fields)])),
+    );
+    setBatch(null);
+  }, [columns, fields]);
+  useEffect(() => {
+    if (target !== 'category' || mode !== 'new' || step < 1) return;
+    const category = categoryOptions.find((option) => option.templateId === templateId);
+    if (!category) return;
+    const controller = new AbortController();
+    setSchemaLoading(true);
+    setSchemaError('');
+    setCategoryFields([]);
+    fetchCatalogSchema(category.id, { templateId }, controller.signal)
+      .then((schema) => {
+        if (!controller.signal.aborted)
+          setCategoryFields(
+            schema.columns
+              .filter((column) => column.permissions.import)
+              .map((column) => ({ key: column.key, label: column.label })),
+          );
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          setSchemaError(
+            failure instanceof Error ? failure.message : 'No se pudo leer la plantilla.',
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSchemaLoading(false);
+      });
+    return () => controller.abort();
+  }, [target, mode, step >= 1, templateId, categoryOptions]);
   const rowEstimate = useMemo(() => localRowEstimate(payload, format), [format, payload]);
   const categorySelectionReady =
     target !== 'category' || (categoryCode.length > 0 && templateId.length > 0);
@@ -338,6 +473,17 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   }, [batch?.id, mode, resultId]);
 
   const navigate = (next: ImportMode, batchId = '') => {
+    if (next === 'history' && (loading || fileLoading)) return;
+    if (
+      next === 'history' &&
+      mode === 'new' &&
+      dirty &&
+      !window.confirm(
+        'Hay una importación sin confirmar. ¿Descartar la configuración y volver al historial?',
+      )
+    )
+      return;
+    if (next !== 'new') setDirty(false);
     setMode(next);
     setResultId(batchId);
     const url = new URL(window.location.href);
@@ -354,6 +500,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   };
 
   const reset = () => {
+    setDirty(false);
     setPayload(format === 'csv' ? csvExamples[target] : '[]');
     setFileName(`${target}.${format}`);
     setIdempotencyKey(newKey(target));
@@ -368,6 +515,12 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   };
 
   const changeTarget = (value: ImportTarget) => {
+    if (
+      dirty &&
+      !window.confirm('Cambiar el destino sustituirá el archivo y su mapeo. ¿Continuar?')
+    )
+      return;
+    setDirty(false);
     setTarget(value);
     setPayload(format === 'csv' ? csvExamples[value] : '[]');
     setFileName(`${value}.${format}`);
@@ -375,21 +528,17 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     setBatch(null);
   };
 
-  const changeFormat = (value: ImportFormat) => {
-    setFormat(value);
-    setPayload(value === 'csv' ? csvExamples[target] : '[]');
-    setFileName(`${target}.${value}`);
-    setIdempotencyKey(newKey(target));
-    setBatch(null);
-  };
-
-  const loadFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const loadFile = async (file: File) => {
+    if (!canExecute || fileLoading) return;
+    if (!/\.(xlsx|csv)$/iu.test(file.name)) {
+      setError('Selecciona un archivo XLSX o CSV.');
+      return;
+    }
     if (file.size > 2_000_000) {
       setError('El archivo supera el límite de 2 MB para esta vista previa.');
       return;
     }
+    setFileLoading(true);
     try {
       const lowerName = file.name.toLocaleLowerCase();
       const nextFormat: ImportFormat =
@@ -398,9 +547,10 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
         ? JSON.stringify(await readFirstXlsxWorksheet(file))
         : await file.text();
       if (new TextEncoder().encode(nextPayload).byteLength > 2_000_000) {
-        setError('La primera hoja supera el límite de 2 MB después de convertirla a JSON.');
+        setError('La primera hoja supera el límite de 2 MB para validar la carga.');
         return;
       }
+      setDirty(true);
       setPayload(nextPayload);
       setFileName(file.name);
       setFormat(nextFormat);
@@ -410,27 +560,27 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     } catch (fileError) {
       setError(fileError instanceof Error ? fileError.message : 'No fue posible leer el archivo.');
     } finally {
-      event.target.value = '';
+      setFileLoading(false);
     }
   };
 
   const validatePreview = async (): Promise<ImportBatchDto | null> => {
     setError(null);
     let records: unknown;
-    if (format === 'json') {
-      try {
-        records = JSON.parse(payload);
-      } catch {
-        setError('El contenido JSON no tiene una sintaxis válida.');
-        return null;
-      }
+    try {
+      records = mapImportRecords(parseImportSource(payload, format), mapping, fields);
+      if (target === 'category' && Object.values(mapping).filter(Boolean).length < 2)
+        throw new Error('Mapea el SKU y al menos un atributo de la plantilla.');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo leer la hoja.');
+      return null;
     }
     const parsed = previewImportSchema.safeParse({
       target,
-      format,
+      format: 'json',
       idempotencyKey,
       ...(target === 'category' ? { categoryCode, templateId } : {}),
-      ...(format === 'csv' ? { csv: payload } : { records }),
+      records,
     });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'La carga no es válida.');
@@ -531,7 +681,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                 'Confirma las filas válidas y corrige después las filas rechazadas.',
               ]
         }
-        dataSource="La vista previa, idempotencia, filas y confirmación se almacenan en el backend."
+        dataSource="Los lotes, sus filas y resultados se guardan en el PIM."
         limitation="La confirmación es parcial por fila para todos los destinos: las filas válidas se persisten y las rechazadas conservan su detalle. En atributos por categoría solo se aceptan SKU existentes, una categoría con plantilla activa y columnas importables para tu rol."
       />
 
@@ -684,20 +834,27 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       <option value="homologs">Homólogos</option>
                       <option value="oem">Códigos OEM</option>
                     </Select>
-                    <Select
-                      label="Formato"
-                      value={format}
-                      disabled={!canExecute}
-                      onChange={(event) => changeFormat(event.target.value as ImportFormat)}
-                    >
-                      <option value="csv">CSV</option>
-                      <option value="json">JSON</option>
-                    </Select>
                   </div>
-                  <label className="grid min-h-40 cursor-pointer place-items-center rounded-xl border border-dashed bg-slate-50 p-6 text-center">
+                  <label
+                    className={cn(
+                      'grid min-h-40 cursor-pointer place-items-center rounded-xl border border-dashed p-6 text-center',
+                      dragging ? 'border-primary bg-orange-50' : 'bg-slate-50',
+                    )}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (canExecute) setDragging(true);
+                    }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setDragging(false);
+                      const file = event.dataTransfer.files[0];
+                      if (file) void loadFile(file);
+                    }}
+                  >
                     <span>
                       <UploadCloud className="mx-auto size-9 text-primary" aria-hidden="true" />
-                      <strong className="mt-3 block">Arrastra un archivo XLSX, CSV o JSON</strong>
+                      <strong className="mt-3 block">Arrastra un archivo XLSX o CSV</strong>
                       <small className="mt-1 block text-muted-foreground">
                         Máximo 2 MB · el archivo no crea ni activa SKU.
                       </small>
@@ -707,25 +864,45 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     </span>
                     <input
                       type="file"
-                      accept=".xlsx,.csv,.json,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      aria-label="Archivo de importación"
                       disabled={!canExecute}
-                      onChange={(event) => void loadFile(event)}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void loadFile(file);
+                        event.target.value = '';
+                      }}
                       className="sr-only"
                     />
                   </label>
-                  <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                    Contenido del archivo
-                    <textarea
-                      className="min-h-36 w-full rounded-md border bg-white p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-cdr-ink"
-                      value={payload}
-                      disabled={!canExecute}
-                      onChange={(event) => {
-                        setPayload(event.target.value);
-                        setBatch(null);
-                      }}
-                      spellCheck={false}
-                    />
-                  </label>
+                  {fileLoading ? (
+                    <p role="status" className="text-sm">
+                      Leyendo archivo…
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Archivo: <strong>{fileName}</strong>
+                  </p>
+                  <details className="rounded-lg border p-3">
+                    <summary className="cursor-pointer text-xs font-semibold">
+                      Ver contenido del archivo
+                    </summary>
+                    <label className="mt-3 grid gap-1.5 text-xs font-semibold text-muted-foreground">
+                      Contenido del archivo
+                      <textarea
+                        className="min-h-36 w-full rounded-md border bg-white p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-cdr-ink"
+                        value={payload}
+                        disabled={!canExecute}
+                        onChange={(event) => {
+                          setDirty(true);
+                          setPayload(event.target.value);
+                          setIdempotencyKey(newKey(target));
+                          setBatch(null);
+                        }}
+                        spellCheck={false}
+                      />
+                    </label>
+                  </details>
                 </div>
               ) : null}
 
@@ -735,7 +912,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     <div className="border-b p-4">
                       <h3 className="font-semibold">SKU e identidad del lote</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        El contrato identifica registros existentes; no crea identidad maestra.
+                        La carga completa información de productos y grupos existentes.
                       </p>
                     </div>
                     <div className="grid gap-3 p-4 sm:grid-cols-2">
@@ -758,7 +935,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       <div className="rounded-lg border p-3">
                         <small className="text-muted-foreground">Identificador</small>
                         <strong className="mt-1 block text-sm">
-                          {target === 'category' ? 'sku' : 'unifiedCode'}
+                          {target === 'category' ? 'Código artículo (SKU)' : 'Código unificador'}
                         </strong>
                       </div>
                     </div>
@@ -777,6 +954,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                           const selected = categoryOptions.find(
                             (category) => category.templateId === selectedTemplateId,
                           );
+                          setDirty(true);
+                          setIdempotencyKey(newKey(target));
                           setTemplateId(selectedTemplateId);
                           setCategoryCode(selected?.slug ?? '');
                           setBatch(null);
@@ -799,7 +978,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       </p>
                     )}
                     <div className="mt-4 rounded-lg bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
-                      La API validará la identidad de cada fila y que el SKU pertenezca a la
+                      El sistema validará la identidad de cada fila y que el SKU pertenezca a la
                       variante elegida en el paso Validación.
                     </div>
                   </Card>
@@ -812,8 +991,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     <div className="border-b p-4">
                       <h3 className="font-semibold">Mapeo de columnas · {targetLabels[target]}</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        El contrato actual acepta nombres exactos; no persiste un mapeo
-                        configurable.
+                        Asigna cada encabezado a un campo del PIM. Las columnas sin asignar se
+                        omiten antes de validar.
                       </p>
                     </div>
                     <div className="overflow-x-auto">
@@ -822,16 +1001,39 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                           <tr>
                             <th className="px-4 py-3">Columna del archivo</th>
                             <th className="px-4 py-3">Atributo destino</th>
-                            <th className="px-4 py-3">Modo</th>
+                            <th className="px-4 py-3">Estado</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {columns.map((column) => (
                             <tr key={column}>
                               <td className="px-4 py-3 font-semibold">{column}</td>
-                              <td className="px-4 py-3">{column}</td>
                               <td className="px-4 py-3">
-                                <StatusBadge tone="info">Contrato exacto</StatusBadge>
+                                <select
+                                  className="h-9 w-full rounded-md border bg-white px-2 text-xs"
+                                  aria-label={`Destino de ${column}`}
+                                  value={mapping[column] ?? ''}
+                                  disabled={loading || schemaLoading || !canExecute}
+                                  onChange={(event) => {
+                                    setDirty(true);
+                                    setMapping({ ...mapping, [column]: event.target.value });
+                                    setBatch(null);
+                                    setIdempotencyKey(newKey(target));
+                                  }}
+                                >
+                                  <option value="">No importar esta columna</option>
+                                  {fields.map((field) => (
+                                    <option key={field.key} value={field.key}>
+                                      {field.label}
+                                      {field.required ? ' · obligatorio' : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="px-4 py-3">
+                                <StatusBadge tone={mapping[column] ? 'success' : 'neutral'}>
+                                  {mapping[column] ? 'Asignada' : 'Se omite'}
+                                </StatusBadge>
                               </td>
                             </tr>
                           ))}
@@ -839,10 +1041,20 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       </table>
                     </div>
                   </Card>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-950">
-                    No se inventa un mapeo visual: cambiar nombres de columnas requiere un contrato
-                    backend que aún no existe.
-                  </div>
+                  {schemaLoading ? (
+                    <p role="status" className="text-xs">
+                      Leyendo atributos de la plantilla…
+                    </p>
+                  ) : null}
+                  {schemaError ? (
+                    <p role="alert" className="text-xs text-red-700">
+                      {schemaError}
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    {Object.values(mapping).filter(Boolean).length} de {columns.length} columnas
+                    asignadas. Los campos obligatorios se revisan antes de crear la vista previa.
+                  </p>
                 </div>
               ) : null}
 
@@ -854,8 +1066,19 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       <div className="border-b p-4">
                         <h3 className="font-semibold">Validación por registro</h3>
                         <p className="text-xs text-muted-foreground">
-                          Respuesta real de la vista previa persistida.
+                          Revisa los errores y advertencias antes de confirmar.
                         </p>
+                      </div>
+                      <div className="flex justify-end border-b p-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!batch.rows.some((row) => !row.valid || row.warnings.length)}
+                          onClick={() => downloadImportErrors(batch)}
+                        >
+                          <Download className="size-3.5" />
+                          Descargar errores y advertencias
+                        </Button>
                       </div>
                       <BatchRowsTable batch={batch} />
                     </Card>
@@ -885,7 +1108,6 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       ['Registros', String(batch.totalRows)],
                       ['Válidos', String(batch.validRows)],
                       ['Rechazados', String(batch.invalidRows)],
-                      ['Clave de idempotencia', batch.idempotencyKey],
                     ].map(([label, value]) => (
                       <div
                         key={label}
@@ -924,6 +1146,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   disabled={
                     !canExecute ||
                     loading ||
+                    fileLoading ||
+                    (step === 2 && (schemaLoading || !!schemaError)) ||
                     !payload.trim() ||
                     (step >= 1 && !categorySelectionReady)
                   }
@@ -971,14 +1195,24 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     Lote {batch.id} · creado {new Date(batch.createdAt).toLocaleString('es-PE')}
                   </p>
                 </div>
-                {batch.status === 'previewed' ? (
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    onClick={() => void confirm()}
-                    disabled={!canExecute || loading || batch.validRows === 0}
+                    variant="outline"
+                    disabled={!batch.rows.some((row) => !row.valid || row.warnings.length)}
+                    onClick={() => downloadImportErrors(batch)}
                   >
-                    {loading ? 'Confirmando…' : 'Confirmar lote'}
+                    <Download className="size-3.5" />
+                    Descargar errores y advertencias
                   </Button>
-                ) : null}
+                  {batch.status === 'previewed' ? (
+                    <Button
+                      onClick={() => void confirm()}
+                      disabled={!canExecute || loading || batch.validRows === 0}
+                    >
+                      {loading ? 'Confirmando…' : 'Confirmar lote'}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
               <BatchRowsTable batch={batch} />
               <div className="border-t bg-blue-50 px-5 py-3 text-xs leading-relaxed text-blue-950">

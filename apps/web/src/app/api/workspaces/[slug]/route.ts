@@ -14,9 +14,11 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
       NextResponse.json({ message: 'El módulo solicitado no es válido.' }, { status: 400 }),
     );
   }
-  const parsedQuery = workspaceQuerySchema.safeParse(
-    Object.fromEntries(new URL(request.url).searchParams.entries()),
-  );
+  const searchParams = new URL(request.url).searchParams;
+  const parsedQuery = workspaceQuerySchema.safeParse({
+    ...Object.fromEntries(searchParams.entries()),
+    ...(searchParams.has('field') ? { field: searchParams.getAll('field') } : {}),
+  });
   if (!parsedQuery.success) {
     return securePrivateResponse(
       NextResponse.json(

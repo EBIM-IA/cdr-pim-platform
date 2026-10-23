@@ -300,6 +300,11 @@ describe('QualitySecondaryWorkspace', () => {
       { expectedAttributes: ['diametro'] },
       expect.any(AbortSignal),
     );
+    expect(screen.getByText('Valor actual')).toBeInTheDocument();
+    expect(screen.getByText('20 mm')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aplicar seleccionados' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Aceptar Diámetro' }));
+    expect(screen.getByText('Aceptada · pendiente de aplicar')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar seleccionados' }));
 
     await waitFor(() =>
@@ -312,6 +317,56 @@ describe('QualitySecondaryWorkspace', () => {
     expect(
       await screen.findByText(/1 atributo fue aplicado mediante una confirmación humana y atómica/),
     ).toBeInTheDocument();
+  });
+
+  it('shows real document evidence and discards a candidate locally without changing the catalog', async () => {
+    render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
+    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
+      target: { value: product.id },
+    });
+    await screen.findByText(asset.filename);
+    fireEvent.click(screen.getByRole('button', { name: 'Extraer candidatos' }));
+    await screen.findByText('Confianza 91%');
+    fireEvent.click(screen.getByRole('button', { name: 'Evidencia' }));
+    expect(screen.getByRole('dialog', { name: 'Evidencia de la sugerencia' })).toHaveTextContent(
+      'no incluye una cita ni una ubicación',
+    );
+    expect(screen.getByRole('link', { name: 'Abrir documento de origen' })).toHaveAttribute(
+      'href',
+      `/assets/${asset.id}`,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar configuración' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rechazar Diámetro' }));
+    expect(screen.getByText('Descartada en esta revisión')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aplicar seleccionados' })).toBeDisabled();
+    expect(mocks.patchProductAttributes).not.toHaveBeenCalled();
+  });
+
+  it('edits and compares a commercial draft locally and copies the edited text', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
+    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
+      target: { value: product.id },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
+    await screen.findByText('Propuesta comercial verificable.');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar propuesta' }));
+    fireEvent.change(screen.getByLabelText('Borrador comercial'), {
+      target: { value: 'Borrador revisado por la persona.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar borrador local' }));
+    expect(screen.getByText('Borrador local editado')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('Borrador revisado por la persona.'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Comparar versiones' }));
+    const comparison = screen.getByRole('dialog', { name: 'Comparación de versiones' });
+    expect(comparison).toHaveTextContent('Propuesta comercial verificable.');
+    expect(comparison).toHaveTextContent('Borrador revisado por la persona.');
+    expect(mocks.generateCommercialProposal).toHaveBeenCalledTimes(1);
+    expect(mocks.patchProductAttributes).not.toHaveBeenCalled();
   });
 
   it('aborts an in-flight commercial generation from the visible cancel control', async () => {

@@ -121,10 +121,12 @@ describe('ReferenceWorkspace report views', () => {
     render(<ReferenceWorkspace definition={moduleDefinitions.catalogs} />);
 
     expect(workspaceData.useWorkspaceData).toHaveBeenLastCalledWith('catalogs', {});
-    expect(screen.getByRole('heading', { name: 'Catálogos de productos' })).toBeVisible();
-    expect(screen.getByText('Capacidad visible, todavía no operativa')).toBeVisible();
-    expect(screen.getByText('Cargar catálogo PDF')).toBeVisible();
-    expect(screen.getByText('Compartir catálogo')).toBeVisible();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Catálogos de productos' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Nuevo catálogo PDF' })).toBeDisabled();
+    expect(screen.getByRole('columnheader', { name: 'Vigencia desde' })).toBeVisible();
+    expect(
+      screen.getByText('El registro y mantenimiento de catálogos PDF está pendiente de habilitar.'),
+    ).toBeVisible();
+    expect(screen.getByRole('table')).toBeInTheDocument();
   });
 });

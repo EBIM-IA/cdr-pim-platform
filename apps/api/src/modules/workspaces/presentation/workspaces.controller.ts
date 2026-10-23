@@ -30,6 +30,28 @@ export class WorkspacesController {
   @ApiOperation({ summary: 'Get one live operational workspace projection' })
   @ApiParam({ name: 'slug', enum: workspaceSlugSchema.options })
   @ApiQuery({ name: 'report', required: false, enum: reportFormatSchema.options })
+  @ApiQuery({ name: 'categoryId', required: false, type: String })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    type: String,
+    description: 'Inclusive UTC date, YYYY-MM-DD',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    type: String,
+    description: 'Inclusive UTC date, YYYY-MM-DD',
+  })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiQuery({
+    name: 'field',
+    required: false,
+    type: [String],
+    description: 'Fields for a personal products report layout',
+  })
   @ApiOkResponse({ schema: openApiSchema(workspaceSchema) })
   async findOne(
     @Param('slug', new ZodValidationPipe(workspaceSlugSchema)) slug: WorkspaceSlug,

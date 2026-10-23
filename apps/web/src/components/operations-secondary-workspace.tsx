@@ -44,6 +44,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
+import { SettingsParameterCatalog } from '@/components/settings-parameter-catalog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -950,13 +951,7 @@ const statusLabels: Record<CodeAffixStatus, string> = {
   rejected: 'Rechazado',
 };
 
-function SettingsSurface({
-  workspace,
-  definition,
-}: {
-  workspace: WorkspaceDto;
-  definition: ViewDefinition;
-}) {
+function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
   const [catalog, setCatalog] = useState<SettingsCatalog>('Prefijos y sufijos');
   const [rules, setRules] = useState<CodeAffixDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1142,15 +1137,7 @@ function SettingsSurface({
         </div>
       </Card>
       {catalog !== 'Prefijos y sufijos' ? (
-        <Card className="p-5">
-          <h3 className="text-base font-semibold text-cdr-ink">{catalog}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Este catálogo todavía no tiene un contrato de mantenimiento aprobado.
-          </p>
-          <div className="mt-4">
-            <EmptyCapability definition={definition} />
-          </div>
-        </Card>
+        <SettingsParameterCatalog catalog={catalog} />
       ) : (
         <div className="min-w-0 space-y-4">
           <Card className="p-5">
@@ -2023,6 +2010,8 @@ export function OperationsSecondaryWorkspace({
     );
   }
 
+  if (view === 'settings') return <SettingsSurface workspace={workspace} />;
+
   const showRows = workspace.rows.length > 0;
   const showMetrics = [
     'channels',
@@ -2091,8 +2080,6 @@ export function OperationsSecondaryWorkspace({
           <AuditSurface workspace={workspace} />
         ) : view === 'searches' ? (
           <SearchReportSurface workspace={workspace} definition={definition} />
-        ) : view === 'settings' ? (
-          <SettingsSurface workspace={workspace} definition={definition} />
         ) : (
           <EmptyCapability definition={definition} />
         )

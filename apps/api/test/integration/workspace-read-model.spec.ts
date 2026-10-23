@@ -3,7 +3,11 @@ import { workspaceSchema, workspaceSlugSchema } from '@cdr/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PostgresWorkspaceReadModel } from '../../src/modules/workspaces/infrastructure/postgres-workspace-read-model';
-import { Role, type AuthenticatedActor } from '../../src/modules/identity/domain/entities/role';
+import {
+  Role,
+  capabilitiesForRole,
+  type AuthenticatedActor,
+} from '../../src/modules/identity/domain/entities/role';
 import { type TestDatabase, createTestDatabase, testDatabaseUrl } from './database.helper';
 
 const PRODUCT_ID = '10000000-0000-4000-8000-000000000001';
@@ -318,13 +322,13 @@ describe('PostgresWorkspaceReadModel', () => {
     expect(publication.rows[0]?.values).toMatchObject({
       category: 'Rodamientos',
       template: 'Rodamiento',
-      eligibility: 'No publicable',
+      eligibility: 'Requisitos incompletos',
       missing: expect.stringContaining('Diámetro interior'),
     });
     expect(publication.actions).toContainEqual(
       expect.objectContaining({
         id: 'configure-publication-fields',
-        availability: 'blocked',
+        availability: 'supported',
       }),
     );
     expect(reports.metrics).toContainEqual({
@@ -495,10 +499,21 @@ describe('PostgresWorkspaceReadModel', () => {
       currentAttributes: 1,
     });
 
-    expect(period.rows.map((row) => row.values)).toEqual([
-      { year: 2026, month: 'Noviembre', products: 1 },
-      { year: 2026, month: 'Octubre', products: 1 },
-    ]);
+    expect(period.rows).toHaveLength(14);
+    expect(period.rows[9]?.values).toEqual({
+      month: 'OCTUBRE',
+      year_2024: null,
+      year_2025: null,
+      year_2026: 1,
+    });
+    expect(period.rows[10]?.values).toEqual({
+      month: 'NOVIEMBRE',
+      year_2024: null,
+      year_2025: null,
+      year_2026: 1,
+    });
+    expect(period.rows[12]?.values.year_2026).toBe(1);
+    expect(period.rows[13]?.values.year_2026).toBe(2);
     expect(period.notices).toContainEqual(
       expect.objectContaining({ id: 'period-report-definition' }),
     );
@@ -531,7 +546,7 @@ describe('PostgresWorkspaceReadModel', () => {
       format: 'integer',
     });
     expect(beforePublication.rows[0]?.values).toMatchObject({
-      eligibility: 'No publicable',
+      eligibility: 'Requisitos incompletos',
       missing: 'Ficha técnica (FT)',
     });
     expect(beforeReports.metrics).toContainEqual({
@@ -574,7 +589,7 @@ describe('PostgresWorkspaceReadModel', () => {
       format: 'integer',
     });
     expect(publication.rows[0]?.values).toMatchObject({
-      eligibility: 'Publicable',
+      eligibility: 'Requisitos completos',
       missing: '—',
     });
     expect(reports.metrics).toContainEqual({
@@ -583,5 +598,274 @@ describe('PostgresWorkspaceReadModel', () => {
       value: 100,
       format: 'integer',
     });
+  });
+
+  it('returns all seven report formats and eight indicators without inventing telemetry', async () => {
+    const summary = await readModel.read('reports', actor);
+    expect(summary.reportFormats).toHaveLength(7);
+    expect(summary.reportFormats).toContainEqual(
+      expect.objectContaining({ format: 'products_by_category', totalRows: 1, columnCount: 13 }),
+    );
+    expect(summary.reportFormats).toContainEqual(
+      expect.objectContaining({ format: 'general_results', totalRows: 0 }),
+    );
+    expect(summary.reportIndicators).toHaveLength(8);
+    for (const key of ['duplicates', 'searches', 'integrations'])
+      expect(summary.reportIndicators).toContainEqual(
+        expect.objectContaining({ key, value: null, status: 'unavailable' }),
+      );
+    expect(summary.reportCategories).toContainEqual({
+      id: CATEGORY_ID,
+      name: 'Rodamientos',
+      parentId: null,
+      path: 'rodamientos',
+    });
+    expect(summary.reportFields).toContainEqual({
+      id: 'attribute:diametro_interior',
+      label: 'Diámetro interior',
+      type: 'number',
+    });
+    for (const format of summary.reportFormats!) {
+      const report = await readModel.read('reports', actor, { report: format.format });
+      expect(report.totalRows).toBe(format.totalRows);
+      expect(report.columns).toHaveLength(format.columnCount);
+      expect(() => workspaceSchema.parse(report)).not.toThrow();
+    }
+  });
+
+  it('returns the approved role policy and pages publication without claiming channel publication', async () => {
+    const administrator = { ...actor, roles: [Role.Administrator] };
+    const administration = await readModel.read('administration', administrator);
+    expect(administration.roleCapabilities).toEqual(
+      [Role.Administrator, Role.Purchasing, Role.Sales].map((role) => ({
+        role,
+        capabilities: capabilitiesForRole(role),
+      })),
+    );
+    await database.sql`INSERT INTO products (id,sku,name,status) SELECT gen_random_uuid(), 'EXTRA-' || LPAD(n::text,3,'0'), 'Extra product ' || n, 'draft' FROM generate_series(1,104) n`;
+    const all = await readModel.read('publication', administrator);
+    expect(all.totalRows).toBe(105);
+    expect(all.rows).toHaveLength(105);
+    const page = await readModel.read('publication', administrator, { page: 2, pageSize: 100 });
+    expect(page.totalRows).toBe(105);
+    expect(page.rows).toHaveLength(5);
+    expect(all.rows.every((row) => row.values.publicationState === 'Canal no conectado')).toBe(
+      true,
+    );
+    expect(all.rows.every((row) => row.values.eligibility === 'Requisitos incompletos')).toBe(true);
+    expect(() => workspaceSchema.parse(all)).not.toThrow();
+  });
+
+  it('filters descendants and inclusive UTC dates, propagates unifier changes, and pages unique SKUs', async () => {
+    const leafId = '30000000-0000-4000-8000-000000000002';
+    const secondProductId = '10000000-0000-4000-8000-000000000002';
+    const untouchedProductId = '10000000-0000-4000-8000-000000000003';
+    await database.sql`INSERT INTO catalog_categories (id,parent_id,slug,name,path,active) VALUES (${leafId},${CATEGORY_ID},'rigidos','Rígidos','rodamientos/rigidos',true)`;
+    await database.sql`UPDATE attribute_templates SET category_id=${leafId} WHERE id=${TEMPLATE_ID}`;
+    await database.sql`INSERT INTO products (id,sku,name,status) VALUES (${secondProductId},'SKU-002','Segundo rodamiento','in_review'),(${untouchedProductId},'SKU-003','Sin cambios','draft')`;
+    await database.sql`INSERT INTO product_template_assignments (product_id,template_id) VALUES (${secondProductId},${TEMPLATE_ID}),(${untouchedProductId},${TEMPLATE_ID})`;
+    await database.sql`INSERT INTO equivalence_group_members (group_id,product_id,role) VALUES (${GROUP_ID},${secondProductId},'member')`;
+    await database.sql`INSERT INTO audit_entries (id,resource_type,resource_id,action,actor_id,source,correlation_id,occurred_at,changes) VALUES (${AUDIT_APPLICATION_ID},'group_application',${APPLICATION_ID},'updated',${actor.id},'api','report-last-second','2026-10-31T23:59:59.999Z','{}'::jsonb),(${AUDIT_NOVEMBER_ID},'product',${PRODUCT_ID},'updated',${actor.id},'api','report-next-month','2026-11-01T00:00:00Z','{}'::jsonb)`;
+    await database.sql`INSERT INTO audit_change_items (id,audit_entry_id,field_name,before_value,after_value) VALUES ('91000000-0000-4000-8000-000000000002',${AUDIT_APPLICATION_ID},'make','"Toyota"'::jsonb,'"Lexus"'::jsonb)`;
+    const query = {
+      report: 'general_results' as const,
+      categoryId: CATEGORY_ID,
+      from: '2026-10-01',
+      to: '2026-10-31',
+      pageSize: 1,
+    };
+    const [first, second, empty, period] = await Promise.all([
+      readModel.read('reports', actor, { ...query, page: 1 }),
+      readModel.read('reports', actor, { ...query, page: 2 }),
+      readModel.read('reports', actor, { ...query, page: 3 }),
+      readModel.read('reports', actor, { ...query, report: 'period_results', pageSize: 100 }),
+    ]);
+    expect(first.totalRows).toBe(2);
+    expect(second.totalRows).toBe(2);
+    expect(empty.totalRows).toBe(2);
+    expect(first.rows[0]?.values.sku).toBe('SKU-001');
+    expect(second.rows[0]?.values.sku).toBe('SKU-002');
+    expect(empty.rows).toEqual([]);
+    expect(period.rows).toHaveLength(14);
+    expect(period.rows[9]?.values).toEqual({
+      month: 'OCTUBRE',
+      year_2024: null,
+      year_2025: null,
+      year_2026: 2,
+    });
+    expect(period.rows[13]?.values.year_2026).toBe(2);
+    const edited = await readModel.read('reports', actor, {
+      ...query,
+      report: 'edited_information',
+      pageSize: 100,
+    });
+    expect(edited.totalRows).toBe(2);
+    expect(edited.rows.map((row) => row.values.sku).sort()).toEqual(['SKU-001', 'SKU-002']);
+    expect(edited.rows[0]?.values).toMatchObject({
+      field: 'make',
+      before: 'Toyota',
+      after: 'Lexus',
+      reason: null,
+    });
+    const none = await readModel.read('reports', actor, {
+      ...query,
+      from: '2026-10-01',
+      to: '2026-10-30',
+    });
+    expect(none.totalRows).toBe(0);
+    const catalog = await readModel.read('reports', actor, {
+      report: 'products_by_category',
+      categoryId: CATEGORY_ID,
+      pageSize: 1,
+      page: 3,
+    });
+    expect(catalog.totalRows).toBe(3);
+    expect(catalog.rows[0]?.values.sku).toBe('SKU-003');
+    const search = await readModel.read('reports', actor, { ...query, q: 'SKU-002' });
+    expect(search.totalRows).toBe(1);
+    expect(search.rows[0]?.values.sku).toBe('SKU-002');
+  });
+
+  it('uses real document metadata, returns typed custom fields and leaves channel evidence unavailable', async () => {
+    await database.sql`INSERT INTO product_attribute_values (product_id,attribute_definition_id,value_number,source,confidence,version) VALUES (${PRODUCT_ID},${ATTRIBUTE_ID},25,'manual',1,1)`;
+    const before = await readModel.read('reports', actor, { report: 'documents_by_sku' });
+    expect(before.rows[0]?.values).toMatchObject({
+      FT: 'Faltante',
+      FOTO: 'No aplica',
+      documents: '0/1',
+      lastUpload: null,
+    });
+    await database.sql`INSERT INTO product_assets (id,product_id,kind,type_code,original_filename,object_key,bucket,mime_type,size_bytes,checksum_sha256,source,uploaded_by,uploaded_at) VALUES (${ASSET_ID},${PRODUCT_ID},'document','FT','SKU-001__FT.pdf','test/ft.pdf','test','application/pdf',128,'test-checksum','manual',${actor.id},'2026-10-31T23:59:59.999Z')`;
+    const documents = await readModel.read('reports', actor, {
+      report: 'documents_by_sku',
+      from: '2026-10-31',
+      to: '2026-10-31',
+    });
+    expect(documents.rows[0]?.values).toMatchObject({
+      FT: 'Cargado (1)',
+      documents: '1/1',
+      lastUpload: '2026-10-31T23:59:59.999Z',
+    });
+    const earlier = await readModel.read('reports', actor, {
+      report: 'documents_by_sku',
+      to: '2026-10-30',
+    });
+    expect(earlier.totalRows).toBe(0);
+    const custom = await readModel.read('reports', actor, {
+      report: 'products_by_category',
+      field: ['sku', 'attribute:diametro_interior', 'documents'],
+    });
+    expect(custom.rows[0]?.values).toEqual({
+      sku: 'SKU-001',
+      'attribute:diametro_interior': 25,
+      documents: '1/1',
+    });
+    expect(() => workspaceSchema.parse(custom)).not.toThrow();
+    await expect(
+      readModel.read('reports', actor, {
+        report: 'products_by_category',
+        field: ['attribute:unknown'],
+      }),
+    ).rejects.toThrow('Unknown report field');
+    const publication = await readModel.read('reports', actor, { report: 'publication_by_sku' });
+    expect(publication.rows[0]?.values).toMatchObject({
+      publication: null,
+      publishedAttributes: '1/1',
+      commercialDescription: null,
+    });
+    expect(() => workspaceSchema.parse(publication)).not.toThrow();
+    await database.sql`UPDATE template_attribute_assignments SET publishable=false WHERE template_id=${TEMPLATE_ID} AND attribute_definition_id=${ATTRIBUTE_ID}`;
+    const unselected = await readModel.read('reports', actor, { report: 'publication_by_sku' });
+    expect(unselected.rows[0]?.values).toMatchObject({
+      publishedAttributes: '0/1',
+      publication: null,
+    });
+    const unchangedCompleteness = await readModel.read('reports', actor, {
+      report: 'products_by_category',
+      field: ['completeness'],
+    });
+    expect(unchangedCompleteness.rows[0]?.values.completeness).toBe(100);
+  });
+
+  it('pivots the client period layout with null history, real audit totals, extra years and pagination', async () => {
+    const blank = await readModel.read('reports', actor, { report: 'period_results' });
+    expect(blank.columns.map((column) => column.label)).toEqual([
+      'MES',
+      'ITEMS ACT 2024',
+      'ITEMS ACT 2025',
+      'ITEMS ACT 2026',
+    ]);
+    expect(blank.totalRows).toBe(14);
+    expect(blank.rows).toHaveLength(14);
+    expect(blank.rows.map((row) => row.values.month)).toEqual([
+      'ENERO',
+      'FEBRERO',
+      'MARZO',
+      'ABRIL',
+      'MAYO',
+      'JUNIO',
+      'JULIO',
+      'AGOSTO',
+      'SEPTIEMBRE',
+      'OCTUBRE',
+      'NOVIEMBRE',
+      'DICIEMBRE',
+      'PROMEDIO',
+      'TOTAL',
+    ]);
+    expect(
+      blank.rows.every(
+        (row) =>
+          row.values.year_2024 === null &&
+          row.values.year_2025 === null &&
+          row.values.year_2026 === null,
+      ),
+    ).toBe(true);
+    const metadata = await readModel.read('reports', actor);
+    expect(metadata.reportFormats).toContainEqual(
+      expect.objectContaining({ format: 'period_results', totalRows: 14, columnCount: 4 }),
+    );
+    await database.sql`INSERT INTO audit_entries (id,resource_type,resource_id,action,actor_id,source,correlation_id,occurred_at,changes) VALUES (${AUDIT_ATTRIBUTE_ID},'product',${PRODUCT_ID},'updated',${actor.id},'api','period-extra-year-jan','2030-01-10T12:00:00Z','{}'::jsonb),(${AUDIT_APPLICATION_ID},'group_application',${APPLICATION_ID},'updated',${actor.id},'api','period-extra-year-jan-repeat','2030-01-11T12:00:00Z','{}'::jsonb),(${AUDIT_NOVEMBER_ID},'product',${PRODUCT_ID},'updated',${actor.id},'api','period-extra-year-feb','2030-02-10T12:00:00Z','{}'::jsonb)`;
+    const actual = await readModel.read('reports', actor, { report: 'period_results' });
+    expect(actual.columns.map((column) => column.label)).toEqual([
+      'MES',
+      'ITEMS ACT 2024',
+      'ITEMS ACT 2025',
+      'ITEMS ACT 2026',
+      'ITEMS ACT 2030',
+    ]);
+    expect(actual.rows[0]?.values.year_2030).toBe(1);
+    expect(actual.rows[1]?.values.year_2030).toBe(1);
+    expect(actual.rows[2]?.values.year_2030).toBeNull();
+    expect(actual.rows[12]?.values.year_2030).toBe(1);
+    expect(actual.rows[13]?.values.year_2030).toBe(2);
+    const page = await readModel.read('reports', actor, {
+      report: 'period_results',
+      page: 2,
+      pageSize: 12,
+    });
+    expect(page.totalRows).toBe(14);
+    expect(page.rows.map((row) => row.values.month)).toEqual(['PROMEDIO', 'TOTAL']);
+    const filtered = await readModel.read('reports', actor, {
+      report: 'period_results',
+      from: '2022-01-01',
+      to: '2022-12-31',
+    });
+    expect(filtered.columns.map((column) => column.label)).toEqual([
+      'MES',
+      'ITEMS ACT 2022',
+      'ITEMS ACT 2024',
+      'ITEMS ACT 2025',
+      'ITEMS ACT 2026',
+    ]);
+    expect(
+      filtered.rows.every((row) =>
+        Object.entries(row.values)
+          .filter(([key]) => key !== 'month')
+          .every(([, value]) => value === null),
+      ),
+    ).toBe(true);
+    expect(() => workspaceSchema.parse(actual)).not.toThrow();
+    expect(() => workspaceSchema.parse(filtered)).not.toThrow();
   });
 });

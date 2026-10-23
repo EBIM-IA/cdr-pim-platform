@@ -120,6 +120,7 @@ export class UpdateTemplateAttributeUseCase {
       replicable?: boolean;
       searchable?: boolean;
       includeInTechnicalSheet?: boolean;
+      publishable?: boolean;
       position?: number;
       roleAccess?: readonly AttributeRoleAccess[];
       expectedUpdatedAt: string;
@@ -145,6 +146,7 @@ export class UpdateTemplateAttributeUseCase {
       ...(input.includeInTechnicalSheet !== undefined
         ? { includeInTechnicalSheet: input.includeInTechnicalSheet }
         : {}),
+      ...(input.publishable !== undefined ? { publishable: input.publishable } : {}),
       ...(input.position !== undefined ? { position: input.position } : {}),
       ...(input.roleAccess !== undefined ? { roleAccess: input.roleAccess } : {}),
       expectedUpdatedAt: new Date(input.expectedUpdatedAt),

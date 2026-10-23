@@ -12,6 +12,7 @@ import type {
   CatalogGridProduct,
   CatalogWorkbookProduct,
   DynamicCatalogSchema,
+  TemplateAssetRequirement,
 } from '../domain/entities/catalog-schema';
 import type { CatalogWorkbookResult } from '../domain/ports/dynamic-catalog.repository.port';
 import type { UpdatedProductAttribute } from '../application/update-product-attribute.use-case';
@@ -33,6 +34,7 @@ export function toGridSchemaDto(schema: DynamicCatalogSchema): CatalogGridSchema
       replicable: attribute.replicable,
       searchable: attribute.searchable,
       includeInTechnicalSheet: attribute.includeInTechnicalSheet,
+      ...(attribute.publishable !== undefined ? { publishable: attribute.publishable } : {}),
       sourceAuthority: attribute.sourceAuthority,
       position: attribute.position,
       permissions: attribute.permissions,
@@ -93,11 +95,15 @@ export function toProductAttributeSheetDto(input: {
   schema: DynamicCatalogSchema;
   product: CatalogGridProduct;
   completeness?: number | null;
+  assetRequirements?: readonly TemplateAssetRequirement[];
 }): ProductAttributeSheetDto {
   return {
     schema: toGridSchemaDto(input.schema),
     product: toGridProductDto(input.product),
     ...(input.completeness !== undefined ? { completeness: input.completeness } : {}),
+    ...(input.assetRequirements !== undefined
+      ? { assetRequirements: input.assetRequirements.map((requirement) => ({ ...requirement })) }
+      : {}),
   };
 }
 

@@ -1,8 +1,20 @@
-import type { Uuid } from '@cdr/shared';
+import { type Uuid, ValidationError } from '@cdr/shared';
 
 import type { AttributeSourceAuthority, CatalogAttributeDataType } from './catalog-schema';
 
 export type BusinessRole = 'ADMINISTRADOR' | 'COMPRAS' | 'VENTAS';
+
+/** The SKU identifies every published product; other ERP fields remain configurable. */
+export function assertTemplatePublicationSelection(key: string, publishable?: boolean): void {
+  if (
+    publishable === false &&
+    ['codigoarticulo', 'sku'].includes(key.replace(/_/gu, '').toLowerCase())
+  ) {
+    throw new ValidationError('Product identity must remain selected for publication', {
+      attributeKey: key,
+    });
+  }
+}
 
 export interface AttributeRoleAccess {
   readonly role: BusinessRole;
@@ -39,6 +51,7 @@ export interface AdminTemplateAttribute {
   readonly replicable: boolean;
   readonly searchable: boolean;
   readonly includeInTechnicalSheet: boolean;
+  readonly publishable: boolean;
   readonly active: boolean;
   readonly position: number;
   readonly updatedAt: Date;

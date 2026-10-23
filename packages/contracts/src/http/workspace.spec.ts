@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { catalogGridColumnSchema } from './dynamic-catalog';
 import {
   reportFormatSchema,
+  workspaceColumnSchema,
   workspaceQuerySchema,
   workspaceSchema,
   workspaceSlugSchema,
@@ -44,17 +46,60 @@ describe('workspace contract', () => {
     expect(parsed.rows[0]?.values.products).toBe(3);
   });
 
-  it('validates the four supported report projections', () => {
+  it('validates the seven report layouts and summary', () => {
     expect(reportFormatSchema.options).toEqual([
       'summary',
       'attribute_changes',
       'general_results',
       'period_results',
+      'products_by_category',
+      'edited_information',
+      'documents_by_sku',
+      'publication_by_sku',
     ]);
     expect(workspaceQuerySchema.parse({ report: 'general_results' })).toEqual({
       report: 'general_results',
     });
     expect(workspaceQuerySchema.safeParse({ report: 'invented' }).success).toBe(false);
+  });
+
+  it('validates inclusive calendar dates, bounded pagination and repeated custom field selectors', () => {
+    expect(
+      workspaceQuerySchema.parse({
+        report: 'products_by_category',
+        from: '2026-10-01',
+        to: '2026-10-31',
+        page: '2',
+        pageSize: '1000',
+        field: 'sku',
+      }),
+    ).toMatchObject({ page: 2, pageSize: 1000, field: ['sku'] });
+    expect(workspaceQuerySchema.safeParse({ from: '2026-02-30' }).success).toBe(false);
+    expect(workspaceQuerySchema.safeParse({ from: '2026-11-01', to: '2026-10-31' }).success).toBe(
+      false,
+    );
+    expect(workspaceQuerySchema.safeParse({ pageSize: 1001 }).success).toBe(false);
+    expect(workspaceQuerySchema.safeParse({ categoryId: 'not-a-uuid' }).success).toBe(false);
+  });
+
+  it('accepts report attribute selectors for a maximum length definition key and enforces 160 characters', () => {
+    const definitionKey = 'a'.repeat(100);
+    expect(catalogGridColumnSchema.shape.key.parse(definitionKey)).toBe(definitionKey);
+    const reportKey = `attribute:${definitionKey}`;
+    expect(reportKey).toHaveLength(110);
+    expect(
+      workspaceQuerySchema.parse({ report: 'products_by_category', field: [reportKey] }).field,
+    ).toEqual([reportKey]);
+    expect(
+      workspaceColumnSchema.parse({ key: reportKey, label: 'Atributo', type: 'text' }).key,
+    ).toBe(reportKey);
+    for (const length of [160, 161]) {
+      const key = 'a'.repeat(length);
+      expect(workspaceColumnSchema.safeParse({ key, label: 'Atributo' }).success).toBe(
+        length === 160,
+      );
+      expect(workspaceQuerySchema.safeParse({ field: [key] }).success).toBe(length === 160);
+    }
   });
 
   it('requires a reason for blocked actions and an API endpoint for supported ones', () => {

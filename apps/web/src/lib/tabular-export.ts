@@ -22,7 +22,15 @@ export function createCsvText(data: TabularData): string {
 }
 
 function xmlEscape(value: string): string {
-  return value
+  return Array.from(value, (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return (code >= 32 || code === 9 || code === 10 || code === 13) &&
+      code !== 0xfffe &&
+      code !== 0xffff
+      ? character
+      : '';
+  })
+    .join('')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -122,19 +130,31 @@ function joinBytes(parts: readonly Uint8Array[]): Uint8Array {
   return output;
 }
 
-/** Creates a standards-compliant uncompressed XLSX container without a runtime spreadsheet SDK. */
-export function createXlsxBytes(data: TabularData): Uint8Array {
-  const rawSheetName = data.sheetName?.trim() || 'Datos';
-  const sheetName = xmlEscape(
-    Array.from(rawSheetName, (character) => ('\\/*?:[]'.includes(character) ? '-' : character))
-      .join('')
-      .slice(0, 31),
-  );
+/** Creates an OOXML workbook; every report remains a separate worksheet. */
+export function createWorkbookXlsxBytes(sheets: readonly TabularData[]): Uint8Array {
+  if (sheets.length === 0) throw new Error('El libro debe contener al menos una hoja.');
+  const used = new Set<string>();
+  const names = sheets.map((sheet) => {
+    const base =
+      Array.from(sheet.sheetName?.trim() || 'Datos', (character) =>
+        character.charCodeAt(0) < 32 || "\\/*?:[]'".includes(character) ? '-' : character,
+      )
+        .join('')
+        .slice(0, 31) || 'Datos';
+    let name = base;
+    let suffix = 2;
+    while (used.has(name.toLowerCase())) {
+      const ending = ` (${suffix++})`;
+      name = `${base.slice(0, 31 - ending.length)}${ending}`;
+    }
+    used.add(name.toLowerCase());
+    return xmlEscape(name);
+  });
   const files: ZipEntry[] = [
     {
       name: '[Content_Types].xml',
       data: encoder.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`),
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`),
     },
     {
       name: '_rels/.rels',
@@ -144,14 +164,17 @@ export function createXlsxBytes(data: TabularData): Uint8Array {
     {
       name: 'xl/workbook.xml',
       data: encoder.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((name, index) => `<sheet name="${name}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('')}</sheets></workbook>`),
     },
     {
       name: 'xl/_rels/workbook.xml.rels',
       data: encoder.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
     },
-    { name: 'xl/worksheets/sheet1.xml', data: encoder.encode(worksheetXml(data)) },
+    ...sheets.map((sheet, index) => ({
+      name: `xl/worksheets/sheet${index + 1}.xml`,
+      data: encoder.encode(worksheetXml(sheet)),
+    })),
     {
       name: 'xl/styles.xml',
       data: encoder.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -205,6 +228,10 @@ export function createXlsxBytes(data: TabularData): Uint8Array {
   return joinBytes([...localParts, centralDirectory, end]);
 }
 
+export function createXlsxBytes(data: TabularData): Uint8Array {
+  return createWorkbookXlsxBytes([data]);
+}
+
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -231,7 +258,11 @@ export function downloadCsv(data: TabularData, filename: string): void {
 }
 
 export function downloadXlsx(data: TabularData, filename: string): void {
-  const bytes = createXlsxBytes(data);
+  downloadWorkbookXlsx([data], filename);
+}
+
+export function downloadWorkbookXlsx(sheets: readonly TabularData[], filename: string): void {
+  const bytes = createWorkbookXlsxBytes(sheets);
   const buffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buffer).set(bytes);
   downloadBlob(

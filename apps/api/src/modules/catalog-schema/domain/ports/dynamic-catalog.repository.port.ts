@@ -9,6 +9,7 @@ import type {
   DynamicCatalogSchema,
   ProductAttributeCell,
   TemplateAttribute,
+  TemplateAssetRequirement,
 } from '../entities/catalog-schema';
 
 export type AttributeFilterOperator = 'eq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte';
@@ -41,7 +42,7 @@ export interface CatalogWorkbookOptions {
   readonly brand?: string;
   readonly status?: string;
   readonly applicationType?: string;
-  readonly completeness?: 'complete' | 'attention' | 'critical';
+  readonly completeness?: 'complete' | 'attention' | 'critical' | 'incomplete';
   readonly filters: readonly CatalogAttributeFilter[];
   readonly columnFilters?: readonly CatalogWorkbookColumnFilter[];
   readonly sort?: CatalogWorkbookSort;
@@ -134,6 +135,7 @@ export interface DynamicCatalogRepositoryPort {
     schema: DynamicCatalogSchema;
     product: CatalogGridProduct;
     completeness?: number | null;
+    assetRequirements?: readonly TemplateAssetRequirement[];
   } | null>;
   listGrid(options: CatalogGridOptions): Promise<{ items: CatalogGridProduct[]; total: number }>;
   listWorkbook(options: CatalogWorkbookOptions): Promise<CatalogWorkbookResult>;
