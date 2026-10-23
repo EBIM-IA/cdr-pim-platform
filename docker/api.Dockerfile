@@ -55,9 +55,12 @@ USER node
 WORKDIR /app
 COPY --from=qas-seed-build --chown=node:node /output/node_modules ./node_modules
 COPY --from=qas-seed-build --chown=node:node /repo/apps/api/dist-qas-seed ./dist
+COPY --from=qas-seed-build --chown=node:node /repo/apps/api/drizzle ./drizzle
 COPY --from=qas-seed-build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem ./certs/rds-global-bundle.pem
 ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
-CMD ["node", "dist/database/seed-qas-demo.cli.js", "--dry-run"]
+# The migration family keeps its existing default command. Seeding always needs
+# an explicit per-task command override from the QAS maintenance workflow.
+CMD ["node", "dist/database/migrate.cli.js"]
 
 # ---- runtime ---------------------------------------------------------------
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime

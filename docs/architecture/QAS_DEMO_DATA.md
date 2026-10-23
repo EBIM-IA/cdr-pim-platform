@@ -23,10 +23,14 @@ The workflow builds a separate `qas-seed` Docker target, publishes it under
 images keep both the fixture data and the seed command excluded. PRD is not a supported
 target: the task requires `APP_ENV=qas`, TLS and the database CA bundle.
 
-The one-off Fargate task copies the existing QAS migration task's database secret reference,
-network and execution roles into a separate `cdr-pim-qas-demo-seed` family. It does not
-change the migration family or update any service. Its concurrency group is shared with
-QAS promotions. Database credentials remain in Secrets Manager and are never printed.
+The deployed IAM role permits task execution in the existing QAS migration family. The
+one-off Fargate task therefore uses a temporary revision of that family with the database
+secret reference, network, execution roles and original migration command preserved. Only
+that execution receives a seed command override. The workflow restores the original image
+and command afterward, including on errors, and avoids replacing any newer external revision.
+The maintenance image also contains the migrator and SQL files: an interrupted restoration
+cannot make a later default task seed data. No service is updated. Its concurrency group is
+shared with QAS promotions. Database credentials remain in Secrets Manager and are never printed.
 
 ## Preservation and evidence
 

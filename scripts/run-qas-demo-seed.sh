@@ -25,12 +25,55 @@ mkdir -p qas-demo-result
 private_directory=$(mktemp -d)
 task_arn=''
 task_finished=false
+seed_td=''
+restore_needed=false
+restore_migration_definition() {
+  local current_td current_revision seed_revision attempt
+  seed_revision=${seed_td##*:}
+  [[ "$seed_revision" =~ ^[1-9][0-9]*$ ]] || return 1
+  for attempt in 1 2 3 4 5 6; do
+    current_td=$(aws ecs describe-task-definition --task-definition "$family" \
+      --query taskDefinition.taskDefinitionArn --output text) || return 1
+    current_revision=${current_td##*:}
+    if [[ "${current_td%:*}" != "${seed_td%:*}" || ! "$current_revision" =~ ^[1-9][0-9]*$ ]]; then
+      echo 'ECS returned an unexpected migration task definition; restoration remains pending.' >&2
+      return 1
+    fi
+    if [[ "$current_td" == "$seed_td" ]]; then
+      aws ecs register-task-definition --cli-input-json "file://$private_directory/restore.json" \
+        --query 'taskDefinition.taskDefinitionArn' --output text >/dev/null || return 1
+      restore_needed=false
+      echo 'Original migration image and default command restored.'
+      return 0
+    fi
+    if (( current_revision > seed_revision )); then
+      echo 'Another migration revision was registered; preserving that newer configuration.'
+      restore_needed=false
+      return 0
+    fi
+    # The family lookup can lag behind RegisterTaskDefinition. An older revision
+    # is not evidence of a newer external change and must never skip restoration.
+    if (( attempt < 6 )); then
+      echo 'ECS still reports an older migration revision; retrying before restoration.' >&2
+      sleep 2
+    fi
+  done
+  echo 'ECS did not expose the temporary migration revision; restoration remains pending.' >&2
+  return 1
+}
 cleanup() {
+  local exit_status=$?
+  trap - EXIT
   if [[ -n "$task_arn" && "$task_finished" != true ]]; then
     aws ecs stop-task --cluster "$cluster" --task "$task_arn" \
-      --reason 'QAS demo workflow ended before task completion' >/dev/null || true
+      --reason 'QAS demo workflow ended before task completion' >/dev/null || exit_status=1
+    aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task_arn" || exit_status=1
+  fi
+  if [[ "$restore_needed" == true ]]; then
+    restore_migration_definition || exit_status=1
   fi
   rm -rf "$private_directory"
+  exit "$exit_status"
 }
 trap cleanup EXIT
 
@@ -39,6 +82,7 @@ aws ecs describe-task-definition --task-definition "$family" \
 jq -e '
   (.family == "cdr-pim-qas-migrate")
   and (.containerDefinitions | length == 1)
+  and (.containerDefinitions[0].command | join(" ") | contains("dist/database/migrate.cli.js"))
   and ([.containerDefinitions[0].environment[]? | select(.name == "APP_ENV") | .value] == ["qas"])
   and (.containerDefinitions[0].logConfiguration.logDriver == "awslogs")
 ' "$private_directory/base.json" >/dev/null
@@ -48,25 +92,31 @@ log_group=$(jq -r '.containerDefinitions[0].logConfiguration.options["awslogs-gr
 log_prefix=$(jq -r '.containerDefinitions[0].logConfiguration.options["awslogs-stream-prefix"]' "$private_directory/base.json")
 [[ "$log_group" != 'null' && "$log_prefix" != 'null' ]]
 
-# The migration family already has the correct database secret reference, TLS and
-# private network. Only its image and command change; no service is updated.
-jq --arg image "$SEED_IMAGE" --arg mode "--$SEED_MODE" '
-  .family = "cdr-pim-qas-demo-seed"
-  | .containerDefinitions[0].image = $image
-  | .containerDefinitions[0].command = ["node", "dist/database/seed-qas-demo.cli.js", $mode]
-  | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+# The deployed role authorizes RunTask only for the existing migration family.
+# Keep its default command intact; only this execution receives the seed override.
+# The maintenance image also ships the migrator, so an interrupted restore cannot
+# make a future default migration task seed data or start a serving API.
+jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
         .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
-' "$private_directory/base.json" > "$private_directory/seed.json"
+' "$private_directory/base.json" > "$private_directory/restore.json"
+jq --arg image "$SEED_IMAGE" '.containerDefinitions[0].image = $image' \
+  "$private_directory/restore.json" > "$private_directory/seed.json"
 seed_td=$(aws ecs register-task-definition --cli-input-json "file://$private_directory/seed.json" \
   --query 'taskDefinition.taskDefinitionArn' --output text)
+restore_needed=true
+jq -n --arg name "$container_name" --arg mode "--$SEED_MODE" \
+  '{containerOverrides: [{name: $name, command: ["node", "dist/database/seed-qas-demo.cli.js", $mode]}]}' \
+  > "$private_directory/overrides.json"
 aws ecs run-task --cluster "$cluster" --task-definition "$seed_td" \
   --launch-type FARGATE --network-configuration "$MIGRATION_NETWORK_CONFIGURATION" \
+  --overrides "file://$private_directory/overrides.json" \
   > "$private_directory/start.json"
 jq -e '(.failures | length == 0) and (.tasks | length == 1)' "$private_directory/start.json" >/dev/null
 task_arn=$(jq -r '.tasks[0].taskArn' "$private_directory/start.json")
 echo "QAS demo $SEED_MODE task: $task_arn"
 aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task_arn"
 task_finished=true
+restore_migration_definition
 aws ecs describe-tasks --cluster "$cluster" --tasks "$task_arn" \
   --query 'tasks[0].{lastStatus:lastStatus,stopCode:stopCode,stoppedReason:stoppedReason,containers:containers[].{name:name,exitCode:exitCode,reason:reason}}' \
   > qas-demo-result/task.json
