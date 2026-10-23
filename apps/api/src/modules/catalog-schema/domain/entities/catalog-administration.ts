@@ -1,6 +1,10 @@
 import { type Uuid, ValidationError } from '@cdr/shared';
 
-import type { AttributeSourceAuthority, CatalogAttributeDataType } from './catalog-schema';
+import type {
+  AttributeSourceAuthority,
+  CatalogAttributeDataType,
+  TemplateAssetRequirement,
+} from './catalog-schema';
 
 export type BusinessRole = 'ADMINISTRADOR' | 'COMPRAS' | 'VENTAS';
 
@@ -69,4 +73,5 @@ export interface AdminAttributeTemplate {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly attributes?: readonly AdminTemplateAttribute[];
+  readonly assetRequirements?: readonly TemplateAssetRequirement[];
 }

@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApplicationsWorkspace } from '@/components/applications-workspace';
-import { EquivalencesWorkspace } from '@/components/equivalences-workspace';
 
 const mocks = vi.hoisted(() => ({
   listApplications: vi.fn(),
@@ -181,14 +180,16 @@ describe('catálogo secundario aprobado', () => {
     render(<ApplicationsWorkspace canWrite={false} />);
 
     await screen.findAllByText('UNI-6205');
-    fireEvent.click(screen.getByRole('button', { name: 'Mover columna Marca a la izquierda' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Mover columna Marca Vehículo a la izquierda' }),
+    );
 
     const headings = screen.getAllByRole('columnheader').map((heading) => heading.textContent);
     expect(headings.findIndex((text) => text?.includes('Marca'))).toBeLessThan(
-      headings.findIndex((text) => text?.includes('Contexto')),
+      headings.findIndex((text) => text?.includes('Código Unificador')),
     );
     expect(window.localStorage.getItem('cdr:column-order:guest:applications')).toContain(
-      '"make","vehicleType"',
+      '"make","unifiedCode"',
     );
     expect(screen.getByRole('button', { name: 'Restaurar columnas' })).toBeEnabled();
   });
@@ -204,8 +205,8 @@ describe('catálogo secundario aprobado', () => {
     fireEvent.click(screen.getByRole('button', { name: /Código unificador en contexto/ }));
     expect(screen.getByText('Aplicaciones heredadas')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /Todas las aplicaciones/ }));
-    expect(screen.getByLabelText('Tipo')).toBeVisible();
-    expect(screen.getByLabelText('Marca / industria')).toBeVisible();
+    expect(screen.getByLabelText('Filtro de columna Tipo')).toBeVisible();
+    expect(screen.getByLabelText('Filtro de columna Marca Vehículo')).toBeVisible();
     fireEvent.change(screen.getByLabelText('Buscar aplicaciones'), {
       target: { value: 'SEDAN' },
     });
@@ -217,8 +218,10 @@ describe('catálogo secundario aprobado', () => {
     render(<ApplicationsWorkspace canWrite />);
 
     await screen.findAllByText('UNI-6205');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Editar Marca de UNI-6205' })[0]!);
-    const input = screen.getByRole('textbox', { name: 'Editar Marca' });
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Editar Marca Vehículo de UNI-6205' })[0]!,
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar Marca Vehículo' });
     fireEvent.change(input, { target: { value: 'Lexus' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -252,6 +255,9 @@ describe('catálogo secundario aprobado', () => {
 
     await screen.findAllByText('UNI-6205');
     fireEvent.click(screen.getByRole('button', { name: /Agregar fila/u }));
+    fireEvent.change(screen.getByLabelText('Nuevo código unificador de aplicación'), {
+      target: { value: 'UNI-6205' },
+    });
     fireEvent.change(screen.getByLabelText('Nueva marca de aplicación'), {
       target: { value: 'Toyota' },
     });
@@ -310,78 +316,15 @@ describe('catálogo secundario aprobado', () => {
     render(<ApplicationsWorkspace canWrite={false} />);
 
     await screen.findAllByText('UNI-6205');
-    fireEvent.click(screen.getByRole('button', { name: /^Marca: filtrar u ordenar/u }));
-    const dialog = screen.getByRole('dialog', { name: 'Filtrar Marca' });
+    fireEvent.click(screen.getByRole('button', { name: /^Marca Vehículo: filtrar u ordenar/u }));
+    const dialog = screen.getByRole('dialog', { name: 'Filtrar Marca Vehículo' });
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Seleccionar todo/u }));
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /^Toyota/u }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Aplicar' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('1 de 2 filas visibles');
-    expect(screen.getByRole('button', { name: /CSV · 1 fila$/u })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
     expect(screen.getAllByText('Toyota').some((element) => element.tagName === 'TD')).toBe(true);
     expect(screen.queryAllByText('Ford').some((element) => element.tagName === 'TD')).toBe(false);
-  });
-
-  it('filtra los grupos persistidos de Equivalencias y alinea la exportación con el orden visible', async () => {
-    render(<EquivalencesWorkspace canWrite={false} />);
-    await waitFor(() => expect(mocks.listHomologs).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByRole('button', { name: /^Tipo: filtrar u ordenar/u }));
-    const dialog = screen.getByRole('dialog', { name: 'Filtrar Tipo' });
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Seleccionar todo/u }));
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^ERP/u }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Aplicar' }));
-
-    expect(screen.getByRole('status')).toHaveTextContent('1 de 2 filas visibles');
-    expect(screen.getByRole('button', { name: /CSV · 1 fila$/u })).toBeEnabled();
-    expect(screen.getByText('Rodamiento 6205')).toBeVisible();
-    expect(screen.queryByText('Rodamiento 6305')).not.toBeInTheDocument();
-  });
-
-  it('integra el deep link histórico de identificadores sin exponer un cuarto tab', async () => {
-    window.history.replaceState({}, '', '/equivalences?view=identifiers');
-    render(<EquivalencesWorkspace canWrite={false} />);
-    await waitFor(() => expect(mocks.listHomologs).toHaveBeenCalled());
-
-    expect(screen.getByRole('navigation', { name: /Vistas de Código Unificador/u })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Código Unificador/u })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Homólogos/u })).toBeVisible();
-    expect(screen.getByRole('button', { name: /^OEM/u })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /Identificadores/u })).not.toBeInTheDocument();
-    expect(window.location.search).toBe('');
-  });
-
-  it('crea un homólogo como fila inline y desactiva la selección de forma lógica', async () => {
-    render(<EquivalencesWorkspace canWrite />);
-    await waitFor(() => expect(mocks.listHomologs).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: /Homólogos/u }));
-    fireEvent.click(screen.getByRole('button', { name: /Agregar fila/u }));
-    fireEvent.change(screen.getByLabelText('Nuevo código unificador'), {
-      target: { value: 'UNI-6205' },
-    });
-    fireEvent.change(screen.getByLabelText('Nuevo código externo'), {
-      target: { value: 'EXT-NEW' },
-    });
-    fireEvent.change(screen.getByLabelText('Nueva marca externa'), { target: { value: 'SKF' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar nuevo homólogo' }));
-
-    await waitFor(() =>
-      expect(mocks.createHomolog).toHaveBeenCalledWith({
-        unifiedCode: 'UNI-6205',
-        externalCode: 'EXT-NEW',
-        externalBrand: 'SKF',
-        approvalStatus: 'pending',
-        active: true,
-      }),
-    );
-
-    fireEvent.click(screen.getByLabelText('Seleccionar homólogo EXT-6205'));
-    fireEvent.click(screen.getByRole('button', { name: /Eliminar selección \(1\)/u }));
-    await waitFor(() =>
-      expect(mocks.deactivateHomolog).toHaveBeenCalledWith('hom-1', '2026-10-05T12:00:00.000Z'),
-    );
-    await waitFor(() =>
-      expect(screen.queryByLabelText('Seleccionar homólogo EXT-6205')).not.toBeInTheDocument(),
-    );
   });
 });

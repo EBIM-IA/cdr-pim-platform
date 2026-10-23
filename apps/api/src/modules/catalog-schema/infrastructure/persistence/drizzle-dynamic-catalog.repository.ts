@@ -652,6 +652,42 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       .where(where);
 
     const productIds = rows.map((row) => row.id as Uuid);
+    const activeTemplateIds = [
+      ...new Set(
+        rows
+          .filter(
+            (row) =>
+              row.templateId && row.templateStatus === 'active' && row.categoryActive === true,
+          )
+          .map((row) => row.templateId!),
+      ),
+    ];
+    const assetRequirementRows =
+      activeTemplateIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              templateId: templateAssetRequirements.templateId,
+              type: templateAssetRequirements.typeCode,
+              required: templateAssetRequirements.required,
+            })
+            .from(templateAssetRequirements)
+            .where(
+              and(
+                inArray(templateAssetRequirements.templateId, activeTemplateIds),
+                eq(templateAssetRequirements.active, true),
+              ),
+            )
+            .orderBy(templateAssetRequirements.typeCode);
+    const assetsByTemplate = new Map<string, TemplateAssetRequirement[]>();
+    for (const requirement of assetRequirementRows) {
+      const requirements = assetsByTemplate.get(requirement.templateId) ?? [];
+      requirements.push({
+        type: requirement.type as TemplateAssetRequirement['type'],
+        required: requirement.required,
+      });
+      assetsByTemplate.set(requirement.templateId, requirements);
+    }
     const definitionIds = workbookSchema.columns.map((column) => column.id);
     const valueRows =
       productIds.length === 0 || definitionIds.length === 0
@@ -819,6 +855,8 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         unifiedCode: attributeText(unifiedAttribute),
         applicationTypes: [...(applicationsByProduct.get(row.id) ?? [])].sort(),
         completeness: row.completeness,
+        assetRequirements:
+          activeTemplate && row.templateId ? (assetsByTemplate.get(row.templateId) ?? []) : [],
         attributes,
       };
     });

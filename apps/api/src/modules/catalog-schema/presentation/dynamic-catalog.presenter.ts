@@ -55,9 +55,11 @@ export function toGridProductDto(product: CatalogGridProduct): CatalogGridProduc
 }
 
 function toWorkbookProductDto(product: CatalogWorkbookProduct) {
+  const { assetRequirements, ...fields } = product;
   return {
-    ...product,
+    ...fields,
     applicationTypes: [...product.applicationTypes],
+    ...(assetRequirements ? { assetRequirements: [...assetRequirements] } : {}),
     updatedAt: product.updatedAt.toISOString(),
     attributes: Object.fromEntries(
       Object.entries(product.attributes).map(([key, cell]) => [

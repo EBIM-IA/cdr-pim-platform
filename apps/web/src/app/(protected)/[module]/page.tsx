@@ -74,7 +74,15 @@ export default async function ModulePage({ params }: ModulePageProps) {
     return <ApplicationsWorkspace canWrite={capabilities.has('applications:write')} />;
   }
   if (module === 'equivalences') {
-    return <EquivalencesWorkspace canWrite={capabilities.has('equivalences:write')} />;
+    return (
+      <EquivalencesWorkspace
+        canWrite={capabilities.has('equivalences:write')}
+        canViewCompleteness={capabilities.has('administration:manage')}
+        canViewProductStatus={
+          !actor?.roles.includes('VENTAS') || !!actor?.roles.includes('ADMINISTRADOR')
+        }
+      />
+    );
   }
   if (module === 'imports') {
     return <ImportsWorkspace canExecute={capabilities.has('imports:execute')} />;

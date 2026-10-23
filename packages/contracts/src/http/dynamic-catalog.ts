@@ -163,6 +163,9 @@ export const catalogWorkbookProductSchema = z.object({
   applicationTypes: z.array(z.string()),
   completeness: z.number().int().min(0).max(100).nullable(),
   attributes: z.record(catalogWorkbookCellSchema),
+  assetRequirements: z
+    .array(z.object({ type: productAssetTypeSchema, required: z.boolean() }))
+    .optional(),
 });
 export type CatalogWorkbookProductDto = z.infer<typeof catalogWorkbookProductSchema>;
 
@@ -389,6 +392,9 @@ export const adminTemplateSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   attributes: z.array(adminTemplateAttributeSchema).optional(),
+  assetRequirements: z
+    .array(z.object({ type: productAssetTypeSchema, required: z.boolean() }))
+    .optional(),
 });
 export type AdminTemplateDto = z.infer<typeof adminTemplateSchema>;
 

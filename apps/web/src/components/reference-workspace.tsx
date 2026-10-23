@@ -37,9 +37,9 @@ import { AuditWorkspace } from '@/components/audit-workspace';
 import { CatalogQualityWorkspace } from '@/components/catalog-quality-workspace';
 import {
   AdministrationReferenceView,
-  CatalogsReferenceView,
   IntegrationsReferenceView,
 } from '@/components/operations-reference-views';
+import { ProductCatalogsWorkspace } from '@/components/product-catalogs-workspace';
 import { PublicationWorkspace } from '@/components/publication-workspace';
 import {
   OperationsSecondaryWorkspace,
@@ -102,7 +102,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
     {
       id: 'catalogs',
       label: 'Catálogos PDF',
-      title: 'Catálogos de productos',
+      title: 'Catálogos',
       description: 'Catálogos PDF por marca, vigencia y estado.',
       icon: FileArchive,
       mode: 'capabilities',
@@ -561,31 +561,33 @@ export function ReferenceWorkspace({
         limitation={definition.limitation}
       />
 
-      <nav
-        className="mb-5 flex gap-1 overflow-x-auto border-b"
-        aria-label={`Vistas de ${definition.label}`}
-      >
-        {views.map((view) => {
-          const Icon = view.icon;
-          const current = view.id === active.id;
-          return (
-            <button
-              key={view.id}
-              type="button"
-              onClick={() => changeView(view.id)}
-              aria-current={current ? 'page' : undefined}
-              className={cn(
-                'inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-2 text-sm transition',
-                current
-                  ? 'border-primary bg-white text-primary'
-                  : 'border-transparent text-slate-600 hover:bg-slate-50',
-              )}
-            >
-              <Icon className="size-4" aria-hidden="true" /> {view.label}
-            </button>
-          );
-        })}
-      </nav>
+      {definition.slug !== 'catalogs' ? (
+        <nav
+          className="mb-5 flex gap-1 overflow-x-auto border-b"
+          aria-label={`Vistas de ${definition.label}`}
+        >
+          {views.map((view) => {
+            const Icon = view.icon;
+            const current = view.id === active.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                onClick={() => changeView(view.id)}
+                aria-current={current ? 'page' : undefined}
+                className={cn(
+                  'inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-2 text-sm transition',
+                  current
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-slate-600 hover:bg-slate-50',
+                )}
+              >
+                <Icon className="size-4" aria-hidden="true" /> {view.label}
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
 
       {loading ? (
         <div className="space-y-4" aria-label="Cargando módulo" aria-busy="true">
@@ -630,7 +632,7 @@ export function ReferenceWorkspace({
         ) : definition.slug === 'administration' && active.id === 'audit' ? (
           <AuditWorkspace embedded />
         ) : definition.slug === 'catalogs' ? (
-          <CatalogsReferenceView />
+          <ProductCatalogsWorkspace workspace={workspace} onReload={reload} />
         ) : definition.slug === 'quality' && active.id === 'search' ? (
           <SmartSearchWorkspace />
         ) : definition.slug === 'quality' && isQualitySecondaryView(active.id) ? (
