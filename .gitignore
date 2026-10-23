@@ -4,6 +4,7 @@ node_modules/
 
 # Build output
 dist/
+dist-qas-seed/
 build/
 .next/
 .next-dev/

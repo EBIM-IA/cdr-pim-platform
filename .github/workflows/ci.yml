@@ -188,6 +188,16 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
+      - name: Build isolated QAS seed image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/api.Dockerfile
+          target: qas-seed
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=api
+
       - name: Build worker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:

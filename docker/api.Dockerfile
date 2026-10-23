@@ -43,6 +43,22 @@ RUN pnpm --filter @cdr/api... run build
 # Collapse the workspace into a portable, production-only tree.
 RUN pnpm deploy --filter @cdr/api --prod --legacy /output
 
+# ---- QAS-only data maintenance image -----------------------------------------
+# This target is built only by the manual QAS workflow. The final runtime below
+# keeps both source-backed fixtures and the seed CLI out of serving images.
+FROM build AS qas-seed-build
+RUN pnpm --filter @cdr/api exec tsc -p tsconfig.qas-seed.json
+
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS qas-seed
+ENV NODE_ENV=production
+USER node
+WORKDIR /app
+COPY --from=qas-seed-build --chown=node:node /output/node_modules ./node_modules
+COPY --from=qas-seed-build --chown=node:node /repo/apps/api/dist-qas-seed ./dist
+COPY --from=qas-seed-build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem ./certs/rds-global-bundle.pem
+ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
+CMD ["node", "dist/database/seed-qas-demo.cli.js", "--dry-run"]
+
 # ---- runtime ---------------------------------------------------------------
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 ENV NODE_ENV=production

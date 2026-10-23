@@ -1,0 +1,130 @@
+name: QAS demo data
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Preview the insert-only plan or apply it to QAS
+        required: true
+        type: choice
+        default: dry-run
+        options: [dry-run, apply]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare isolated seed image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: qas-demo-image-${{ github.sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: cdr-qas-demo-image-${{ github.run_id }}
+
+      - id: image
+        name: Reuse the immutable seed image when available
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          test "$(aws sts get-caller-identity --query Account --output text)" = "$AWS_ACCOUNT_ID"
+          registry="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          printf 'tag=%s/cdr-pim-api:qas-demo-%s\n' "$registry" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          digest=$(aws ecr describe-images --repository-name cdr-pim-api \
+            --image-ids "imageTag=qas-demo-$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+          if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.image.outputs.exists != 'true'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - if: steps.image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - if: steps.image.outputs.exists != 'true'
+        name: Build QAS maintenance target only
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/api.Dockerfile
+          target: qas-seed
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=api
+
+      - id: resolve
+        name: Pin the seed image digest
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+          digest=$(aws ecr describe-images --repository-name cdr-pim-api \
+            --image-ids "imageTag=qas-demo-$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+  seed:
+    name: Run QAS insert-only data task
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: qas
+    concurrency:
+      group: promote-qas
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: cdr-qas-demo-${{ github.run_id }}
+
+      - name: Preview or apply the QAS dataset
+        env:
+          SEED_IMAGE: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/cdr-pim-api@${{ needs.prepare.outputs.digest }}
+          SEED_MODE: ${{ inputs.mode }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          MIGRATION_NETWORK_CONFIGURATION: ${{ vars.MIGRATION_NETWORK_CONFIGURATION }}
+        run: bash scripts/run-qas-demo-seed.sh
+
+      - name: Retain counts and inserted identifiers
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qas-demo-${{ inputs.mode }}-${{ github.run_id }}
+          path: qas-demo-result/
+          if-no-files-found: warn
+          retention-days: 14

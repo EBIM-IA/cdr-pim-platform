@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": { "outDir": "dist-qas-seed" },
+  "include": ["src/database/seed-qas-demo.cli.ts"],
+  "exclude": ["node_modules", "dist", "dist-qas-seed", "test", "**/*.spec.ts"]
+}

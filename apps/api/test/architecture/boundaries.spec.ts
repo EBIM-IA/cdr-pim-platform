@@ -200,6 +200,9 @@ describe('platform-wide rules', () => {
         'src/database/client-template-manifest.ts',
         'src/database/demo-seed.ts',
         'src/database/seed-demo.cli.ts',
+        'src/database/qas-demo-seed.ts',
+        'src/database/qas-demo-manifest.ts',
+        'src/database/seed-qas-demo.cli.ts',
       ]),
     );
   });
@@ -214,6 +217,7 @@ describe('platform-wide rules', () => {
       if (
         relative === path.join('shared', 'config', 'config.module.ts') ||
         relative.startsWith(path.join('database', 'migrate.cli')) ||
+        relative.startsWith(path.join('database', 'seed-qas-demo.cli')) ||
         relative.startsWith(path.join('database', 'new-migration.cli'))
       ) {
         continue;
