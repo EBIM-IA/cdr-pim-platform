@@ -80,6 +80,11 @@ describe('applications reference layout', () => {
   it('combines column filtering with export and preserves the current visible column order', async () => {
     render(<ApplicationsWorkspace canWrite />);
     await screen.findByRole('table');
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: 'Editar Marca Vehículo de UNI-6205' }),
+      ).toHaveLength(2),
+    );
     fireEvent.change(screen.getByLabelText('Filtro de columna Marca Vehículo'), {
       target: { value: 'TOYOTA' },
     });

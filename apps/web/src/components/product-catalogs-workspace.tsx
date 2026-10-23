@@ -1227,19 +1227,18 @@ export function ProductCatalogsWorkspace({
                         />
                       </th>
                       {columns.map((column) => (
-                        <th key={column.key}>
-                          <ExcelTableHeader
-                            columnKey={column.key}
-                            label={column.label}
-                            options={table.getValueOptions(column.key)}
-                            selectedValues={table.filters[column.key]}
-                            sortDirection={
-                              table.sort?.key === column.key ? table.sort.direction : undefined
-                            }
-                            onFilterChange={(values) => table.setColumnFilter(column.key, values)}
-                            onSort={(direction) => table.setSort(column.key, direction)}
-                          />
-                        </th>
+                        <ExcelTableHeader
+                          key={column.key}
+                          columnKey={column.key}
+                          label={column.label}
+                          options={table.getValueOptions(column.key)}
+                          selectedValues={table.filters[column.key]}
+                          sortDirection={
+                            table.sort?.key === column.key ? table.sort.direction : undefined
+                          }
+                          onFilterChange={(values) => table.setColumnFilter(column.key, values)}
+                          onSort={(direction) => table.setSort(column.key, direction)}
+                        />
                       ))}
                     </tr>
                   </thead>

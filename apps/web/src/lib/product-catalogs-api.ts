@@ -60,20 +60,50 @@ export function listProductCatalogs(
   return request(`?${params}`, productCatalogListSchema, { signal });
 }
 
-/** Fetch every page so spreadsheet filters and export never silently omit later results. */
+/**
+ * Offset pages can shift when another actor changes the catalog list. Discard an inconsistent
+ * traversal and retry from page one; a partial set must never reach spreadsheet filters/export.
+ */
 export async function listAllProductCatalogs(
   query: { q?: string; includeDeleted?: boolean } = {},
   signal?: AbortSignal,
 ): Promise<ProductCatalogListDto> {
-  const first = await listProductCatalogs({ ...query, page: 1, pageSize: 100 }, signal);
-  const items = [...first.items];
-  for (let page = 2; items.length < first.total; page += 1) {
-    const next = await listProductCatalogs({ ...query, page, pageSize: 100 }, signal);
-    if (!next.items.length) break;
-    items.push(...next.items);
+  const pageSize = 100;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted();
+    const first = await listProductCatalogs({ ...query, page: 1, pageSize }, signal);
+    const total = first.total;
+    const items: ProductCatalogDto[] = [];
+    const ids = new Set<string>();
+    let consistent = true;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    for (let page = 1; page <= pages; page += 1) {
+      const next =
+        page === 1 ? first : await listProductCatalogs({ ...query, page, pageSize }, signal);
+      const expectedCount = Math.min(pageSize, total - (page - 1) * pageSize);
+      if (
+        next.total !== total ||
+        next.page !== page ||
+        next.pageSize !== pageSize ||
+        next.items.length !== expectedCount ||
+        next.items.some((item) => ids.has(item.id))
+      ) {
+        consistent = false;
+        break;
+      }
+      for (const item of next.items) ids.add(item.id);
+      if (ids.size !== items.length + next.items.length) {
+        consistent = false;
+        break;
+      }
+      items.push(...next.items);
+    }
+    if (consistent && ids.size === total) return { ...first, items };
   }
-  const unique = [...new Map(items.map((item) => [item.id, item])).values()];
-  return { ...first, items: unique };
+  throw new ProductCatalogsApiError(
+    'La lista de catálogos cambió durante la carga. Actualiza para volver a intentarlo; no se pudo obtener una lista completa.',
+    409,
+  );
 }
 
 export function getProductCatalog(

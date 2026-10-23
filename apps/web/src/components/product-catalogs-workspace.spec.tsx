@@ -111,6 +111,7 @@ describe('ProductCatalogsWorkspace', () => {
   it('shows real metrics, PDF actions and role permissions without placeholder blocks', async () => {
     mount(false, true);
     expect(await screen.findByRole('button', { name: catalog.title })).toBeVisible();
+    expect(within(screen.getByRole('table')).getAllByRole('columnheader')).toHaveLength(13);
     expect(api.listAllProductCatalogs).toHaveBeenCalledWith(
       { q: '', includeDeleted: false },
       expect.any(AbortSignal),

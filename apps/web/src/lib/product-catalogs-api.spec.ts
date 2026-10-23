@@ -98,6 +98,73 @@ describe('product catalogs API', () => {
       );
     }
   });
+  it('restarts from page one when a concurrent insertion changes total200 to201', async () => {
+    const original = Array.from({ length: 200 }, (_, index) => ({
+      ...catalog,
+      id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    }));
+    const inserted = { ...catalog, id: '10000000-0000-4000-8000-000000000999' };
+    const current = [inserted, ...original];
+    client.fetch
+      .mockResolvedValueOnce(response(page(original.slice(0, 100), 1, 200)))
+      .mockResolvedValueOnce(response(page(current.slice(100, 200), 2, 201)))
+      .mockResolvedValueOnce(response(page(current.slice(0, 100), 1, 201)))
+      .mockResolvedValueOnce(response(page(current.slice(100, 200), 2, 201)))
+      .mockResolvedValueOnce(response(page(current.slice(200), 3, 201)));
+
+    const result = await listAllProductCatalogs({ includeDeleted: true });
+
+    expect(result.total).toBe(201);
+    expect(result.items.map((item) => item.id)).toEqual(current.map((item) => item.id));
+    expect(
+      client.fetch.mock.calls.map((call) =>
+        new URL(String(call[0]), 'https://example.invalid').searchParams.get('page'),
+      ),
+    ).toEqual(['1', '2', '1', '2', '3']);
+  });
+  it('retries duplicate IDs even if raw page lengths equal the advertised total', async () => {
+    const rows = Array.from({ length: 200 }, (_, index) => ({
+      ...catalog,
+      id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    }));
+    client.fetch
+      .mockResolvedValueOnce(response(page(rows.slice(0, 100), 1, 200)))
+      .mockResolvedValueOnce(response(page([rows[99]!, ...rows.slice(100, 199)], 2, 200)))
+      .mockResolvedValueOnce(response(page(rows.slice(0, 100), 1, 200)))
+      .mockResolvedValueOnce(response(page(rows.slice(100), 2, 200)));
+
+    const result = await listAllProductCatalogs();
+
+    expect(result.items).toEqual(rows);
+    expect(client.fetch).toHaveBeenCalledTimes(4);
+  });
+  it.each(['duplicate', 'missing', 'overflow', 'no progress'] as const)(
+    'fails clearly after three unstable traversals with %s rows',
+    async (failure) => {
+      const rows = Array.from({ length: 200 }, (_, index) => ({
+        ...catalog,
+        id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      }));
+      const invalidSecond =
+        failure === 'duplicate'
+          ? [rows[99]!, ...rows.slice(100, 199)]
+          : failure === 'missing'
+            ? rows.slice(100, 199)
+            : failure === 'overflow'
+              ? [...rows.slice(100), { ...catalog, id: '10000000-0000-4000-8000-000000000999' }]
+              : [];
+      client.fetch.mockImplementation(async (input: string) => {
+        const number = Number(new URL(input, 'https://example.invalid').searchParams.get('page'));
+        return response(page(number === 1 ? rows.slice(0, 100) : invalidSecond, number, 200));
+      });
+
+      await expect(listAllProductCatalogs()).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringContaining('no se pudo obtener una lista completa'),
+      });
+      expect(client.fetch).toHaveBeenCalledTimes(6);
+    },
+  );
   it('uploads multipart metadata and allows an update without replacing the current file', async () => {
     client.fetch.mockImplementation(async () => response(catalog));
     const pdf = new File(['%PDF-1.7'], 'catalogo.pdf', { type: 'application/pdf' });

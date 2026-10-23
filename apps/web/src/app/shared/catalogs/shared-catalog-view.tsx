@@ -10,9 +10,8 @@ import { CalendarDays, Download, ExternalLink, FileText, LoaderCircle } from 'lu
 import { useEffect, useRef, useState } from 'react';
 
 import { StatePanel } from '@/components/state-panel';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 
 function catalogDate(value: string): string {
   return new Intl.DateTimeFormat('es-EC', {
@@ -28,6 +27,19 @@ async function responseMessage(response: Response, fallback: string): Promise<st
     : fallback;
 }
 
+function receivedFilename(response: Response, fallback: string): string {
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const encoded = /filename\*=UTF-8''([^;]+)/iu.exec(disposition)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return fallback;
+    }
+  }
+  return /filename="([^"]+)"/iu.exec(disposition)?.[1] || fallback;
+}
+
 /** The share credential stays in the fragment and memory; requests never use a URL token. */
 export function SharedCatalogView() {
   const [loading, setLoading] = useState(true);
@@ -35,10 +47,11 @@ export function SharedCatalogView() {
   const [error, setError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [completedAction, setCompletedAction] = useState<'download' | 'open' | null>(null);
   const token = useRef<string | null>(null);
   const objectUrl = useRef<string | null>(null);
   const fileRequest = useRef<AbortController | null>(null);
+  const pendingPreview = useRef<Window | null>(null);
 
   useEffect(() => {
     let metadataRequest: AbortController | null = null;
@@ -46,9 +59,11 @@ export function SharedCatalogView() {
       metadataRequest?.abort();
       fileRequest.current?.abort();
       fileRequest.current = null;
+      pendingPreview.current?.close();
+      pendingPreview.current = null;
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       objectUrl.current = null;
-      setPdfUrl(null);
+      setCompletedAction(null);
       setCatalog(null);
       setFileError(null);
       setDownloading(false);
@@ -99,17 +114,32 @@ export function SharedCatalogView() {
       window.removeEventListener('hashchange', load);
       metadataRequest?.abort();
       fileRequest.current?.abort();
+      pendingPreview.current?.close();
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     };
   }, []);
 
-  const requestPdf = async () => {
+  const requestPdf = async (action: 'download' | 'open') => {
     if (!token.current || !catalog || fileRequest.current) return;
     const controller = new AbortController();
     fileRequest.current = controller;
     setDownloading(true);
     setFileError(null);
+    setCompletedAction(null);
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+    let preview: Window | null = null;
+    let createdUrl: string | null = null;
     try {
+      // Open synchronously within the click gesture, then detach the opener before any navigation.
+      if (action === 'open') {
+        preview = window.open('about:blank', '_blank');
+        if (!preview) {
+          throw new Error('Permite abrir una nueva pestaña para ver el PDF, o usa Descargar PDF.');
+        }
+        preview.opener = null;
+        pendingPreview.current = preview;
+      }
       const response = await fetch('/api/shared/catalogs/file', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -131,18 +161,30 @@ export function SharedCatalogView() {
         throw new Error('El archivo del catálogo no tiene un tamaño válido.');
       }
       if (controller.signal.aborted) return;
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       const url = URL.createObjectURL(blob);
+      createdUrl = url;
       objectUrl.current = url;
-      setPdfUrl(url);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = catalog.fileName;
-      anchor.rel = 'noopener noreferrer';
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
+      const fileName = receivedFilename(response, catalog.fileName);
+      setCatalog((current) => (current ? { ...current, fileName, fileSize: blob.size } : current));
+      if (preview) {
+        if (preview.closed) throw new Error('La pestaña del PDF se cerró. Vuelve a intentarlo.');
+        preview.location.replace(url);
+        pendingPreview.current = null;
+      } else {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        anchor.rel = 'noopener noreferrer';
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+      }
+      setCompletedAction(action);
     } catch (cause) {
+      preview?.close();
+      if (pendingPreview.current === preview) pendingPreview.current = null;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+      if (objectUrl.current === createdUrl) objectUrl.current = null;
       if (!controller.signal.aborted) {
         setFileError(cause instanceof Error ? cause.message : 'No fue posible descargar el PDF.');
       }
@@ -223,34 +265,23 @@ export function SharedCatalogView() {
           </div>
         </div>
         <div className="flex flex-wrap gap-3">
-          {pdfUrl ? (
-            <>
-              <a className={buttonVariants()} href={pdfUrl} download={catalog.fileName}>
-                <Download className="size-4" aria-hidden="true" /> Descargar PDF
-              </a>
-              <a
-                className={cn(buttonVariants({ variant: 'outline' }))}
-                href={pdfUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink className="size-4" aria-hidden="true" /> Abrir PDF
-              </a>
-            </>
-          ) : (
-            <Button disabled={downloading} onClick={() => void requestPdf()}>
-              {downloading ? (
-                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Download className="size-4" aria-hidden="true" />
-              )}
-              {downloading ? 'Preparando PDF…' : 'Descargar PDF'}
-            </Button>
-          )}
+          <Button disabled={downloading} onClick={() => void requestPdf('download')}>
+            {downloading ? (
+              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="size-4" aria-hidden="true" />
+            )}
+            {downloading ? 'Preparando PDF…' : 'Descargar PDF'}
+          </Button>
+          <Button variant="outline" disabled={downloading} onClick={() => void requestPdf('open')}>
+            <ExternalLink className="size-4" aria-hidden="true" /> Abrir PDF
+          </Button>
         </div>
-        {pdfUrl ? (
+        {completedAction ? (
           <p className="text-xs text-muted-foreground" role="status">
-            PDF listo para descargar o abrir.
+            {completedAction === 'download'
+              ? 'Descarga del PDF iniciada.'
+              : 'PDF abierto en una nueva pestaña.'}
           </p>
         ) : null}
         {fileError ? (
