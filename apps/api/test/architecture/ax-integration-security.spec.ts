@@ -16,6 +16,8 @@ import { AxIntegrationAuthGuard } from '../../src/modules/ax-integration/present
 import { AxMockAuthGuard } from '../../src/modules/integrations/presentation/ax-mock-auth.guard';
 import { AuthController } from '../../src/modules/identity/presentation/auth.controller';
 import { HealthController } from '../../src/modules/health/presentation/health.controller';
+import { ProductCatalogsController } from '../../src/modules/product-catalogs/presentation/product-catalogs.controller';
+import { CatalogShareAuthGuard } from '../../src/modules/product-catalogs/presentation/guards/catalog-share-auth.guard';
 import { PUBLIC_ROUTE } from '../../src/shared/http/public.decorator';
 import { RATE_LIMIT_PROFILE } from '../../src/shared/http/rate-limit';
 
@@ -27,7 +29,7 @@ import { RATE_LIMIT_PROFILE } from '../../src/shared/http/rate-limit';
  * an unauthenticated endpoint. These rules make that mistake fail the build:
  *
  *  1. every route of the ax-integration module carries AxIntegrationAuthGuard;
- *  2. every public route ANYWHERE is health, login, or carries a dedicated machine guard;
+ *  2. every public route is health, login, a machine route or one of two guarded PDF reads;
  *  3. database access stays inside this module's persistence adapter.
  */
 
@@ -97,18 +99,35 @@ describe('AX integration route security', () => {
     expect(unguarded, 'Use @AxIntegrationRoute() on every AX controller').toEqual([]);
   });
 
-  it('allows a public route only for health, login, or behind the AX machine guard', () => {
+  it('allows only health, login, guarded AX routes and exact token-authenticated PDF reads', () => {
     const allowed = (route: Route) =>
       route.controller === HealthController ||
       (route.controller === AuthController && route.handlerName === 'login') ||
       guardsOf(route).includes(AxIntegrationAuthGuard) ||
-      guardsOf(route).includes(AxMockAuthGuard);
+      guardsOf(route).includes(AxMockAuthGuard) ||
+      (route.controller === ProductCatalogsController &&
+        ['resolve', 'sharedFile'].includes(route.handlerName) &&
+        guardsOf(route).includes(CatalogShareAuthGuard));
 
     const violations = allRoutes
       .filter(isPublic)
       .filter((route) => !allowed(route))
       .map(label);
     expect(violations, '@Public() must never stand alone').toEqual([]);
+  });
+
+  it('requires the share-token guard on exactly the two public PDF POSTs', () => {
+    const routes = allRoutes.filter((route) => route.controller === ProductCatalogsController);
+    const shared = routes.filter(isPublic);
+    expect(shared.map(label).sort()).toEqual([
+      'ProductCatalogsController.resolve',
+      'ProductCatalogsController.sharedFile',
+    ]);
+    for (const route of shared) {
+      expect(guardsOf(route)).toContain(CatalogShareAuthGuard);
+      expect(Reflect.getMetadata(METHOD_METADATA, route.handler)).toBe(1);
+    }
+    expect(routes.filter((route) => !isPublic(route)).length).toBeGreaterThan(5);
   });
 
   it('keeps the contractual Spanish route and the integration rate-limit profile', () => {

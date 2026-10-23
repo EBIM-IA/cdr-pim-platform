@@ -1,4 +1,8 @@
 import {
+  productCatalogs,
+  productCatalogShares,
+} from '../../modules/product-catalogs/infrastructure/persistence/product-catalogs.tables';
+import {
   productIdentifiers,
   products,
 } from '../../modules/catalog/infrastructure/persistence/catalog.tables';
@@ -67,6 +71,8 @@ export const schema = {
   equivalenceGroupMembers,
   productEmbeddings,
   productAssets,
+  productCatalogs,
+  productCatalogShares,
 };
 
 export {
@@ -87,6 +93,8 @@ export {
   importRows,
   productEmbeddings,
   productAssets,
+  productCatalogs,
+  productCatalogShares,
   productIdentifiers,
   productAttributeValues,
   productTemplateAssignments,

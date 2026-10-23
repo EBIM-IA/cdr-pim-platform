@@ -23,6 +23,10 @@ import {
 } from '../../identity/domain/entities/role';
 import type { WorkspaceReadModelPort } from '../domain/ports/workspace-read-model.port';
 import { PostgresReportsReadModel } from './postgres-reports-read-model';
+import {
+  PRODUCT_CATALOG_QUERY,
+  type ProductCatalogQueryPort,
+} from '../../product-catalogs/domain/ports/product-catalog-query.port';
 
 interface WorkspaceParts {
   readonly operationalStatus: WorkspaceOperationalStatus;
@@ -108,6 +112,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   constructor(
     @Inject(DATABASE_SQL) private readonly sql: Sql,
     @Inject(API_ENV) private readonly env: ApiEnv,
+    @Inject(PRODUCT_CATALOG_QUERY) private readonly productCatalogs: ProductCatalogQueryPort,
   ) {}
 
   read(
@@ -127,7 +132,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       case 'documents':
         return this.readDocuments();
       case 'catalogs':
-        return Promise.resolve(this.readCatalogs());
+        return this.readCatalogs(actor, query);
       case 'imports':
         return this.readImports();
       case 'quality':
@@ -738,42 +743,106 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
-  private readCatalogs(): WorkspaceDto {
+  private async readCatalogs(
+    actor: AuthenticatedActor,
+    query: WorkspaceQuery,
+  ): Promise<WorkspaceDto> {
+    const result = await this.productCatalogs.list(
+      {
+        page: query.page ?? 1,
+        pageSize: Math.min(query.pageSize ?? 100, 100),
+        includeDeleted: false,
+        ...(query.q ? { q: query.q } : {}),
+      },
+      actor,
+    );
+    const keys = [
+      'code',
+      'title',
+      'description',
+      'fileName',
+      'validFrom',
+      'validUntil',
+      'status',
+      'links',
+      'createdBy',
+      'createdAt',
+      'updatedBy',
+      'updatedAt',
+    ] as const;
+    const labels = [
+      'ID',
+      'Título',
+      'Descripción',
+      'Archivo PDF',
+      'Vigente desde',
+      'Vigente hasta',
+      'Estado',
+      'Enlaces',
+      'Creado por',
+      'Fecha de creación',
+      'Modificado por',
+      'Fecha de modificación',
+    ];
+    const capabilities = new Set(capabilitiesForActor(actor));
     return this.response('catalogs', {
-      operationalStatus: 'blocked',
+      operationalStatus: 'operational',
       metrics: [
-        textMetric('persistence', 'Registro persistente', 'Pendiente de contrato'),
-        textMetric('storage', 'Almacenamiento PDF', 'No configurado'),
-        textMetric('sharing', 'Compartición externa', 'Deshabilitada'),
-        integerMetric('catalogs', 'Catálogos registrados', 0),
+        integerMetric('catalogs', 'Catálogos registrados', result.metrics.catalogs),
+        integerMetric('current', 'Vigentes', result.metrics.current),
+        integerMetric('expiring', 'Por vencer', result.metrics.expiring),
+        integerMetric('activeLinks', 'Enlaces activos', result.metrics.activeLinks),
       ],
-      columns: [],
-      rows: [],
-      totalRows: 0,
-      notices: [
-        warning(
-          'catalogs-blocked',
-          'Capacidad visible, todavía no operativa',
-          'No existe un modelo persistente para título, vigencia, archivo PDF y auditoría. La pantalla no crea catálogos ni enlaces de demostración.',
+      columns: keys.map((key, index) => ({
+        key,
+        label: labels[index]!,
+        type:
+          key === 'links'
+            ? 'number'
+            : key === 'createdAt' || key === 'updatedAt'
+              ? 'datetime'
+              : key === 'status'
+                ? 'status'
+                : 'text',
+      })),
+      rows: result.items.map((catalog) => ({
+        id: catalog.id,
+        values: Object.fromEntries(
+          keys.map((key) => [key, key === 'links' ? catalog.activeLinks : catalog[key]]),
         ),
+      })),
+      totalRows: result.total,
+      notices: [
         info(
-          'catalogs-decisions',
-          'Decisiones necesarias antes de implementar',
-          'El cliente debe confirmar permisos por rol, límites y validación del PDF, almacenamiento privado, retención y el contrato de expiración, revocación y conteo de visitas.',
+          'catalogs-live',
+          'Catálogos PDF',
+          'Archivos privados y metadatos persistidos. Los enlaces se validan en cada acceso; las bajas son recuperables y revocan sus enlaces.',
         ),
       ],
       actions: [
         refreshAction('catalogs'),
-        blockedAction(
-          'upload-catalog',
-          'Cargar catálogo PDF',
-          'Bloqueado hasta definir permisos, tamaño máximo, tipos admitidos, validación, antimalware, almacenamiento y retención.',
-        ),
-        blockedAction(
-          'share-catalog',
-          'Compartir catálogo',
-          'Bloqueado hasta aprobar el contrato de enlace público, expiración, revocación, límites de acceso, conteo de visitas y auditoría.',
-        ),
+        ...(capabilities.has('product-catalogs:write')
+          ? [
+              {
+                id: 'upload-catalog',
+                label: 'Cargar catálogo PDF',
+                availability: 'supported' as const,
+                method: 'POST' as const,
+                endpoint: '/api/v1/product-catalogs',
+              },
+            ]
+          : []),
+        ...(capabilities.has('product-catalogs:share')
+          ? [
+              {
+                id: 'share-catalog',
+                label: 'Compartir catálogo',
+                availability: 'supported' as const,
+                method: 'POST' as const,
+                endpoint: '/api/v1/product-catalogs/:id/shares',
+              },
+            ]
+          : []),
       ],
     });
   }

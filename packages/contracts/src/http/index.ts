@@ -11,5 +11,6 @@ export * from './health';
 export * from './import';
 export * from './product';
 export * from './product-asset';
+export * from './product-catalog';
 export * from './search';
 export * from './workspace';

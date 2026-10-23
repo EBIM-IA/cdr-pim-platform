@@ -3,6 +3,13 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const workspaceData = vi.hoisted(() => ({ useWorkspaceData: vi.fn() }));
+const catalogView = vi.hoisted(() => ({ render: vi.fn() }));
+vi.mock('@/components/product-catalogs-workspace', () => ({
+  ProductCatalogsWorkspace: (props: { canManage: boolean; canShare: boolean }) => {
+    catalogView.render(props);
+    return <div>Gestión de catálogos PDF</div>;
+  },
+}));
 
 vi.mock('@/components/use-workspace-data', () => workspaceData);
 
@@ -110,24 +117,46 @@ describe('ReferenceWorkspace report views', () => {
     });
   });
 
-  it('shows product catalogs as blocked and does not simulate CRUD data', () => {
+  it('connects the live PDF workspace with actor capabilities', () => {
     workspaceData.useWorkspaceData.mockReturnValue({
-      workspace: catalogsWorkspace,
+      workspace: { ...catalogsWorkspace, operationalStatus: 'operational', notices: [] },
       loading: false,
       error: null,
       reload: vi.fn(),
     });
-
-    render(<ReferenceWorkspace definition={moduleDefinitions.catalogs} />);
-
+    const { rerender } = render(
+      <ReferenceWorkspace
+        definition={moduleDefinitions.catalogs}
+        actor={{
+          id: 'buyer',
+          email: 'buyer@example.invalid',
+          roles: ['COMPRAS'],
+          capabilities: [
+            'product-catalogs:read',
+            'product-catalogs:write',
+            'product-catalogs:share',
+          ],
+        }}
+      />,
+    );
     expect(workspaceData.useWorkspaceData).toHaveBeenLastCalledWith('catalogs', {});
     expect(screen.getByRole('heading', { name: 'Catálogos' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Todavía no hay catálogos' })).toBeVisible();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Compartir' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Subir catálogo' }));
-    expect(screen.getByRole('dialog', { name: 'Subir catálogo' })).toBeVisible();
-    expect(screen.getByRole('textbox', { name: 'Título *' })).toBeDisabled();
-    expect(screen.getByText(/La carga de catálogos todavía no está habilitada/u)).toBeVisible();
+    expect(catalogView.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canManage: true, canShare: true }),
+    );
+    rerender(
+      <ReferenceWorkspace
+        definition={moduleDefinitions.catalogs}
+        actor={{
+          id: 'sales',
+          email: 'sales@example.invalid',
+          roles: ['VENTAS'],
+          capabilities: ['product-catalogs:read', 'product-catalogs:share'],
+        }}
+      />,
+    );
+    expect(catalogView.render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canManage: false, canShare: true }),
+    );
   });
 });
