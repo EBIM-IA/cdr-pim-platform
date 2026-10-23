@@ -1,4 +1,4 @@
-import { assertUuid, newUuid } from '@cdr/shared';
+import { assertUuid, newUuid, ValidationError } from '@cdr/shared';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -21,6 +21,95 @@ describe('DrizzleCatalogAdministrationRepository', () => {
     await seedDemoCatalog(database.db);
   });
   afterAll(() => database.close());
+
+  it('keeps the SKU identity in publication while allowing other ERP fields to be deselected', async () => {
+    const templates = await repository.listTemplates();
+    const template = await repository.getTemplate(templates[0]!.id);
+    const identity = template!.attributes!.find(
+      (attribute) => attribute.key === 'codigo_articulo',
+    )!;
+    expect(identity).toBeTruthy();
+    await expect(
+      repository.updateTemplateAttribute({
+        templateId: template!.id,
+        attributeDefinitionId: identity.id,
+        publishable: false,
+        expectedUpdatedAt: identity.updatedAt,
+        audit: {
+          actorId: 'admin-publication',
+          correlationId: newUuid(),
+          occurredAt: new Date(identity.updatedAt.getTime() + 1000),
+        },
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const provider = template!.attributes!.find(
+      (attribute) => attribute.key === 'codigo_proveedor',
+    )!;
+    await expect(
+      repository.updateTemplateAttribute({
+        templateId: template!.id,
+        attributeDefinitionId: provider.id,
+        publishable: false,
+        expectedUpdatedAt: provider.updatedAt,
+        audit: {
+          actorId: 'admin-publication',
+          correlationId: newUuid(),
+          occurredAt: new Date(provider.updatedAt.getTime() + 1000),
+        },
+      }),
+    ).resolves.toMatchObject({ kind: 'updated', after: { publishable: false } });
+  });
+
+  it('persists publication selection independently of PDF policy with audit and stale-write protection', async () => {
+    const { template, attribute } = await findAdminAttribute(repository, true);
+    expect(attribute.publishable).toBe(true);
+    const correlationId = newUuid();
+    const result = await repository.updateTemplateAttribute({
+      templateId: template.id,
+      attributeDefinitionId: attribute.id,
+      publishable: false,
+      expectedUpdatedAt: attribute.updatedAt,
+      audit: {
+        actorId: 'admin-publication',
+        correlationId,
+        occurredAt: new Date(attribute.updatedAt.getTime() + 1000),
+      },
+    });
+    expect(result).toMatchObject({
+      kind: 'updated',
+      after: { publishable: false, includeInTechnicalSheet: attribute.includeInTechnicalSheet },
+    });
+    expect(
+      (await repository.getTemplate(template.id))?.attributes?.find(
+        (item) => item.id === attribute.id,
+      )?.publishable,
+    ).toBe(false);
+    const [audit] = await database.db
+      .select()
+      .from(auditEntries)
+      .where(eq(auditEntries.correlationId, correlationId));
+    expect(audit?.changes.configuration).toMatchObject({
+      before: { publishable: true },
+      after: { publishable: false },
+    });
+    const stale = await repository.updateTemplateAttribute({
+      templateId: template.id,
+      attributeDefinitionId: attribute.id,
+      publishable: true,
+      expectedUpdatedAt: attribute.updatedAt,
+      audit: {
+        actorId: 'admin-publication',
+        correlationId: newUuid(),
+        occurredAt: new Date(attribute.updatedAt.getTime() + 2000),
+      },
+    });
+    expect(stale.kind).toBe('version_conflict');
+    expect(
+      (await repository.getTemplate(template.id))?.attributes?.find(
+        (item) => item.id === attribute.id,
+      )?.publishable,
+    ).toBe(false);
+  });
 
   it('lists all template versions and preserves inactive assignments in administration', async () => {
     const templates = await repository.listTemplates();
@@ -246,10 +335,18 @@ describe('DrizzleCatalogAdministrationRepository', () => {
   });
 });
 
-async function findAdminAttribute(repository: DrizzleCatalogAdministrationRepository) {
+async function findAdminAttribute(
+  repository: DrizzleCatalogAdministrationRepository,
+  excludeIdentity = false,
+) {
   for (const template of await repository.listTemplates()) {
     const detail = await repository.getTemplate(template.id);
-    const attribute = detail?.attributes?.find((candidate) => candidate.active);
+    const attribute = detail?.attributes?.find(
+      (candidate) =>
+        candidate.active &&
+        (!excludeIdentity ||
+          !['codigoarticulo', 'sku'].includes(candidate.key.replace(/_/gu, '').toLowerCase())),
+    );
     if (attribute) return { template, attribute };
   }
   throw new Error('Expected at least one active template attribute assignment');

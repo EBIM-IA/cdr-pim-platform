@@ -34,6 +34,11 @@ export const AttributeValueSource = {
 export type AttributeValueSource = (typeof AttributeValueSource)[keyof typeof AttributeValueSource];
 export type CatalogAttributeValue = string | number | boolean;
 
+export interface TemplateAssetRequirement {
+  readonly type: 'FT' | 'MSDS' | 'CERT' | 'PLANO' | 'FOTO';
+  readonly required: boolean;
+}
+
 export interface DynamicAttributeDefinition {
   readonly id: Uuid;
   readonly key: string;
@@ -49,6 +54,7 @@ export interface TemplateAttribute extends DynamicAttributeDefinition {
   readonly replicable: boolean;
   readonly searchable: boolean;
   readonly includeInTechnicalSheet: boolean;
+  readonly publishable?: boolean;
   readonly position: number;
   readonly permissions: {
     readonly edit: boolean;

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { authCapabilitySchema } from './auth';
+
 /**
  * Stable identifiers for the operational workspaces rendered by the web application.
  * Keeping this list in the shared contract prevents the API and navigation from drifting.
@@ -29,12 +31,36 @@ export const reportFormatSchema = z.enum([
   'attribute_changes',
   'general_results',
   'period_results',
+  'products_by_category',
+  'edited_information',
+  'documents_by_sku',
+  'publication_by_sku',
 ]);
 export type ReportFormat = z.infer<typeof reportFormatSchema>;
 
-export const workspaceQuerySchema = z.object({
-  report: reportFormatSchema.optional(),
-});
+export const workspaceQuerySchema = z
+  .object({
+    report: reportFormatSchema.optional(),
+    categoryId: z.string().uuid().optional(),
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+    q: z.string().trim().max(200).optional(),
+    page: z.coerce.number().int().min(1).max(1_000_000).optional(),
+    pageSize: z.coerce.number().int().min(1).max(1000).optional(),
+    field: z.preprocess(
+      (value) => (typeof value === 'string' ? [value] : value),
+      z.array(z.string().min(1).max(160)).max(500).optional(),
+    ),
+  })
+  .superRefine((query, context) => {
+    if (query.from && query.to && query.from > query.to) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['to'],
+        message: 'to must be on or after from',
+      });
+    }
+  });
 export type WorkspaceQuery = z.infer<typeof workspaceQuerySchema>;
 
 /**
@@ -67,8 +93,8 @@ export const workspaceMetricSchema = z.discriminatedUnion('format', [
 export type WorkspaceMetric = z.infer<typeof workspaceMetricSchema>;
 
 export const workspaceColumnSchema = z.object({
-  key: z.string().min(1).max(80),
-  label: z.string().min(1).max(120),
+  key: z.string().min(1).max(160),
+  label: z.string().min(1).max(200),
   type: z.enum(['text', 'number', 'status', 'datetime']).default('text'),
 });
 export type WorkspaceColumn = z.infer<typeof workspaceColumnSchema>;
@@ -125,6 +151,53 @@ export const workspaceSchema = z
     totalRows: z.number().int().nonnegative(),
     notices: z.array(workspaceNoticeSchema),
     actions: z.array(workspaceActionSchema),
+    roleCapabilities: z
+      .array(
+        z.object({
+          role: z.enum(['ADMINISTRADOR', 'COMPRAS', 'VENTAS']),
+          capabilities: z.array(authCapabilitySchema),
+        }),
+      )
+      .optional(),
+    reportFormats: z
+      .array(
+        z.object({
+          format: reportFormatSchema,
+          title: z.string().min(1).max(160),
+          totalRows: z.number().int().nonnegative(),
+          columnCount: z.number().int().nonnegative(),
+        }),
+      )
+      .optional(),
+    reportIndicators: z
+      .array(
+        z.object({
+          key: z.string().min(1).max(80),
+          value: z.number().finite().nullable(),
+          status: z.enum(['available', 'unavailable']),
+          detail: z.string().max(1000),
+        }),
+      )
+      .optional(),
+    reportCategories: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          name: z.string().min(1),
+          parentId: z.string().uuid().nullable(),
+          path: z.string(),
+        }),
+      )
+      .optional(),
+    reportFields: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(160),
+          label: z.string().min(1).max(200),
+          type: z.enum(['text', 'number', 'status', 'datetime']),
+        }),
+      )
+      .optional(),
   })
   .superRefine((workspace, context) => {
     const unique = (values: string[]): boolean => new Set(values).size === values.length;

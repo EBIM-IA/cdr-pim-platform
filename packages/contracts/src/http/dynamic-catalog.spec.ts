@@ -10,9 +10,57 @@ import {
   updateProductAttributesBatchSchema,
   updateTemplateAttributeSchema,
   adminCategoryListQuerySchema,
+  productAttributeSheetSchema,
 } from './dynamic-catalog';
 
 describe('dynamic catalog contracts', () => {
+  it('accepts a publication-only update independently of PDF export', () => {
+    expect(
+      updateTemplateAttributeSchema.parse({
+        publishable: false,
+        expectedUpdatedAt: '2026-10-22T10:00:00.000Z',
+      }),
+    ).toEqual({ publishable: false, expectedUpdatedAt: '2026-10-22T10:00:00.000Z' });
+    expect(catalogWorkbookQuerySchema.parse({ completeness: 'incomplete' }).completeness).toBe(
+      'incomplete',
+    );
+  });
+
+  it('validates optional active asset policies without inventing requirements on older sheets', () => {
+    const legacy = {
+      schema: {
+        category: { id: '11111111-1111-4111-8111-111111111111', slug: 'rod', name: 'Rod' },
+        template: {
+          id: '22222222-2222-4222-8222-222222222222',
+          variantKey: '14',
+          name: 'Rod',
+          version: 1,
+        },
+        columns: [],
+      },
+      product: {
+        id: '33333333-3333-4333-8333-333333333333',
+        sku: '6205',
+        name: 'Rod',
+        brand: null,
+        status: 'in_review',
+        attributes: {},
+      },
+    };
+    expect(productAttributeSheetSchema.parse(legacy).assetRequirements).toBeUndefined();
+    expect(
+      productAttributeSheetSchema.parse({
+        ...legacy,
+        assetRequirements: [{ type: 'FT', required: true }],
+      }).assetRequirements,
+    ).toEqual([{ type: 'FT', required: true }]);
+    expect(
+      productAttributeSheetSchema.safeParse({
+        ...legacy,
+        assetRequirements: [{ type: 'UNKNOWN', required: true }],
+      }).success,
+    ).toBe(false);
+  });
   it('represents an unclassified SKU without inventing a category, template or completeness', () => {
     expect(
       catalogWorkbookProductSchema.parse({

@@ -8,6 +8,7 @@ import { EquivalencesWorkspace } from '@/components/equivalences-workspace';
 import { ImportsWorkspace } from '@/components/imports-workspace';
 import { ModuleWorkspace } from '@/components/module-workspace';
 import { ReferenceWorkspace } from '@/components/reference-workspace';
+import { ReportsWorkspace } from '@/components/reports-workspace';
 import { StatePanel } from '@/components/state-panel';
 import { TemplatesAdminWorkspace } from '@/components/templates-admin-workspace';
 import {
@@ -78,6 +79,15 @@ export default async function ModulePage({ params }: ModulePageProps) {
   if (module === 'imports') {
     return <ImportsWorkspace canExecute={capabilities.has('imports:execute')} />;
   }
+  if (module === 'reports') {
+    return (
+      <ReportsWorkspace
+        actorId={actor?.id ?? 'guest'}
+        canManageFormats={capabilities.has('administration:manage')}
+        capabilities={[...capabilities]}
+      />
+    );
+  }
   if (module === 'documents') {
     return <DocumentsWorkspace canWrite={capabilities.has('catalog:write')} />;
   }
@@ -86,10 +96,15 @@ export default async function ModulePage({ params }: ModulePageProps) {
     module === 'catalogs' ||
     module === 'publication' ||
     module === 'integrations' ||
-    module === 'reports' ||
     module === 'administration'
   ) {
-    return <ReferenceWorkspace key={definition.slug} definition={definition} />;
+    return (
+      <ReferenceWorkspace
+        key={definition.slug}
+        definition={definition}
+        {...(actor ? { actor } : {})}
+      />
+    );
   }
 
   return <ModuleWorkspace key={definition.slug} definition={definition} />;

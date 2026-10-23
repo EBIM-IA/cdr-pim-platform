@@ -7,6 +7,8 @@ import {
 
 import { authenticatedBffFetch } from '@/lib/bff-client';
 
+import { workspaceQueryParams } from '@/lib/workspace-query';
+
 export class WorkspaceApiError extends Error {
   constructor(
     message: string,
@@ -34,8 +36,7 @@ export async function fetchWorkspace(
   signal?: AbortSignal,
   query: WorkspaceQuery = {},
 ): Promise<WorkspaceDto> {
-  const params = new URLSearchParams();
-  if (query.report) params.set('report', query.report);
+  const params = workspaceQueryParams(query);
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   const response = await authenticatedBffFetch(
     `/api/workspaces/${encodeURIComponent(slug)}${suffix}`,

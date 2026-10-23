@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { paginatedSchema, paginationQuerySchema, uuidSchema } from './common';
+import { productAssetTypeSchema } from './product-asset';
 
 export const dynamicAttributeDataTypeSchema = z.enum([
   'text',
@@ -42,6 +43,8 @@ export const catalogGridColumnSchema = z.object({
   replicable: z.boolean(),
   searchable: z.boolean(),
   includeInTechnicalSheet: z.boolean(),
+  /** Template-level channel selection; independent of technical-sheet export. */
+  publishable: z.boolean().optional(),
   sourceAuthority: attributeSourceAuthoritySchema,
   position: z.number().int().min(0),
   permissions: z.object({
@@ -107,6 +110,10 @@ export const productAttributeSheetSchema = z.object({
   product: catalogGridProductSchema,
   /** Authoritative readiness: required attributes and required digital assets. */
   completeness: z.number().int().min(0).max(100).nullable().optional(),
+  /** Active document policies; omission supports older deployments without implying none. */
+  assetRequirements: z
+    .array(z.object({ type: productAssetTypeSchema, required: z.boolean() }))
+    .optional(),
 });
 export type ProductAttributeSheetDto = z.infer<typeof productAttributeSheetSchema>;
 
@@ -216,7 +223,7 @@ export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
   brand: z.string().trim().min(1).max(120).optional(),
   status: z.enum(['draft', 'in_review', 'published', 'archived']).optional(),
   applicationType: z.enum(['AUTOMOTRIZ', 'INDUSTRIAL']).optional(),
-  completeness: z.enum(['complete', 'attention', 'critical']).optional(),
+  completeness: z.enum(['complete', 'attention', 'critical', 'incomplete']).optional(),
   filter: filterQuerySchema.default([]),
   /** Repeated JSON wire values: `{ "key": string, "values": string[] }` or `{ "key": string, "expression": string }`. */
   columnFilter: workbookColumnFilterQuerySchema.optional(),
@@ -397,6 +404,7 @@ export const updateTemplateAttributeSchema = z
     replicable: z.boolean().optional(),
     searchable: z.boolean().optional(),
     includeInTechnicalSheet: z.boolean().optional(),
+    publishable: z.boolean().optional(),
     position: z.number().int().min(0).optional(),
     roleAccess: z.array(adminAttributeRoleAccessSchema).max(3).optional(),
     expectedUpdatedAt: z.string().datetime(),
@@ -408,6 +416,7 @@ export const updateTemplateAttributeSchema = z
       value.replicable !== undefined ||
       value.searchable !== undefined ||
       value.includeInTechnicalSheet !== undefined ||
+      value.publishable !== undefined ||
       value.position !== undefined ||
       value.roleAccess !== undefined;
     if (!hasChange)

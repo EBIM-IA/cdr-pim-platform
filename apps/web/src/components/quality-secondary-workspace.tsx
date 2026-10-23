@@ -46,6 +46,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { extractAssetCandidates, generateCommercialProposal } from '@/lib/ai-api';
 import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { fetchProducts } from '@/lib/catalog-api';
@@ -92,7 +93,7 @@ function BlockingNotice({
         <div>
           <strong className="text-sm">{title}</strong>
           <p className="mt-1 text-xs leading-relaxed text-amber-900/80">
-            {actionReason ?? reasons[0]?.reason ?? fallback}
+            {actionReason ?? fallback}
           </p>
         </div>
       </div>
@@ -274,6 +275,8 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const [contextError, setContextError] = useState<string | null>(null);
   const [result, setResult] = useState<AiExtractionCandidatesResponse | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Record<string, boolean>>({});
+  const [rejectedCandidates, setRejectedCandidates] = useState<Record<string, boolean>>({});
+  const [evidenceKey, setEvidenceKey] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -290,6 +293,8 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
     setSelectedAssetId('');
     setResult(null);
     setSelectedCandidates({});
+    setRejectedCandidates({});
+    setEvidenceKey(null);
     setContextError(null);
     setExtractError(null);
     setSaveError(null);
@@ -362,8 +367,9 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
       if (extractionRef.current !== controller) return;
       setResult(response);
       setSelectedCandidates(
-        Object.fromEntries(response.candidates.map((candidate) => [candidate.key, true])),
+        Object.fromEntries(response.candidates.map((candidate) => [candidate.key, false])),
       );
+      setRejectedCandidates({});
     } catch (requestError) {
       if (isAbortError(requestError) || extractionRef.current !== controller) return;
       setExtractError(
@@ -456,12 +462,12 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           workspace={workspace}
           actionId="extract-asset-candidates"
           title="Extracción documental no habilitada"
-          fallback="La API no anunció la operación de extracción para este entorno."
+          fallback="La extracción documental no está habilitada. Puedes consultar los archivos del producto y completar sus atributos desde la ficha."
         />
       ) : (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          La IA propone candidatos; no se persiste nada hasta que una persona seleccione y confirme
-          los campos editables.
+          La IA propone; los valores actuales se conservan hasta que aceptes una propuesta y
+          confirmes su aplicación. Descartar una sugerencia solo afecta esta revisión.
         </div>
       )}
       <ProductSelector
@@ -508,6 +514,9 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                     extractionRef.current?.abort();
                     setSelectedAssetId(event.target.value);
                     setResult(null);
+                    setSelectedCandidates({});
+                    setRejectedCandidates({});
+                    setEvidenceKey(null);
                     setExtractError(null);
                     setSaveNotice(null);
                   }}
@@ -587,32 +596,98 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                     (column) =>
                       column.key.toLocaleLowerCase('es') === candidate.key.toLocaleLowerCase('es'),
                   );
+                  const current = definition
+                    ? sheet?.product.attributes[definition.key]?.value
+                    : null;
+                  const accepted = selectedCandidates[candidate.key] ?? false;
+                  const rejected = rejectedCandidates[candidate.key] ?? false;
                   return (
-                    <label key={candidate.key} className="flex gap-3 rounded-xl border p-3 text-sm">
-                      <input
-                        type="checkbox"
-                        className="mt-1 size-4"
-                        checked={selectedCandidates[candidate.key] ?? false}
-                        onChange={(event) =>
-                          setSelectedCandidates((current) => ({
-                            ...current,
-                            [candidate.key]: event.target.checked,
-                          }))
-                        }
-                        aria-label={`Aplicar ${definition?.label ?? candidate.key}`}
-                      />
-                      <span className="min-w-0 flex-1">
+                    <div
+                      key={candidate.key}
+                      className={`rounded-lg border p-3 text-sm ${rejected ? 'bg-slate-50' : ''}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <strong className="block text-cdr-ink">
                           {definition?.label ?? candidate.key}
                         </strong>
-                        <span className="mt-1 block break-words text-muted-foreground">
-                          {candidate.value}
-                        </span>
                         <small className="mt-1 block text-violet-700">
                           Confianza {Math.round(candidate.confidence * 100)}%
                         </small>
-                      </span>
-                    </label>
+                      </div>
+                      <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Valor actual</dt>
+                          <dd className="mt-1 break-words">
+                            {current === null ||
+                            current === undefined ||
+                            (typeof current === 'string' && !current.trim())
+                              ? 'Sin valor'
+                              : typeof current === 'boolean'
+                                ? current
+                                  ? 'Sí'
+                                  : 'No'
+                                : String(current)}
+                            {current !== null && current !== undefined && definition?.unit
+                              ? ` ${definition.unit}`
+                              : ''}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Propuesta IA</dt>
+                          <dd className="mt-1 break-words">{candidate.value}</dd>
+                        </div>
+                      </dl>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setEvidenceKey(candidate.key)}
+                        >
+                          Evidencia
+                        </Button>
+                        <Button
+                          variant={accepted ? 'outline' : 'default'}
+                          size="sm"
+                          disabled={saving || !definition}
+                          aria-label={`Aceptar ${definition?.label ?? candidate.key}`}
+                          onClick={() => {
+                            setSelectedCandidates((current) => ({
+                              ...current,
+                              [candidate.key]: true,
+                            }));
+                            setRejectedCandidates((current) => ({
+                              ...current,
+                              [candidate.key]: false,
+                            }));
+                          }}
+                        >
+                          Aceptar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={saving}
+                          aria-label={`Rechazar ${definition?.label ?? candidate.key}`}
+                          onClick={() => {
+                            setSelectedCandidates((current) => ({
+                              ...current,
+                              [candidate.key]: false,
+                            }));
+                            setRejectedCandidates((current) => ({
+                              ...current,
+                              [candidate.key]: true,
+                            }));
+                          }}
+                        >
+                          Rechazar
+                        </Button>
+                        {accepted ? (
+                          <StatusBadge tone="warning">Aceptada · pendiente de aplicar</StatusBadge>
+                        ) : rejected ? (
+                          <StatusBadge tone="neutral">Descartada en esta revisión</StatusBadge>
+                        ) : null}
+                      </div>
+                    </div>
                   );
                 })
               )}
@@ -665,7 +740,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
             )}
             <Button
               onClick={() => void applyCandidates()}
-              disabled={saving || !result || result.candidates.length === 0}
+              disabled={saving || !result || !Object.values(selectedCandidates).some(Boolean)}
             >
               {saving ? (
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
@@ -677,6 +752,33 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           </div>
         </Card>
       </div>
+      {evidenceKey && result && selectedAsset ? (
+        <WorkspaceDrawer title="Evidencia de la sugerencia" onClose={() => setEvidenceKey(null)}>
+          <div className="space-y-4 text-sm">
+            <p>
+              <strong>Documento de origen:</strong> {selectedAsset.filename}
+            </p>
+            <p>
+              <strong>Atributo:</strong>{' '}
+              {editableDefinitions.find((definition) => definition.key === evidenceKey)?.label ??
+                evidenceKey}
+            </p>
+            <p>
+              <strong>Propuesta:</strong>{' '}
+              {result.candidates.find((candidate) => candidate.key === evidenceKey)?.value}
+            </p>
+            <p className="text-muted-foreground">
+              La extracción no incluye una cita ni una ubicación dentro del documento. Abre el
+              archivo y verifica el dato antes de aceptarlo.
+            </p>
+            <Button asChild variant="outline">
+              <a href={productAssetDownloadUrl(selectedAsset.id)} target="_blank" rel="noreferrer">
+                Abrir documento de origen
+              </a>
+            </Button>
+          </div>
+        </WorkspaceDrawer>
+      ) : null}
     </div>
   );
 }
@@ -689,6 +791,9 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<string | null>(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => requestRef.current?.abort(), []);
@@ -699,6 +804,9 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
     setResult(null);
     setError(null);
     setCopyNotice(null);
+    setDraft(null);
+    setEditingDraft(null);
+    setComparisonOpen(false);
   };
 
   const generate = async () => {
@@ -709,6 +817,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
     setGenerating(true);
     setError(null);
     setCopyNotice(null);
+    setDraft(null);
     try {
       const response = await generateCommercialProposal(
         product.id,
@@ -731,7 +840,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const copyProposal = async () => {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(result.proposal);
+      await navigator.clipboard.writeText(draft ?? result.proposal);
       setCopyNotice('Propuesta copiada al portapapeles.');
     } catch {
       setCopyNotice('No fue posible copiar automáticamente. Selecciona el texto manualmente.');
@@ -745,12 +854,12 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           workspace={workspace}
           actionId="generate-commercial-proposal"
           title="Generación comercial no habilitada"
-          fallback="La API no anunció la generación comercial para este entorno."
+          fallback="La generación comercial no está habilitada en este entorno. Consulta la descripción técnica desde la ficha del producto."
         />
       ) : (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          La propuesta se genera con datos visibles del producto y siempre queda no persistida,
-          pendiente de revisión humana.
+          Revisa y edita la propuesta antes de utilizarla. Los borradores de esta pantalla son
+          temporales y no cambian la descripción del producto.
         </div>
       )}
       <ProductSelector
@@ -776,7 +885,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
         <div className="grid gap-5 p-5 lg:grid-cols-2">
           <section className="rounded-xl border bg-slate-50 p-5">
             <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-semibold">Descripción técnica aprobada</h4>
+              <h4 className="text-sm font-semibold">Descripción técnica · referencia</h4>
               <StatusBadge tone={product ? 'success' : 'neutral'}>
                 {product?.sku ?? 'Sin SKU en contexto'}
               </StatusBadge>
@@ -794,6 +903,19 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                 </Link>
               </Button>
             ) : null}
+            {product?.attributes.length ? (
+              <div className="mt-4 border-t pt-4">
+                <h5 className="text-sm font-semibold">Datos técnicos disponibles</h5>
+                <dl className="mt-2 divide-y">
+                  {product.attributes.slice(0, 6).map((attribute) => (
+                    <div key={attribute.key} className="flex justify-between gap-3 py-2 text-xs">
+                      <dt className="text-muted-foreground">{attribute.label}</dt>
+                      <dd>{attribute.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
           </section>
           <section className="rounded-xl border border-violet-100 bg-violet-50/40 p-5">
             <div className="flex items-center justify-between gap-2">
@@ -803,13 +925,23 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                   {result ? 'No persistida' : 'Sin generar'}
                 </StatusBadge>
                 {result ? <StatusBadge tone="info">Revisión humana</StatusBadge> : null}
+                {draft !== null ? (
+                  <StatusBadge tone="warning">Borrador local editado</StatusBadge>
+                ) : null}
               </div>
             </div>
             {result ? (
               <>
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-cdr-ink">
-                  {result.proposal}
+                  {draft ?? result.proposal}
                 </p>
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                  <h5 className="font-semibold">Diferencias y advertencias</h5>
+                  <p className="mt-1">
+                    Valida medidas, materiales, aplicaciones y afirmaciones comerciales contra la
+                    ficha técnica. Este borrador no está aprobado para publicación.
+                  </p>
+                </div>
                 <dl className="mt-5 grid gap-2 border-t pt-4 text-xs text-muted-foreground sm:grid-cols-3">
                   <div>
                     <dt>Modelo</dt>
@@ -832,7 +964,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
             ) : (
               <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
                 Selecciona el producto y el canal. El resultado mostrará modelo y uso reportado, sin
-                fingir persistencia ni aprobación.
+                modificar la descripción vigente.
               </p>
             )}
             <div className="mt-4 min-h-5 text-xs" aria-live="polite">
@@ -861,6 +993,8 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                 setChannel(event.target.value as 'b2c' | 'b2b');
                 setResult(null);
                 setCopyNotice(null);
+                setDraft(null);
+                setEditingDraft(null);
               }}
               disabled={!canExecute || generating}
             >
@@ -870,9 +1004,17 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           </label>
           <div className="flex gap-2">
             {result ? (
-              <Button variant="outline" onClick={() => void copyProposal()}>
-                <ClipboardCopy className="size-4" aria-hidden="true" /> Copiar
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setComparisonOpen(true)}>
+                  Comparar versiones
+                </Button>
+                <Button variant="outline" onClick={() => setEditingDraft(draft ?? result.proposal)}>
+                  Editar propuesta
+                </Button>
+                <Button variant="outline" onClick={() => void copyProposal()}>
+                  <ClipboardCopy className="size-4" aria-hidden="true" /> Copiar
+                </Button>
+              </>
             ) : null}
             {generating ? (
               <Button variant="outline" onClick={() => requestRef.current?.abort()}>
@@ -887,6 +1029,60 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           </div>
         </div>
       </Card>
+      {editingDraft !== null ? (
+        <WorkspaceDrawer title="Editar propuesta comercial" onClose={() => setEditingDraft(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Edita un borrador temporal para revisarlo o copiarlo. Guardarlo aquí no modifica el
+              producto ni aprueba su publicación.
+            </p>
+            <label className="grid gap-2 text-sm">
+              Borrador comercial
+              <textarea
+                className="min-h-64 rounded-lg border p-3 text-sm"
+                value={editingDraft}
+                onChange={(event) => setEditingDraft(event.target.value)}
+                maxLength={20000}
+              />
+            </label>
+            <Button
+              disabled={!editingDraft.trim()}
+              onClick={() => {
+                setDraft(editingDraft.trim());
+                setEditingDraft(null);
+                setCopyNotice('Borrador local actualizado. La descripción vigente no cambió.');
+              }}
+            >
+              Guardar borrador local
+            </Button>
+          </div>
+        </WorkspaceDrawer>
+      ) : null}
+      {comparisonOpen && result ? (
+        <WorkspaceDrawer title="Comparación de versiones" onClose={() => setComparisonOpen(false)}>
+          <div className="space-y-5 text-sm">
+            <section>
+              <h3 className="font-semibold">Descripción técnica · referencia</h3>
+              <p className="mt-2 whitespace-pre-wrap">
+                {product?.description || 'Sin descripción técnica registrada.'}
+              </p>
+            </section>
+            <section className="border-t pt-4">
+              <h3 className="font-semibold">Propuesta IA original</h3>
+              <p className="mt-2 whitespace-pre-wrap">{result.proposal}</p>
+            </section>
+            {draft !== null ? (
+              <section className="border-t pt-4">
+                <h3 className="font-semibold">Borrador local editado</h3>
+                <p className="mt-2 whitespace-pre-wrap">{draft}</p>
+              </section>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              Las propuestas de esta revisión no están guardadas ni aprobadas en el producto.
+            </p>
+          </div>
+        </WorkspaceDrawer>
+      ) : null}
     </div>
   );
 }
@@ -952,8 +1148,8 @@ function DuplicatesWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <EmptyMetric label="Alertas abiertas" note="Motor de candidatos pendiente" />
-        <EmptyMetric label="Resueltas" note="Sin decisiones persistidas" />
+        <EmptyMetric label="Alertas abiertas" note="Sin alertas disponibles" />
+        <EmptyMetric label="Resueltas" note="Sin decisiones registradas" />
         <EmptyMetric label="Ya agrupados por ERP" note="Sin comparación disponible" />
         <Card className="min-h-28 p-4">
           <small className="text-muted-foreground">Fusiones automáticas</small>
@@ -963,8 +1159,8 @@ function DuplicatesWorkspace({ workspace }: { workspace: WorkspaceDto }) {
       </div>
       <BlockingNotice
         workspace={workspace}
-        title="No existe un motor de posibles duplicados"
-        fallback="Faltan criterios de similitud, candidatos persistidos, comparación y decisión humana auditada."
+        title="Sin alertas de duplicados disponibles"
+        fallback="No hay pares de productos disponibles para comparar. Cuando existan alertas, revisa sus diferencias antes de tomar una decisión."
       />
       <Card className="overflow-hidden">
         <div className="border-b p-5">
@@ -1006,7 +1202,7 @@ function DuplicatesWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                   />
                   <strong className="block text-sm text-cdr-ink">Sin candidatos disponibles</strong>
                   <span className="mt-1 block">
-                    El backend no publica pares, similitud ni motivos de coincidencia.
+                    No hay pares con información de similitud disponibles para revisión.
                   </span>
                 </td>
               </tr>
@@ -1026,15 +1222,15 @@ function ReviewWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <EmptyMetric label="Pendientes" note="Cola de revisión no implementada" />
-        <EmptyMetric label="Aprobadas" note="Sin decisiones persistidas" />
-        <EmptyMetric label="Con ajuste" note="Sin solicitudes persistidas" />
-        <EmptyMetric label="Creadas en la sesión" note="No se simulan solicitudes" />
+        <EmptyMetric label="Pendientes" note="Sin solicitudes disponibles" />
+        <EmptyMetric label="Aprobadas" note="Sin decisiones registradas" />
+        <EmptyMetric label="Con ajuste" note="Sin ajustes registrados" />
+        <EmptyMetric label="Creadas en la sesión" note="Sin solicitudes registradas" />
       </div>
       <BlockingNotice
         workspace={workspace}
-        title="Bandeja pendiente de modelo y permisos"
-        fallback="Faltan solicitudes, asignación, decisión, motivo, estado y auditoría de aprobación."
+        title="Sin solicitudes para revisar"
+        fallback="Las solicitudes aparecerán aquí cuando estén disponibles para revisión. No hay cambios pendientes que puedas aprobar desde esta vista."
       />
       <div className="flex flex-wrap gap-2" aria-label="Filtros de estado">
         {['Pendientes', 'Aprobadas', 'Con ajuste', 'Todas'].map((label, index) => (
@@ -1067,8 +1263,8 @@ function ReviewWorkspace({ workspace }: { workspace: WorkspaceDto }) {
               <tbody>
                 <tr>
                   <td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">
-                    Sin solicitudes reales. La vista se activará cuando el backend publique una cola
-                    autenticada.
+                    No hay solicitudes disponibles. Selecciona una solicitud cuando aparezca para
+                    revisar sus cambios y evidencia.
                   </td>
                 </tr>
               </tbody>
@@ -1147,7 +1343,7 @@ function SourcesWorkspace({
         <BlockingNotice
           workspace={workspace}
           title="Resolución de conflictos no disponible"
-          fallback="Faltan candidatos por fuente, prioridad aplicable, decisión con motivo y trazabilidad."
+          fallback="No hay candidatos de distintas fuentes disponibles para comparar. Consulta la prioridad de fuentes o completa la información del producto desde su ficha."
         />
       ) : loadState !== 'ready' ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
@@ -1160,7 +1356,7 @@ function SourcesWorkspace({
         <label className="flex-1 text-[10px] font-semibold text-muted-foreground">
           {conflict ? 'Conflicto' : 'Categoría / plantilla'}
           {conflict ? (
-            <Input className="mt-1" value="Sin conflictos persistidos" disabled readOnly />
+            <Input className="mt-1" value="Sin conflictos disponibles" disabled readOnly />
           ) : (
             <select
               className="mt-1 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-cdr-ink disabled:opacity-50"
@@ -1296,7 +1492,7 @@ function SourcesWorkspace({
               <h3 className="font-semibold text-cdr-ink">Matriz de prioridades por plantilla</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 {configuredCategories.length} categorías con orden confirmado y {pendingCount} sin
-                prioridad informada en el workbook.
+                prioridad informada en el catálogo de categorías.
               </p>
             </div>
             <div className="overflow-x-auto">

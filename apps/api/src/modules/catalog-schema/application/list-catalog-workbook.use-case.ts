@@ -19,7 +19,7 @@ export interface ListCatalogWorkbookQuery {
   readonly brand?: string;
   readonly status?: string;
   readonly applicationType?: string;
-  readonly completeness?: 'complete' | 'attention' | 'critical';
+  readonly completeness?: 'complete' | 'attention' | 'critical' | 'incomplete';
   readonly filter: readonly string[];
   readonly columnFilter?: readonly string[];
   readonly sort?: string;

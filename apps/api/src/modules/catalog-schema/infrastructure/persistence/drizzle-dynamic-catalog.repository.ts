@@ -25,6 +25,7 @@ import {
   type DynamicCatalogSchema,
   type ProductAttributeCell,
   type TemplateAttribute,
+  type TemplateAssetRequirement,
   validateAttributeValue,
 } from '../../domain/entities/catalog-schema';
 import type {
@@ -48,6 +49,7 @@ import {
   productTemplateAssignments,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
+  templateAssetRequirements,
   type ProductAttributeValueRow,
 } from './catalog-schema.tables';
 
@@ -278,6 +280,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         replicable: templateAttributeAssignments.replicable,
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+        publishable: templateAttributeAssignments.publishable,
         position: templateAttributeAssignments.position,
       })
       .from(templateAttributeAssignments)
@@ -348,6 +351,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     schema: DynamicCatalogSchema;
     product: CatalogGridProduct;
     completeness?: number | null;
+    assetRequirements?: readonly TemplateAssetRequirement[];
   } | null> {
     const rows = await this.db
       .select({
@@ -377,8 +381,27 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       roles,
     );
     if (!schema) return null;
-    const cells = await this.loadCells([productId], schema.attributes);
+    const [cells, assetRequirements] = await Promise.all([
+      this.loadCells([productId], schema.attributes),
+      this.db
+        .select({
+          type: templateAssetRequirements.typeCode,
+          required: templateAssetRequirements.required,
+        })
+        .from(templateAssetRequirements)
+        .where(
+          and(
+            eq(templateAssetRequirements.templateId, row.templateId),
+            eq(templateAssetRequirements.active, true),
+          ),
+        )
+        .orderBy(templateAssetRequirements.typeCode),
+    ]);
     return {
+      assetRequirements: assetRequirements.map((requirement) => ({
+        type: requirement.type as TemplateAssetRequirement['type'],
+        required: requirement.required,
+      })),
       schema,
       completeness: row.completeness,
       product: {
@@ -514,6 +537,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       if (options.completeness === 'complete') filters.push(sql`${score} >= 90`);
       if (options.completeness === 'attention') filters.push(sql`${score} >= 70 AND ${score} < 90`);
       if (options.completeness === 'critical') filters.push(sql`${score} < 70`);
+      if (options.completeness === 'incomplete') filters.push(sql`${score} < 100`);
     }
 
     if (options.q) {
@@ -1805,6 +1829,7 @@ function toTemplateAttribute(
     replicable: boolean;
     searchable: boolean;
     includeInTechnicalSheet: boolean;
+    publishable?: boolean;
     position: number;
   },
   permissions = { edit: false, import: false, export: false },

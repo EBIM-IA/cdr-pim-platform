@@ -15,6 +15,7 @@ import {
   products,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
+  templateAssetRequirements,
 } from '../../src/database/schema';
 import { PostgresAuditAdapter } from '../../src/modules/audit/infrastructure/persistence/postgres-audit.adapter';
 import { AttributeValueSource } from '../../src/modules/catalog-schema/domain/entities/catalog-schema';
@@ -347,6 +348,34 @@ describe('DrizzleDynamicCatalogRepository', () => {
     });
     expect(productRow!.completeness).toBeGreaterThan(0);
     expect(productRow!.completeness).toBeLessThan(100);
+    await database.db
+      .update(templateAttributeAssignments)
+      .set({ publishable: false })
+      .where(
+        and(
+          eq(templateAttributeAssignments.templateId, assignment!.templateId),
+          eq(templateAttributeAssignments.attributeDefinitionId, definitionId),
+        ),
+      );
+    const publicationSchema = await repository.getActiveSchema(
+      productRow!.category!.id,
+      { templateId: assignment!.templateId as ReturnType<typeof assertUuid> },
+      ['COMPRAS'],
+    );
+    expect(
+      publicationSchema?.attributes.find(
+        (attribute) => attribute.key === 'material_exclusivo_prueba',
+      )?.publishable,
+    ).toBe(false);
+    const publicationSheet = await repository.getProductSheet(
+      product!.id as ReturnType<typeof assertUuid>,
+      ['COMPRAS'],
+    );
+    expect(
+      publicationSheet?.schema.attributes.find(
+        (attribute) => attribute.key === 'material_exclusivo_prueba',
+      )?.publishable,
+    ).toBe(false);
     expect(all.facets.applicationTypes).toContain('INDUSTRIAL');
     expect(all.facets.applicationTypes).toContain('AUTOMOTRIZ');
     expect(
@@ -456,6 +485,26 @@ describe('DrizzleDynamicCatalogRepository', () => {
     );
     expect(sheetBeforeAsset?.completeness).toBe(completenessBeforeAsset);
     expect(sheetBeforeAsset!.completeness).toBeLessThan(100);
+    expect(sheetBeforeAsset?.assetRequirements).toContainEqual({ type: 'FT', required: true });
+    await database.db
+      .insert(templateAssetRequirements)
+      .values({
+        templateId: assignment!.templateId,
+        typeCode: 'CERT',
+        required: true,
+        active: false,
+      })
+      .onConflictDoUpdate({
+        target: [templateAssetRequirements.templateId, templateAssetRequirements.typeCode],
+        set: { active: false, required: true },
+      });
+    const activePolicies = await repository.getProductSheet(
+      product!.id as ReturnType<typeof assertUuid>,
+      ['COMPRAS'],
+    );
+    expect(
+      activePolicies?.assetRequirements?.some((requirement) => requirement.type === 'CERT'),
+    ).toBe(false);
     await database.db.insert(productAssets).values({
       id: newUuid(),
       productId: product!.id,
@@ -496,6 +545,56 @@ describe('DrizzleDynamicCatalogRepository', () => {
         })
       ).columns.some((column) => column.key === 'material_exclusivo_prueba'),
     ).toBe(false);
+  });
+
+  it('filters incomplete readiness across the whole catalog without changing existing bands', async () => {
+    const all = await repository.listWorkbook({
+      roles: ['COMPRAS'],
+      page: 1,
+      pageSize: 100,
+      filters: [],
+    });
+    const fixture = all.items.find((item) => item.template);
+    expect(fixture?.template).toBeTruthy();
+    // Make one template have no required attributes or assets: its assigned products score 100.
+    await database.db
+      .update(templateAttributeAssignments)
+      .set({ required: false })
+      .where(eq(templateAttributeAssignments.templateId, fixture!.template!.id));
+    await database.db
+      .update(templateAssetRequirements)
+      .set({ required: false })
+      .where(eq(templateAssetRequirements.templateId, fixture!.template!.id));
+    const base = await repository.listWorkbook({
+      roles: ['COMPRAS'],
+      page: 1,
+      pageSize: 100,
+      filters: [],
+    });
+    const incomplete = await repository.listWorkbook({
+      roles: ['COMPRAS'],
+      page: 1,
+      pageSize: 1,
+      filters: [],
+      completeness: 'incomplete',
+    });
+    expect(base.items.find((item) => item.id === fixture!.id)?.completeness).toBe(100);
+    expect(incomplete.total).toBe(
+      base.items.filter((item) => item.completeness !== null && item.completeness < 100).length,
+    );
+    expect(
+      incomplete.items.every((item) => item.completeness !== null && item.completeness < 100),
+    ).toBe(true);
+    const completeBand = await repository.listWorkbook({
+      roles: ['COMPRAS'],
+      page: 1,
+      pageSize: 100,
+      filters: [],
+      completeness: 'complete',
+    });
+    expect(
+      completeBand.items.every((item) => item.completeness !== null && item.completeness >= 90),
+    ).toBe(true);
   });
 
   it('enforces optimistic concurrency and replicates configured values in codigoUnificador', async () => {

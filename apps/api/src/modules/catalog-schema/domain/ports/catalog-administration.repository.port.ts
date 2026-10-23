@@ -32,6 +32,7 @@ export interface CatalogAdministrationRepositoryPort {
     replicable?: boolean;
     searchable?: boolean;
     includeInTechnicalSheet?: boolean;
+    publishable?: boolean;
     position?: number;
     roleAccess?: readonly AttributeRoleAccess[];
     expectedUpdatedAt: Date;

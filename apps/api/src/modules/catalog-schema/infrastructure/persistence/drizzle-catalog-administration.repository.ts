@@ -5,11 +5,12 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
 import { AuditAction, createAuditEntry } from '../../../audit/domain/entities/audit-entry';
-import type {
-  AdminAttributeTemplate,
-  AdminCatalogCategory,
-  AdminTemplateAttribute,
-  AttributeRoleAccess,
+import {
+  type AdminAttributeTemplate,
+  type AdminCatalogCategory,
+  type AdminTemplateAttribute,
+  type AttributeRoleAccess,
+  assertTemplatePublicationSelection,
 } from '../../domain/entities/catalog-administration';
 import type {
   AdminMutationResult,
@@ -142,6 +143,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           replicable: templateAttributeAssignments.replicable,
           searchable: templateAttributeAssignments.searchable,
           includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+          publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
           position: templateAttributeAssignments.position,
           updatedAt: templateAttributeAssignments.updatedAt,
@@ -169,6 +171,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
       if (assignment.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
         return { kind: 'version_conflict', actualUpdatedAt: assignment.updatedAt } as const;
       }
+      assertTemplatePublicationSelection(assignment.key, input.publishable);
 
       await transaction
         .update(templateAttributeAssignments)
@@ -182,6 +185,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           ...(input.includeInTechnicalSheet !== undefined
             ? { includeInTechnicalSheet: input.includeInTechnicalSheet }
             : {}),
+          ...(input.publishable !== undefined ? { publishable: input.publishable } : {}),
           ...(input.position !== undefined ? { position: input.position } : {}),
         })
         .where(
@@ -227,6 +231,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           replicable: templateAttributeAssignments.replicable,
           searchable: templateAttributeAssignments.searchable,
           includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+          publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
           position: templateAttributeAssignments.position,
           updatedAt: templateAttributeAssignments.updatedAt,
@@ -287,6 +292,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         replicable: templateAttributeAssignments.replicable,
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+        publishable: templateAttributeAssignments.publishable,
         active: templateAttributeAssignments.active,
         position: templateAttributeAssignments.position,
         updatedAt: templateAttributeAssignments.updatedAt,
@@ -389,6 +395,7 @@ function assignmentConfiguration(attribute: AdminTemplateAttribute) {
     replicable: attribute.replicable,
     searchable: attribute.searchable,
     includeInTechnicalSheet: attribute.includeInTechnicalSheet,
+    publishable: attribute.publishable,
     position: attribute.position,
   };
 }
