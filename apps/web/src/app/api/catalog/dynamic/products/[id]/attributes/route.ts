@@ -8,13 +8,14 @@ import {
   invalidCatalogRequest,
   unauthenticatedCatalogResponse,
 } from '@/lib/dynamic-catalog-route';
+import { env } from '@/lib/env';
 import { securePrivateResponse } from '@/lib/http-security';
 import { getAccessToken } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  if (!hasExpectedOrigin(request.headers.get('origin'), request.nextUrl.origin)) {
+  if (!hasExpectedOrigin(request.headers.get('origin'), env.PUBLIC_APP_ORIGIN)) {
     return securePrivateResponse(
       NextResponse.json({ message: 'Origen de solicitud no permitido.' }, { status: 403 }),
     );

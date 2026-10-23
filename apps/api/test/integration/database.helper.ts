@@ -109,6 +109,9 @@ export async function createTestDatabase(): Promise<TestDatabase> {
                 DISABLE TRIGGER audit_entries_no_truncate;
 
               TRUNCATE TABLE
+                file_cleanup_candidates,
+                file_inventory_cursors,
+                file_maintenance_leases,
                 product_catalog_shares,
                 product_catalogs,
                 ax_inbound_records,

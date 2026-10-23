@@ -2,6 +2,7 @@
 #
 #   docker compose up -d                 -> PostgreSQL + pgvector only (the default)
 #   docker compose --profile aws up -d   -> also LocalStack, for the SQS walking skeleton
+#   docker compose --profile security up -d clamav -> local upload malware scanning
 #
 # The applications themselves are NOT run from Compose: `pnpm dev` gives hot reload and a
 # far better debugging experience. Compose only provides the stateful dependencies.
@@ -54,6 +55,47 @@ services:
       timeout: 5s
       retries: 12
 
+  clamav:
+    image: clamav/clamav:1.5.4@sha256:e19130cdebaeacc71fa46eab3ed6f69941f2f22aa5e08d55e9197f8edf43ce5e
+    # This pinned release publishes linux/amd64; Docker Desktop uses emulation on ARM hosts.
+    platform: linux/amd64
+    container_name: cdr-pim-clamav
+    profiles: ['security']
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 4g
+    environment:
+      TZ: UTC
+      # Containers have their own network namespace in Compose. Only the host-loopback
+      # mapping below is exposed; ECS instead configures TCPAddr=127.0.0.1 in awsvpc.
+      CLAMD_CONF_TCPAddr: 0.0.0.0
+      CLAMD_CONF_TCPSocket: '3310'
+      CLAMD_CONF_MaxThreads: '2'
+      CLAMD_CONF_StreamMaxLength: 64M
+      CLAMD_CONF_MaxFileSize: 64M
+      CLAMD_CONF_MaxScanSize: 256M
+      CLAMD_CONF_MaxRecursion: '16'
+      CLAMD_CONF_MaxFiles: '1000'
+      CLAMD_CONF_MaxScanTime: '20000'
+      CLAMD_CONF_AlertExceedsMax: 'yes'
+      CLAMD_CONF_AlertEncrypted: 'yes'
+      CLAMD_CONF_ConcurrentDatabaseReload: 'no'
+      CLAMD_CONF_FailIfCvdOlderThan: '7'
+      FRESHCLAM_CHECKS: '12'
+      CLAMAV_NO_MILTERD: 'true'
+    ports:
+      - '127.0.0.1:3310:3310'
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ['CMD', 'clamdcheck.sh']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
 volumes:
   postgres-data:
     name: cdr-pim-postgres-data
+  clamav-data:
+    name: cdr-pim-clamav-data

@@ -1,3 +1,4 @@
+import { FileMaintenanceModule } from './modules/file-maintenance/file-maintenance.module';
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -131,6 +132,7 @@ import { API_ENV } from './shared/tokens';
     IntegrationsModule,
     ProductAssetsModule,
     ProductCatalogsModule,
+    FileMaintenanceModule,
     AxIntegrationModule,
     WorkspacesModule,
   ],

@@ -1,3 +1,4 @@
+import { lockFileObject } from '../../../../shared/persistence/file-object-lock';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConflictError, type Uuid } from '@cdr/shared';
 import { and, asc, desc, eq, inArray, isNull, max } from 'drizzle-orm';
@@ -96,10 +97,13 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
     actorId: string,
     now: Date,
     audit: (saved: ProductAsset, replaced: ProductAsset | null) => AuditEntry,
+    assertObjectAvailable?: () => Promise<void>,
   ): Promise<{ saved: ProductAsset; replaced: ProductAsset | null }> {
     const snapshot = asset.toSnapshot();
     try {
       return await this.database.transaction(async (transaction) => {
+        await lockFileObject(transaction, snapshot.objectKey);
+        await assertObjectAvailable?.();
         // All asset-slot mutations for a product serialize on its catalog row.
         await transaction
           .select({ id: products.id })

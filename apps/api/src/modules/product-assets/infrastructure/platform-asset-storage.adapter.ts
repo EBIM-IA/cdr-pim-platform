@@ -24,6 +24,10 @@ export class PlatformAssetStorageAdapter implements AssetBinaryStoragePort {
     return this.storage.get(key);
   }
 
+  exists(key: string): Promise<boolean> {
+    return this.storage.exists(key);
+  }
+
   delete(key: string): Promise<void> {
     return this.storage.delete(key);
   }

@@ -44,6 +44,7 @@ function setup() {
       objects.set(key, bytes);
     }),
     get: vi.fn(async (key) => objects.get(key)!),
+    exists: vi.fn(async (key) => objects.has(key)),
   };
   const repository: ProductCatalogRepositoryPort = {
     list: vi.fn(async () => ({

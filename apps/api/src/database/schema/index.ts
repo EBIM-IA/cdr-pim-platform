@@ -1,4 +1,9 @@
 import {
+  fileCleanupCandidates,
+  fileInventoryCursors,
+  fileMaintenanceLeases,
+} from '../../modules/file-maintenance/infrastructure/persistence/file-maintenance.tables';
+import {
   productCatalogs,
   productCatalogShares,
 } from '../../modules/product-catalogs/infrastructure/persistence/product-catalogs.tables';
@@ -47,6 +52,9 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  fileCleanupCandidates,
+  fileInventoryCursors,
+  fileMaintenanceLeases,
   axInboundBatches,
   axInboundRecords,
   auditChangeItems,
@@ -76,6 +84,9 @@ export const schema = {
 };
 
 export {
+  fileCleanupCandidates,
+  fileInventoryCursors,
+  fileMaintenanceLeases,
   axInboundBatches,
   axInboundRecords,
   auditChangeItems,

@@ -1,3 +1,5 @@
+import { PRODUCT_ASSET_OBJECT_REFERENCES } from './domain/ports/product-asset-object-references.port';
+import { DrizzleProductAssetObjectReferences } from './infrastructure/persistence/drizzle-product-asset-object-references';
 import { Module } from '@nestjs/common';
 
 import { CatalogModule } from '../catalog/catalog.module';
@@ -23,6 +25,7 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
   imports: [CatalogModule],
   controllers: [ProductAssetsController],
   providers: [
+    { provide: PRODUCT_ASSET_OBJECT_REFERENCES, useClass: DrizzleProductAssetObjectReferences },
     { provide: PRODUCT_ASSET_REPOSITORY, useClass: DrizzleProductAssetRepository },
     { provide: ASSET_BINARY_STORAGE, useClass: PlatformAssetStorageAdapter },
     { provide: ARCHIVE_READER, useClass: SafeZipReaderAdapter },
@@ -33,6 +36,6 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
     DeleteProductAssetUseCase,
     ProcessProductAssetArchiveUseCase,
   ],
-  exports: [PRODUCT_ASSET_REPOSITORY, ASSET_BINARY_STORAGE],
+  exports: [PRODUCT_ASSET_REPOSITORY, ASSET_BINARY_STORAGE, PRODUCT_ASSET_OBJECT_REFERENCES],
 })
 export class ProductAssetsModule {}
