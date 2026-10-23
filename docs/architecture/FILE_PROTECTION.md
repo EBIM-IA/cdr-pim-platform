@@ -19,7 +19,9 @@ definition. The official ClamAV 1.5.4 image is pinned by digest and runs beside
 the API on the same task. The listener binds to `127.0.0.1:3310`, without a port
 mapping. The API waits for the scanner's health check. The scanner has a 4096 MiB
 hard memory limit; the task reserves at least 6144 MiB and a compatible Fargate
-CPU size, preserving larger existing allocations. This increases runtime
+CPU size, preserving larger existing allocations. Health checks require an actual
+PONG reply from IPv4 loopback, matching the API connection without relying on
+how the container resolves `localhost`. This increases runtime
 capacity compared with an API-only task.
 
 FreshClam checks for updates twelve times daily. The container includes initial

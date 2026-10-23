@@ -27,6 +27,10 @@ CLAMAV_IMAGE = (
 CLAMAV_CPU = 512
 CLAMAV_MEMORY = 4096
 MINIMUM_TASK_MEMORY = 6144
+CLAMAV_HEALTH_COMMAND = (
+    "CMD-SHELL",
+    "printf 'nPING\\n' | nc -w 3 127.0.0.1 3310 | grep -qx PONG",
+)
 API_ENVIRONMENT = {
     "MALWARE_SCAN_DRIVER": "clamav",
     "CLAMAV_HOST": "127.0.0.1",
@@ -133,7 +137,7 @@ def configure_api_file_protection(definition: dict[str, Any]) -> dict[str, Any]:
         "memory": CLAMAV_MEMORY,
         "environment": environment_values(CLAMAV_ENVIRONMENT),
         "healthCheck": {
-            "command": ["CMD", "clamdcheck.sh"],
+            "command": list(CLAMAV_HEALTH_COMMAND),
             "interval": 30,
             "timeout": 5,
             "retries": 3,
@@ -206,7 +210,7 @@ def check_api_file_protection(definition: dict[str, Any]) -> None:
     ] or api.get("startTimeout") != 120:
         raise ValueError("The running API must wait for the healthy scanner")
     if scanner.get("healthCheck") != {
-        "command": ["CMD", "clamdcheck.sh"],
+        "command": list(CLAMAV_HEALTH_COMMAND),
         "interval": 30,
         "timeout": 5,
         "retries": 3,

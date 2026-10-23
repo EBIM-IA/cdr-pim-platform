@@ -88,7 +88,9 @@ services:
     volumes:
       - clamav-data:/var/lib/clamav
     healthcheck:
-      test: ['CMD', 'clamdcheck.sh']
+      test:
+        - CMD-SHELL
+        - printf 'nPING\n' | nc -w 3 127.0.0.1 3310 | grep -qx PONG
       interval: 30s
       timeout: 5s
       retries: 3

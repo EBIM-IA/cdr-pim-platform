@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -96,7 +97,7 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
         self.assertEqual(scanner_env["FRESHCLAM_CHECKS"], "12")
         self.assertNotIn("CLAMAV_NO_FRESHCLAMD", scanner_env)
         self.assertEqual(scanner["healthCheck"], {
-            "command": ["CMD", "clamdcheck.sh"], "interval": 30, "timeout": 5,
+            "command": ["CMD-SHELL", "printf 'nPING\\n' | nc -w 3 127.0.0.1 3310 | grep -qx PONG"], "interval": 30, "timeout": 5,
             "retries": 3, "startPeriod": 300,
         })
         self.assertEqual(api["startTimeout"], 120)
@@ -107,6 +108,30 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
         self.assertEqual(scanner["logConfiguration"]["options"]["awslogs-group"], "/existing/api")
         self.assertEqual(scanner["logConfiguration"]["options"]["awslogs-stream-prefix"], "clamav")
         self.assertEqual(api["logConfiguration"]["options"]["awslogs-stream-prefix"], "api")
+
+    def test_ipv4_health_command_sends_newline_framed_ping_and_requires_exact_pong(self) -> None:
+        command = PROTECTION.configure_api_file_protection(task_definition())["containerDefinitions"][-1]["healthCheck"]["command"]
+        self.assertEqual(command[0], "CMD-SHELL")
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            capture = folder / "request"
+            nc = folder / "nc"
+            nc.write_text(
+                f'#!{sys.executable}\n'
+                'import os, sys\n'
+                'from pathlib import Path\n'
+                'if sys.argv[1:] != ["-w", "3", "127.0.0.1", "3310"]: sys.exit(9)\n'
+                'Path(os.environ["HEALTH_CAPTURE"]).write_bytes(sys.stdin.buffer.read())\n'
+                'sys.stdout.write(os.environ["HEALTH_RESPONSE"])\n'
+            )
+            nc.chmod(0o700)
+            for response, accepted in [("PONG\n", True), ("PONG altered\n", False), ("NOT PONG\n", False), ("", False)]:
+                with self.subTest(response=response):
+                    result = subprocess.run(["/bin/sh", "-c", command[1]], capture_output=True, check=False,
+                                            env={**os.environ, "PATH": f"{folder}{os.pathsep}{os.environ['PATH']}",
+                                                 "HEALTH_CAPTURE": str(capture), "HEALTH_RESPONSE": response}, timeout=5)
+                    self.assertEqual(result.returncode == 0, accepted)
+                    self.assertEqual(capture.read_bytes(), b"nPING\n")
 
     def test_replaces_old_scanner_and_deduplicates_its_environment_and_dependency_idempotently(self) -> None:
         source = task_definition()
@@ -215,6 +240,7 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
             lambda td: td["containerDefinitions"][-1].update(memory=2048),
             lambda td: td["containerDefinitions"][-1].update(cpu=256),
             lambda td: td["containerDefinitions"][-1].update(healthCheck={"command": ["CMD", "true"]}),
+            lambda td: td["containerDefinitions"][-1]["healthCheck"].update(command=["CMD", "clamdcheck.sh"]),
             lambda td: td["containerDefinitions"][0].update(dependsOn=[]),
             lambda td: td["containerDefinitions"][0].update(startTimeout=1),
             lambda td: td.update(memory="4096"),
