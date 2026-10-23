@@ -32,6 +32,7 @@ export interface Product {
   queryChannel?: string;
   technicalId?: string;
   templateKey?: string;
+  classificationPending?: boolean;
   updatedAt?: string;
   attributes: ProductAttribute[];
 }

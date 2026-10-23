@@ -1782,19 +1782,34 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         ORDER BY COUNT(*) DESC, NULLIF(BTRIM(brand), '') NULLS LAST
         LIMIT 20
       `,
-      this.sql<{ category: string; products: number }[]>`
-        SELECT category.name AS "category", COUNT(DISTINCT product.id)::int AS "products"
-        FROM catalog_categories category
-        INNER JOIN attribute_templates template
-          ON template.category_id = category.id
+      this.sql<{ categoryId: string; category: string; products: number }[]>`
+        WITH RECURSIVE category_roots AS (
+          SELECT id AS category_id, id AS root_id
+          FROM catalog_categories
+          WHERE parent_id IS NULL AND active = true
+
+          UNION
+
+          SELECT child.id AS category_id, ancestor.root_id
+          FROM catalog_categories child
+          INNER JOIN category_roots ancestor ON child.parent_id = ancestor.category_id
+          WHERE child.active = true
+        )
+        SELECT
+          root.id::text AS "categoryId",
+          root.name AS "category",
+          COUNT(DISTINCT product.id)::int AS "products"
+        FROM catalog_categories root
+        LEFT JOIN category_roots descendant ON descendant.root_id = root.id
+        LEFT JOIN attribute_templates template
+          ON template.category_id = descendant.category_id
          AND template.status = 'active'
-        INNER JOIN product_template_assignments assignment
+        LEFT JOIN product_template_assignments assignment
           ON assignment.template_id = template.id
-        INNER JOIN products product ON product.id = assignment.product_id
-        WHERE category.active = true
-        GROUP BY category.id, category.name
-        ORDER BY COUNT(DISTINCT product.id) DESC, category.name
-        LIMIT 100
+        LEFT JOIN products product ON product.id = assignment.product_id
+        WHERE root.parent_id IS NULL AND root.active = true
+        GROUP BY root.id, root.name
+        ORDER BY COUNT(DISTINCT product.id) DESC, root.name, root.id
       `,
       this.sql<
         {
@@ -1861,9 +1876,13 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         id: `brand:${row.brand ?? 'missing'}:${index}`,
         values: { section: 'Marca', indicator: row.brand ?? 'Sin marca', value: row.products },
       })),
-      ...categories.map((row, index) => ({
-        id: `category:${index}:${row.category}`,
-        values: { section: 'Categoría', indicator: row.category, value: row.products },
+      ...categories.map((row) => ({
+        id: `category:${row.categoryId}`,
+        values: {
+          section: 'Categoría',
+          indicator: row.category,
+          value: row.products,
+        },
       })),
     ];
 

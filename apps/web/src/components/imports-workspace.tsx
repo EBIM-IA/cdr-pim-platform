@@ -297,8 +297,16 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     const params = new URLSearchParams(window.location.search);
     const requested = params.get('view');
     const batchId = params.get('batch') ?? '';
+    const destination = params.get('target');
+    if (destination && Object.hasOwn(targetLabels, destination)) {
+      const requestedTarget = destination as ImportTarget;
+      setTarget(requestedTarget);
+      setPayload(csvExamples[requestedTarget]);
+      setFileName(`${requestedTarget}.csv`);
+      setIdempotencyKey(newKey(requestedTarget));
+    }
     if (requested === 'new') setMode('new');
-    if (requested === 'result' && batchId) {
+    if (requested === 'result') {
       setMode('result');
       setResultId(batchId);
     }
@@ -336,6 +344,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     if (next === 'history') {
       url.searchParams.delete('view');
       url.searchParams.delete('batch');
+      url.searchParams.delete('target');
     } else {
       url.searchParams.set('view', next);
       if (batchId) url.searchParams.set('batch', batchId);
@@ -980,9 +989,14 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
           </div>
         ) : (
           <StatePanel
-            variant="error"
-            title="Resultado no disponible"
-            description={error ?? 'No se encontró el lote solicitado.'}
+            variant={resultId ? 'error' : 'empty'}
+            title={resultId ? 'Resultado no disponible' : 'Selecciona un lote de importación'}
+            description={
+              error ??
+              (resultId
+                ? 'No se encontró el lote solicitado.'
+                : 'Abre un lote desde el historial para consultar sus registros válidos, errores y estado de procesamiento.')
+            }
             actionLabel="Volver al historial"
             onAction={() => navigate('history')}
           />

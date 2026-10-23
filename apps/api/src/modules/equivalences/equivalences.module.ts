@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 
+import { CatalogModule } from '../catalog/catalog.module';
+import { CatalogExternalHomologReferencePolicy } from './application/catalog-external-homolog-reference.policy';
+import { EXTERNAL_HOMOLOG_REFERENCE_POLICY } from './domain/ports/external-homolog-reference-policy.port';
 import { EQUIVALENCE_GROUP_REPOSITORY } from './domain/ports/equivalence-group-repository.port';
 import { EXTERNAL_HOMOLOG_REPOSITORY } from './domain/ports/external-homolog-repository.port';
 import { GROUP_OEM_CODE_REPOSITORY } from './domain/ports/group-oem-code-repository.port';
@@ -32,11 +35,13 @@ import { OemCodesController } from './presentation/oem-codes.controller';
  * functional decision still pending with Casa del Rulimán.
  */
 @Module({
+  imports: [CatalogModule],
   controllers: [ExternalHomologsController, OemCodesController],
   providers: [
     { provide: EQUIVALENCE_GROUP_REPOSITORY, useClass: DrizzleEquivalenceGroupRepository },
     { provide: EXTERNAL_HOMOLOG_REPOSITORY, useClass: DrizzleExternalHomologRepository },
     { provide: GROUP_OEM_CODE_REPOSITORY, useClass: DrizzleGroupOemCodeRepository },
+    { provide: EXTERNAL_HOMOLOG_REFERENCE_POLICY, useClass: CatalogExternalHomologReferencePolicy },
     ListExternalHomologsUseCase,
     CreateExternalHomologUseCase,
     DeactivateExternalHomologUseCase,
@@ -48,6 +53,11 @@ import { OemCodesController } from './presentation/oem-codes.controller';
     DeactivateGroupOemCodeUseCase,
     SearchEligibleOemCodesUseCase,
   ],
-  exports: [EQUIVALENCE_GROUP_REPOSITORY, EXTERNAL_HOMOLOG_REPOSITORY, GROUP_OEM_CODE_REPOSITORY],
+  exports: [
+    EQUIVALENCE_GROUP_REPOSITORY,
+    EXTERNAL_HOMOLOG_REPOSITORY,
+    GROUP_OEM_CODE_REPOSITORY,
+    EXTERNAL_HOMOLOG_REFERENCE_POLICY,
+  ],
 })
 export class EquivalencesModule {}

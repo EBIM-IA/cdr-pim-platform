@@ -414,7 +414,7 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
 
       <div className="sticky top-0 z-20 -mx-1 mb-5 space-y-2 bg-cdr-canvas/95 px-1 py-2 backdrop-blur">
         <nav
-          className="grid gap-2 sm:grid-cols-3"
+          className="flex gap-1 overflow-x-auto border-b"
           aria-label="Vistas de Código Unificador y Homólogos"
         >
           {(
@@ -428,12 +428,15 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
               key={key}
               type="button"
               onClick={() => changeView(key)}
-              className={`rounded-lg border px-4 py-3 text-left text-sm font-semibold ${
-                view === key ? 'border-primary bg-orange-50 ring-1 ring-primary' : 'bg-white'
+              aria-current={view === key ? 'page' : undefined}
+              className={`shrink-0 border-b-2 px-4 py-2 text-left text-sm ${
+                view === key
+                  ? 'border-primary bg-white text-primary'
+                  : 'border-transparent text-muted-foreground hover:bg-slate-50'
               }`}
             >
               {label}
-              <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-primary">
+              <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
                 {count}
               </span>
             </button>
@@ -457,11 +460,22 @@ export function EquivalencesWorkspace({ canWrite }: { canWrite: boolean }) {
               />
               Actualizar
             </Button>
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/imports">
-                <Upload className="size-4" aria-hidden="true" /> Importar
-              </Link>
-            </Button>
+            {view === 'homologs' ? (
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/imports?view=new&target=homologs">
+                  <Upload className="size-4" aria-hidden="true" /> Importar
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled
+                title="La importación de asignaciones de código unificador requiere el contrato de sincronización con AX"
+              >
+                <Upload className="size-4" aria-hidden="true" /> Importar códigos
+              </Button>
+            )}
             {exportData ? (
               <TableExportButtons {...exportData} disabled={loading || groups.loading} />
             ) : null}

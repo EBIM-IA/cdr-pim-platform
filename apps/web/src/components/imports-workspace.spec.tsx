@@ -131,6 +131,23 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ImportsWorkspace', () => {
+  it('explica cómo abrir un resultado cuando la ruta no tiene un lote seleccionado', async () => {
+    window.history.replaceState({}, '', '/imports?view=result');
+    render(<ImportsWorkspace canExecute />);
+    expect(await screen.findByRole('heading', { name: 'Resultado de importación' })).toBeVisible();
+    expect(screen.getByText('Selecciona un lote de importación')).toBeVisible();
+    expect(getImport).not.toHaveBeenCalled();
+  });
+
+  it('abre una nueva carga desde OEM con el destino y la plantilla correspondientes', async () => {
+    window.history.replaceState({}, '', '/imports?view=new&target=oem');
+    render(<ImportsWorkspace canExecute />);
+
+    expect(await screen.findByLabelText('Destino')).toHaveValue('oem');
+    expect(screen.getByDisplayValue(/codigo_unificador,codigo_oem,marcas/)).toBeInTheDocument();
+    expect(screen.getByText('Arrastra un archivo XLSX, CSV o JSON')).toBeInTheDocument();
+  });
+
   it('opens a persisted result from the history and keeps it addressable by URL', async () => {
     render(<ImportsWorkspace canExecute />);
 

@@ -110,6 +110,12 @@ export interface DynamicCatalogRepositoryPort {
       slug: string;
       name: string;
       path: string;
+      ancestors?: readonly {
+        readonly id: Uuid;
+        readonly slug: string;
+        readonly name: string;
+        readonly path: string;
+      }[];
       templateId: Uuid;
       templateVariantKey: string;
       templateName: string;
@@ -124,7 +130,11 @@ export interface DynamicCatalogRepositoryPort {
   getProductSheet(
     productId: Uuid,
     roles: readonly string[],
-  ): Promise<{ schema: DynamicCatalogSchema; product: CatalogGridProduct } | null>;
+  ): Promise<{
+    schema: DynamicCatalogSchema;
+    product: CatalogGridProduct;
+    completeness?: number | null;
+  } | null>;
   listGrid(options: CatalogGridOptions): Promise<{ items: CatalogGridProduct[]; total: number }>;
   listWorkbook(options: CatalogWorkbookOptions): Promise<CatalogWorkbookResult>;
   findProductAttributeAssignment(

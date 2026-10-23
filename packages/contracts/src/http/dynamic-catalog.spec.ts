@@ -4,6 +4,8 @@ import {
   catalogGridQuerySchema,
   catalogWorkbookQuerySchema,
   catalogWorkbookResultSchema,
+  catalogWorkbookProductSchema,
+  catalogCategorySummarySchema,
   updateProductAttributeSchema,
   updateProductAttributesBatchSchema,
   updateTemplateAttributeSchema,
@@ -11,6 +13,54 @@ import {
 } from './dynamic-catalog';
 
 describe('dynamic catalog contracts', () => {
+  it('represents an unclassified SKU without inventing a category, template or completeness', () => {
+    expect(
+      catalogWorkbookProductSchema.parse({
+        id: '11111111-1111-4111-8111-111111111111',
+        sku: 'PENDING-AX',
+        name: 'Pendiente de clasificación',
+        description: null,
+        brand: null,
+        status: 'in_review',
+        updatedAt: '2026-10-22T12:00:00.000Z',
+        category: null,
+        template: null,
+        providerCode: null,
+        unifiedCode: null,
+        applicationTypes: [],
+        completeness: null,
+        attributes: { medida: { applicable: false } },
+      }),
+    ).toMatchObject({ category: null, template: null, completeness: null });
+  });
+
+  it('accepts persisted ancestors while preserving category summaries without that optional field', () => {
+    const category = {
+      id: '11111111-1111-4111-8111-111111111111',
+      slug: 'filtros-aire-rectangular',
+      name: 'Filtro rectangular',
+      path: 'FILTROS > AIRE > RECTANGULAR',
+      templateId: '22222222-2222-4222-8222-222222222222',
+      templateVariantKey: '22.1',
+      templateName: 'Filtro rectangular',
+      templateVersion: 1,
+    };
+    expect(catalogCategorySummarySchema.parse(category)).toEqual(category);
+    expect(
+      catalogCategorySummarySchema.parse({
+        ...category,
+        ancestors: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            slug: 'filtros',
+            name: 'Filtros',
+            path: 'FILTROS',
+          },
+        ],
+      }).ancestors,
+    ).toHaveLength(1);
+  });
+
   it('normalises one or many attribute filters', () => {
     const categoryId = '11111111-1111-4111-8111-111111111111';
     const templateId = '22222222-2222-4222-8222-222222222222';

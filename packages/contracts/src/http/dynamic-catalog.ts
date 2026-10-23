@@ -73,6 +73,9 @@ export const catalogCategorySummarySchema = z.object({
   slug: z.string(),
   name: z.string(),
   path: z.string(),
+  ancestors: z
+    .array(z.object({ id: uuidSchema, slug: z.string(), name: z.string(), path: z.string() }))
+    .optional(),
   templateId: uuidSchema,
   templateVariantKey: z.string().trim().min(1).max(100),
   templateName: z.string(),
@@ -102,6 +105,8 @@ export type CatalogGridProductDto = z.infer<typeof catalogGridProductSchema>;
 export const productAttributeSheetSchema = z.object({
   schema: catalogGridSchemaSchema,
   product: catalogGridProductSchema,
+  /** Authoritative readiness: required attributes and required digital assets. */
+  completeness: z.number().int().min(0).max(100).nullable().optional(),
 });
 export type ProductAttributeSheetDto = z.infer<typeof productAttributeSheetSchema>;
 
@@ -137,17 +142,19 @@ export const catalogWorkbookProductSchema = z.object({
   brand: z.string().nullable(),
   status: z.string(),
   updatedAt: z.string().datetime(),
-  category: z.object({ id: uuidSchema, name: z.string() }),
-  template: z.object({
-    id: uuidSchema,
-    variantKey: z.string().trim().min(1).max(100),
-    name: z.string(),
-    version: z.number().int().positive(),
-  }),
+  category: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  template: z
+    .object({
+      id: uuidSchema,
+      variantKey: z.string().trim().min(1).max(100),
+      name: z.string(),
+      version: z.number().int().positive(),
+    })
+    .nullable(),
   providerCode: z.string().nullable(),
   unifiedCode: z.string().nullable(),
   applicationTypes: z.array(z.string()),
-  completeness: z.number().int().min(0).max(100),
+  completeness: z.number().int().min(0).max(100).nullable(),
   attributes: z.record(catalogWorkbookCellSchema),
 });
 export type CatalogWorkbookProductDto = z.infer<typeof catalogWorkbookProductSchema>;

@@ -17,7 +17,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   AlertTriangle,
-  CheckCircle2,
   Database,
   FileText,
   History,
@@ -95,11 +94,11 @@ const DETAIL_ASSET_TYPES: ReadonlyArray<{
 ];
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Database }> = [
-  { id: 'technical', label: 'Información Técnica', icon: Database },
+  { id: 'technical', label: 'Información técnica', icon: Database },
   { id: 'applications', label: 'Aplicaciones', icon: PackageCheck },
   { id: 'equivalences', label: 'Código Unificador y Homólogos', icon: Link2 },
   { id: 'documents', label: 'Imágenes y Documentos', icon: FileText },
-  { id: 'sources', label: 'Canal e ID', icon: Database },
+  { id: 'sources', label: 'Fuentes', icon: Database },
   { id: 'history', label: 'Historial', icon: History },
 ];
 
@@ -397,6 +396,7 @@ function EnrichmentDrawer({
                             }
                             className="h-10 w-full rounded-md border bg-white px-3 text-sm"
                           >
+                            <option value="">Seleccionar…</option>
                             <option value="false">No</option>
                             <option value="true">Sí</option>
                           </select>
@@ -470,24 +470,166 @@ function EnrichmentDrawer({
   );
 }
 
+function ProductTechnicalAssets({
+  productId,
+  active,
+  onManage,
+}: {
+  productId: string;
+  active: boolean;
+  onManage: () => void;
+}) {
+  const [assets, setAssets] = useState<ProductAssetDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    void listProductAssets({ productId }, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setAssets(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [active, productId]);
+
+  return (
+    <Card className="overflow-hidden">
+      <h3 className="border-b px-3 py-2 text-sm font-semibold">Documentos y activos</h3>
+      <div className="p-3">
+        {loading ? (
+          <p className="text-xs text-muted-foreground" role="status">
+            Cargando activos…
+          </p>
+        ) : error ? (
+          <p className="text-xs text-muted-foreground">No fue posible consultar los activos.</p>
+        ) : assets.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Sin archivos registrados para este SKU.</p>
+        ) : (
+          <ul className="divide-y">
+            {assets.map((asset) => (
+              <li key={asset.id} className="flex min-w-0 items-start gap-2 py-2 first:pt-0">
+                <FileText
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                />
+                <div className="min-w-0 flex-1">
+                  <a
+                    href={productAssetDownloadUrl(asset.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block break-words text-xs underline decoration-slate-300 underline-offset-2"
+                  >
+                    {asset.filename}
+                  </a>
+                  <span className="text-[10px] text-muted-foreground">
+                    {DETAIL_ASSET_TYPES.find((type) => type.value === asset.type)?.label ??
+                      asset.type}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onManage}>
+          Gestionar activos
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function TechnicalPanel({
   product,
+  active,
   sheet,
   sheetError,
   unitSystem,
   onUnitSystemChange,
+  canEditDirect,
+  editRequest,
+  showCompleteness,
+  onDirtyChange,
+  onSaved,
+  onManageAssets,
 }: {
   product: Product;
+  active: boolean;
   sheet: ProductAttributeSheetDto | null;
   sheetError: string | null;
   unitSystem: MeasurementSystem;
   onUnitSystemChange: (system: MeasurementSystem) => void;
+  canEditDirect: boolean;
+  editRequest: number;
+  showCompleteness: boolean;
+  onDirtyChange: (dirty: boolean) => void;
+  onSaved: (replicatedProducts: number) => void;
+  onManageAssets: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const editingSnapshot = useRef<ProductAttributeSheetDto | null>(null);
+  const initializedSheet = useRef<ProductAttributeSheetDto | null | undefined>(undefined);
+  const handledEditRequest = useRef(0);
+  const editorElement = useRef<HTMLDivElement>(null);
+  const dirty =
+    editing &&
+    Object.entries(drafts).some(
+      ([key, value]) =>
+        value !== attributeInputValue(editingSnapshot.current?.product.attributes[key]?.value),
+    );
+
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (sheet === initializedSheet.current) return;
+    initializedSheet.current = sheet;
+    if (dirty) {
+      setSaveError(
+        'La ficha recibió una actualización. Conservamos tu borrador; revisa los cambios antes de guardar.',
+      );
+      return;
+    }
+    const allowed =
+      canEditDirect && sheet
+        ? sheet.schema.columns.filter(
+            (column) => column.sourceAuthority === 'pim' && column.permissions.edit,
+          )
+        : [];
+    editingSnapshot.current = allowed.length ? sheet : null;
+    setDrafts(
+      Object.fromEntries(
+        allowed.map((column) => [
+          column.key,
+          attributeInputValue(sheet?.product.attributes[column.key]?.value),
+        ]),
+      ),
+    );
+    setSaveError(null);
+    setEditing(allowed.length > 0);
+  }, [canEditDirect, dirty, sheet]);
+
   const attributes = sheet
     ? technicalAttributesFromSheet(sheet).map((attribute) => ({
         ...attribute,
         rawValue: attribute.value,
-        displayValue: attribute.value === null ? 'Sin valor registrado' : String(attribute.value),
+        displayValue:
+          attribute.value === null
+            ? 'Pendiente'
+            : typeof attribute.value === 'boolean'
+              ? attribute.value
+                ? 'Sí'
+                : 'No'
+              : String(attribute.value),
       }))
     : product.attributes.map((attribute) => ({
         key: attribute.key,
@@ -500,29 +642,60 @@ function TechnicalPanel({
         includeInTechnicalSheet: null,
         updatedAt: null,
       }));
-
-  if (attributes.length === 0) {
-    return (
-      <StatePanel
-        variant="empty"
-        title="Sin atributos técnicos"
-        description="El producto existe, pero no tiene atributos visibles para tu rol ni identificadores técnicos de respaldo."
-      />
-    );
-  }
-
+  const columns = new Map(sheet?.schema.columns.map((column) => [column.key, column]) ?? []);
+  const editableColumns =
+    sheet?.schema.columns.filter(
+      (column) => column.sourceAuthority === 'pim' && column.permissions.edit,
+    ) ?? [];
+  const hasValue = (value: unknown) => value !== null && value !== undefined && value !== '';
+  const erp = attributes.filter((attribute) => attribute.authority === 'erp');
+  const enrichment = attributes.filter((attribute) => attribute.authority !== 'erp');
+  const logisticsPattern = /^(c[oó]digo\s*ean|peso|unds?\s*por\s*caja|unidades\s*por\s*caja)/iu;
+  const logistics = enrichment.filter((attribute) => logisticsPattern.test(attribute.label));
+  const technical = enrichment.filter((attribute) => !logistics.includes(attribute));
+  const measurements = technical.filter(
+    (attribute) =>
+      /^\([^)]+\)/u.test(attribute.label) || columns.get(attribute.key)?.dataType === 'measurement',
+  );
+  const characteristics = technical.filter((attribute) => !measurements.includes(attribute));
+  const groups = [
+    {
+      title: 'Datos base ERP',
+      note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
+      attributes: erp,
+    },
+    {
+      title: 'Características',
+      note: 'Atributos técnicos de enriquecimiento',
+      attributes: characteristics,
+    },
+    {
+      title: 'Medidas y datos de rendimiento',
+      note: 'Valores según la plantilla del producto',
+      attributes: measurements,
+    },
+    {
+      title: 'Información comercial y logística',
+      note: 'Atributos de la plantilla',
+      attributes: logistics,
+    },
+  ].filter((group) => group.attributes.length > 0);
   const convertibleAttributes = attributes.filter(
     (attribute) =>
-      attribute.rawValue !== null &&
-      Boolean(
-        displayMeasurement(
-          attribute.rawValue,
-          { unit: attribute.unit ?? undefined, attributeKey: attribute.key },
-          unitSystem,
-        )?.secondary,
-      ),
+      hasValue(attribute.rawValue) &&
+      displayMeasurement(
+        attribute.rawValue!,
+        { unit: attribute.unit ?? undefined, attributeKey: attribute.key },
+        unitSystem,
+      )?.secondary,
   ).length;
-
+  const requiredColumns = sheet?.schema.columns.filter((column) => column.required) ?? [];
+  const missingRequired = requiredColumns.filter(
+    (column) => !hasValue(sheet?.product.attributes[column.key]?.value),
+  );
+  const filled = attributes.filter((attribute) => hasValue(attribute.rawValue)).length;
+  const completeness =
+    sheet?.completeness !== undefined ? sheet.completeness : product.completeness;
   const sourceLabels = {
     manual: 'Manual',
     erp: 'ERP',
@@ -537,127 +710,410 @@ function TechnicalPanel({
     calculated: 'Calculado',
   } as const;
 
+  const startEditing = useCallback(() => {
+    if (!sheet || !canEditDirect || editing) return;
+    const allowed = sheet.schema.columns.filter(
+      (column) => column.sourceAuthority === 'pim' && column.permissions.edit,
+    );
+    if (!allowed.length) return;
+    editingSnapshot.current = sheet;
+    setDrafts(
+      Object.fromEntries(
+        allowed.map((column) => [
+          column.key,
+          attributeInputValue(sheet.product.attributes[column.key]?.value),
+        ]),
+      ),
+    );
+    setSaveError(null);
+    setEditing(true);
+  }, [canEditDirect, editing, sheet]);
+
+  useEffect(() => {
+    if (!active || !sheet || !canEditDirect || editRequest <= handledEditRequest.current) return;
+    handledEditRequest.current = editRequest;
+    startEditing();
+    requestAnimationFrame(() => {
+      const element = editorElement.current;
+      element?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+      element
+        ?.querySelector<HTMLInputElement | HTMLSelectElement>('input, select')
+        ?.focus({ preventScroll: true });
+    });
+  }, [active, canEditDirect, editRequest, sheet, startEditing]);
+
+  const save = async () => {
+    if (!sheet || !canEditDirect || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const original = editingSnapshot.current ?? sheet;
+      const changed = editableColumns.filter(
+        (column) =>
+          (drafts[column.key] ?? '') !==
+          attributeInputValue(original.product.attributes[column.key]?.value),
+      );
+      if (!changed.length) {
+        setEditing(false);
+        return;
+      }
+      const result = await patchProductAttributes(product.id, {
+        updates: changed.map((column) => ({
+          attributeKey: column.key,
+          value: parsedAttributeValue(column, drafts[column.key] ?? ''),
+          expectedVersion: original.product.attributes[column.key]?.version ?? 0,
+        })),
+      });
+      setEditing(false);
+      onSaved(
+        new Set(result.attributes.flatMap((attribute) => attribute.replicatedProductIds)).size,
+      );
+    } catch (requestError) {
+      setSaveError(
+        requestError instanceof DynamicCatalogApiError && requestError.status === 409
+          ? 'Otro usuario actualizó estos atributos. Recarga la ficha para revisar los valores vigentes antes de guardar.'
+          : requestError instanceof Error
+            ? requestError.message
+            : 'No fue posible guardar los atributos.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <Card>
-      <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <CardTitle>Datos Técnicos e Identificadores</CardTitle>
-          <CardDescription>
-            {sheet
-              ? `${attributes.length} atributos visibles de ${sheet.schema.template.name}, versión ${sheet.schema.template.version}.`
-              : `${attributes.length} identificadores disponibles como respaldo de la ficha base.`}
-          </CardDescription>
-        </div>
-        {convertibleAttributes > 0 ? (
-          <div className="min-w-0 rounded-lg border bg-slate-50 p-2.5">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cdr-ink">
-              <Ruler aria-hidden="true" className="size-4 text-primary" />
-              Sistema de unidades
-            </div>
-            <div
-              className="grid grid-cols-2 rounded-md bg-slate-200 p-1"
-              role="group"
-              aria-label="Ver medidas en"
-            >
-              {(
-                [
-                  ['metric', 'Métrico'],
-                  ['imperial', 'Imperial'],
-                ] as const
-              ).map(([system, label]) => (
-                <button
-                  key={system}
-                  type="button"
-                  aria-pressed={unitSystem === system}
-                  onClick={() => onUnitSystemChange(system)}
-                  className={cn(
-                    'rounded px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink',
-                    unitSystem === system
-                      ? 'bg-white text-primary shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 max-w-64 text-[11px] leading-relaxed text-muted-foreground">
-              {convertibleAttributes > 0
-                ? `${convertibleAttributes} valores convertibles. El valor registrado no se modifica.`
-                : 'Este SKU no contiene unidades convertibles.'}
+    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_250px] xl:grid-cols-[minmax(180px,.65fr)_minmax(0,1.6fr)_260px]">
+      <div className="min-w-0 lg:col-start-2 lg:row-start-1 xl:col-start-1 xl:row-span-2">
+        <ProductArtwork
+          category={sheet?.schema.category.name ?? product.category}
+          name={product.name}
+          technical
+          className="aspect-[4/3] w-full"
+        />
+        <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+          Esquema técnico referencial. Consulta el plano del fabricante para verificar las
+          dimensiones.
+        </p>
+      </div>
+      <div
+        ref={editorElement}
+        className="min-w-0 scroll-mt-28 lg:col-start-1 lg:row-span-2 lg:row-start-1 xl:col-start-2"
+      >
+        <header className="mb-3 flex flex-col items-start gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              Especificaciones · {sheet?.schema.template.name ?? product.category}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {attributes.length} campos visibles · <span className="text-red-600">*</span>{' '}
+              obligatorio
             </p>
+            <div className="mt-2 flex items-center gap-2">
+              <span className="rounded-md border px-2 py-1 text-[11px] text-muted-foreground">
+                {editing ? 'Edición directa · base ERP de solo lectura' : 'Solo consulta'}
+              </span>
+              {canEditDirect && editableColumns.length > 0 && !editing ? (
+                <Button type="button" variant="outline" size="sm" onClick={startEditing}>
+                  <Pencil aria-hidden="true" className="size-3" />
+                  Editar atributos
+                </Button>
+              ) : null}
+            </div>
           </div>
-        ) : null}
-      </CardHeader>
-      <CardContent>
+          {convertibleAttributes > 0 ? (
+            <div className="w-full max-w-md rounded-lg border bg-slate-50 p-2.5">
+              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <Ruler aria-hidden="true" className="size-4" />
+                Sistema de unidades
+              </div>
+              <div
+                className="flex rounded-md border bg-slate-50 p-0.5"
+                role="group"
+                aria-label="Ver medidas en"
+              >
+                {(
+                  [
+                    ['metric', 'Métrico'],
+                    ['imperial', 'Imperial'],
+                  ] as const
+                ).map(([system, label]) => (
+                  <button
+                    key={system}
+                    type="button"
+                    aria-pressed={unitSystem === system}
+                    onClick={() => onUnitSystemChange(system)}
+                    className={cn(
+                      'rounded px-3 py-1 text-xs',
+                      unitSystem === system
+                        ? 'bg-white text-foreground shadow-sm'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 max-w-60 text-[10px] leading-4 text-muted-foreground">
+                {convertibleAttributes} valores convertibles. El valor registrado no se modifica.
+              </p>
+            </div>
+          ) : null}
+        </header>
         {sheetError ? (
-          <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             {sheetError} Se muestran los identificadores de la ficha base.
           </p>
         ) : null}
-        <dl className="grid gap-x-8 gap-y-0 sm:grid-cols-2 xl:grid-cols-3">
-          {attributes.map((attribute) => {
-            const measurement =
-              attribute.rawValue === null
-                ? null
-                : displayMeasurement(
-                    attribute.rawValue,
-                    { unit: attribute.unit ?? undefined, attributeKey: attribute.key },
-                    unitSystem,
-                  );
-            const fallbackUnit =
-              attribute.unit &&
-              attribute.rawValue !== null &&
-              typeof attribute.rawValue !== 'string'
-                ? ` ${attribute.unit}`
-                : '';
-
-            return (
-              <div key={attribute.key} className="min-w-0 border-b py-4 first:pt-0">
-                <dt className="text-xs leading-relaxed text-muted-foreground">{attribute.label}</dt>
-                <dd className="mt-1 break-words text-sm font-semibold">
-                  {measurement
-                    ? measurement.primary.text
-                    : `${attribute.displayValue}${fallbackUnit}`}
-                </dd>
-                {measurement?.secondary ? (
-                  <dd className="mt-1 break-words text-xs text-muted-foreground">
-                    {measurement.secondary.registered ? 'Registrado' : 'Equivalente'}:{' '}
-                    {measurement.secondary.text}
-                  </dd>
-                ) : null}
-                {attribute.source || attribute.authority ? (
-                  <dd className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                    {attribute.source ? (
-                      <span className="rounded-full bg-slate-100 px-2 py-1">
-                        Fuente: {sourceLabels[attribute.source]}
-                      </span>
-                    ) : null}
-                    {attribute.authority ? (
-                      <span className="rounded-full bg-slate-100 px-2 py-1">
-                        Autoridad: {authorityLabels[attribute.authority]}
-                      </span>
-                    ) : null}
-                    {attribute.includeInTechnicalSheet !== null ? (
-                      <span
-                        className={cn(
-                          'rounded-full px-2 py-1',
-                          attribute.includeInTechnicalSheet
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-blue-100 text-blue-700',
-                        )}
-                      >
-                        {attribute.includeInTechnicalSheet ? 'Ficha técnica' : 'Solo detalle'}
-                      </span>
-                    ) : null}
-                  </dd>
-                ) : null}
+        {groups.length === 0 ? (
+          <StatePanel
+            variant="empty"
+            title="Sin atributos técnicos"
+            description="Este producto todavía no tiene atributos visibles para tu rol."
+          />
+        ) : null}
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <section key={group.title} className="overflow-hidden rounded-lg border bg-white">
+              <header className="flex flex-wrap items-baseline justify-between gap-1 border-b px-3 py-2">
+                <h3 className="text-sm font-semibold">{group.title}</h3>
+                <span className="text-[10px] text-muted-foreground">{group.note}</span>
+              </header>
+              <table className="w-full table-fixed text-left text-sm">
+                <caption className="sr-only">{group.title}</caption>
+                <thead className="sr-only">
+                  <tr>
+                    <th scope="col">Símbolo</th>
+                    <th scope="col">Valor</th>
+                    <th scope="col">Atributo y origen</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {group.attributes.map((attribute) => {
+                    const column = columns.get(attribute.key);
+                    const symbol = /^\(\s*([^)]+)\)\s*(.*)/u.exec(attribute.label);
+                    const measurement = hasValue(attribute.rawValue)
+                      ? displayMeasurement(
+                          attribute.rawValue!,
+                          { unit: attribute.unit ?? undefined, attributeKey: attribute.key },
+                          unitSystem,
+                        )
+                      : null;
+                    const fallbackUnit =
+                      attribute.unit &&
+                      hasValue(attribute.rawValue) &&
+                      typeof attribute.rawValue !== 'string'
+                        ? ` ${attribute.unit}`
+                        : '';
+                    const editable =
+                      editing && column?.sourceAuthority === 'pim' && column.permissions.edit;
+                    const value = drafts[attribute.key] ?? '';
+                    const inputClass =
+                      'h-7 w-full min-w-0 rounded border bg-white px-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary';
+                    return (
+                      <tr key={attribute.key}>
+                        <td className="w-[10%] px-2 py-2 align-top text-sm text-muted-foreground">
+                          {symbol?.[1]}
+                        </td>
+                        <td className="w-[32%] break-words px-2 py-2 align-top">
+                          {editable ? (
+                            column.dataType === 'boolean' || column.allowedValues.length > 0 ? (
+                              <select
+                                aria-label={attribute.label}
+                                className={inputClass}
+                                value={value}
+                                disabled={saving}
+                                onChange={(event) =>
+                                  setDrafts((current) => ({
+                                    ...current,
+                                    [attribute.key]: event.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Seleccionar…</option>
+                                {column.dataType === 'boolean' ? (
+                                  <>
+                                    <option value="true">Sí</option>
+                                    <option value="false">No</option>
+                                  </>
+                                ) : (
+                                  column.allowedValues.map((option) => (
+                                    <option key={option} value={option}>
+                                      {option}
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                            ) : (
+                              <input
+                                aria-label={attribute.label}
+                                className={inputClass}
+                                value={value}
+                                disabled={saving}
+                                required={column.required}
+                                type={column.dataType === 'date' ? 'date' : 'text'}
+                                inputMode={
+                                  column.dataType === 'measurement' || column.dataType === 'number'
+                                    ? 'decimal'
+                                    : undefined
+                                }
+                                onChange={(event) =>
+                                  setDrafts((current) => ({
+                                    ...current,
+                                    [attribute.key]: event.target.value,
+                                  }))
+                                }
+                              />
+                            )
+                          ) : (
+                            <>
+                              <span
+                                className={cn(
+                                  !hasValue(attribute.rawValue) && 'text-muted-foreground',
+                                )}
+                              >
+                                {measurement?.primary.text ??
+                                  `${attribute.displayValue}${fallbackUnit}`}
+                              </span>
+                              {measurement?.secondary ? (
+                                <small className="mt-1 block text-[10px] text-muted-foreground">
+                                  {measurement.secondary.registered ? 'Registrado' : 'Equivalente'}:{' '}
+                                  {measurement.secondary.text}
+                                </small>
+                              ) : null}
+                            </>
+                          )}
+                        </td>
+                        <th scope="row" className="px-2 py-2 align-top font-normal">
+                          <span>
+                            {symbol?.[2] ?? attribute.label}
+                            {column?.required ? (
+                              <abbr
+                                title="Obligatorio según plantilla"
+                                className="ml-1 text-red-600 no-underline"
+                              >
+                                *
+                              </abbr>
+                            ) : null}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+                            {attribute.source ? (
+                              <span>Fuente: {sourceLabels[attribute.source]}</span>
+                            ) : null}
+                            {attribute.authority ? (
+                              <span>Autoridad: {authorityLabels[attribute.authority]}</span>
+                            ) : null}
+                            {attribute.includeInTechnicalSheet !== null ? (
+                              <span>
+                                {attribute.includeInTechnicalSheet
+                                  ? 'Ficha técnica'
+                                  : 'Solo detalle'}
+                              </span>
+                            ) : null}
+                            {attribute.unit ? <span>Unidad {attribute.unit}</span> : null}
+                          </div>
+                        </th>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+          ))}
+        </div>
+        {editing ? (
+          <div className="sticky bottom-3 mt-4 rounded-lg border bg-white p-3 shadow-lg">
+            {saveError ? (
+              <p role="alert" className="mb-2 text-xs text-red-700">
+                {saveError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Los cambios conservan su fuente y trazabilidad.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => setEditing(false)}
+                >
+                  Cancelar edición
+                </Button>
+                <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+                  <Save aria-hidden="true" className="size-3" />
+                  {saving ? 'Guardando…' : 'Guardar atributos'}
+                </Button>
               </div>
-            );
-          })}
-        </dl>
-      </CardContent>
-    </Card>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <aside
+        className="min-w-0 space-y-4 lg:col-start-2 xl:col-start-3 xl:row-start-1"
+        aria-label="Documentos y calidad del SKU"
+      >
+        <ProductTechnicalAssets productId={product.id} active={active} onManage={onManageAssets} />
+        {showCompleteness ? (
+          <>
+            <Card className="p-3">
+              <h3 className="text-sm font-semibold">Completitud de plantilla</h3>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Atributos y documentos obligatorios
+              </p>
+              <div className="my-3">
+                <strong className="text-3xl font-semibold">
+                  {completeness ?? '—'}
+                  {completeness !== null ? '%' : ''}
+                </strong>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Cobertura visible: {filled}/{attributes.length} atributos con valor
+                </p>
+              </div>
+              {completeness !== null ? (
+                <Progress value={completeness} label="Completitud de plantilla" />
+              ) : null}
+              <dl className="mt-3 divide-y text-xs">
+                {[
+                  [
+                    'Atributos obligatorios visibles',
+                    `${requiredColumns.length - missingRequired.length}/${requiredColumns.length}`,
+                  ],
+                  [
+                    'Base ERP',
+                    `${erp.filter((attribute) => hasValue(attribute.rawValue)).length}/${erp.length}`,
+                  ],
+                  [
+                    'Enriquecimiento',
+                    `${enrichment.filter((attribute) => hasValue(attribute.rawValue)).length}/${enrichment.length}`,
+                  ],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex justify-between gap-3 py-1.5">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+            <Card className="p-3">
+              <h3 className="text-sm font-semibold">Atributos obligatorios faltantes</h3>
+              {missingRequired.length ? (
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                  {missingRequired.map((column) => (
+                    <li key={column.key}>{column.label}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-emerald-700">
+                  Todos los atributos obligatorios visibles tienen valor.
+                </p>
+              )}
+            </Card>
+          </>
+        ) : null}
+      </aside>
+    </div>
   );
 }
 
@@ -1280,6 +1736,17 @@ export function ProductDetailView({
   const [activeTab, setActiveTab] = useState<DetailTab>('technical');
   const [unitSystem, setUnitSystem] = useState<MeasurementSystem>('metric');
   const [editOpen, setEditOpen] = useState(false);
+  const [inlineEditRequest, setInlineEditRequest] = useState(0);
+  const [inlineDirty, setInlineDirty] = useState(false);
+  const canEditDirect = canReassignTemplate && showCompleteness;
+  const openEnrichment = useCallback(() => {
+    if (canEditDirect) {
+      setActiveTab('technical');
+      setInlineEditRequest((value) => value + 1);
+    } else {
+      setEditOpen(true);
+    }
+  }, [canEditDirect]);
   const [technicalSheetOpen, setTechnicalSheetOpen] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
@@ -1305,7 +1772,7 @@ export function ProductDetailView({
     if (!attributeSheet) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('edit') !== 'enrichment') return;
-    setEditOpen(true);
+    openEnrichment();
     params.delete('edit');
     const query = params.toString();
     window.history.replaceState(
@@ -1313,7 +1780,7 @@ export function ProductDetailView({
       '',
       `${window.location.pathname}${query ? `?${query}` : ''}`,
     );
-  }, [attributeSheet]);
+  }, [attributeSheet, openEnrichment]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1478,6 +1945,12 @@ export function ProductDetailView({
   };
 
   const changeTemplate = async (templateId: string) => {
+    if (inlineDirty) {
+      setTemplateOptionsError(
+        'Guarda o cancela los cambios de la ficha antes de cambiar de plantilla.',
+      );
+      return;
+    }
     const currentTemplateId = attributeSheet?.schema.template.id;
     if (!currentTemplateId || templateId === currentTemplateId || !canReassignTemplate) return;
     setAssigningTemplate(true);
@@ -1544,15 +2017,7 @@ export function ProductDetailView({
         />
       );
     }
-    return (
-      <TechnicalPanel
-        product={product}
-        sheet={attributeSheet}
-        sheetError={attributeSheetError}
-        unitSystem={unitSystem}
-        onUnitSystemChange={changeUnitSystem}
-      />
-    );
+    return null;
   }, [
     activeTab,
     applications,
@@ -1565,6 +2030,8 @@ export function ProductDetailView({
     auditLoading,
     auditTotal,
     canWriteAssets,
+    canReassignTemplate,
+    showCompleteness,
     changeUnitSystem,
     homologs,
     homologsError,
@@ -1604,12 +2071,55 @@ export function ProductDetailView({
   const categoryTemplateOptions = attributeSheet
     ? templateOptions.filter((option) => option.id === attributeSheet.schema.category.id)
     : [];
+  const sheetValue = (pattern: RegExp) => {
+    const column = attributeSheet?.schema.columns.find((column) =>
+      pattern.test(`${column.key} ${column.label}`),
+    );
+    const value = column ? attributeSheet?.product.attributes[column.key]?.value : null;
+    return value === null || value === undefined || value === '' ? undefined : String(value);
+  };
   const firstApplication = applications[0];
-  const applicationSummary = firstApplication
-    ? [firstApplication.vehicleType, firstApplication.make, firstApplication.model]
-        .filter(Boolean)
-        .join(' · ')
-    : product.application;
+  const applicationSummary =
+    sheetValue(/tipo.?aplicaci[oó]n/iu) ??
+    (firstApplication
+      ? [firstApplication.vehicleType, firstApplication.make, firstApplication.model]
+          .filter(Boolean)
+          .join(' · ')
+      : /^no disponible/iu.test(product.application)
+        ? 'Pendiente'
+        : product.application);
+  const heroName =
+    product.name === product.sku
+      ? (attributeSheet?.schema.template.name ?? product.name)
+      : product.name;
+  const heroDescription =
+    product.description ??
+    sheetValue(/descripcion.?tecnica|descripci[oó]n t[eé]cnica|especificaci[oó]n t[eé]cnica/iu);
+  const hasRegisteredValue = (value: unknown) =>
+    value !== null && value !== undefined && value !== '';
+  const heroColumns = attributeSheet?.schema.columns ?? [];
+  const heroCompleteness =
+    attributeSheet?.completeness !== undefined ? attributeSheet.completeness : product.completeness;
+  const heroRequired = heroColumns.filter((column) => column.required);
+  const heroMissing = heroRequired.filter(
+    (column) => !hasRegisteredValue(attributeSheet?.product.attributes[column.key]?.value),
+  );
+  const identityFields = heroColumns
+    .filter((column) => column.sourceAuthority === 'erp')
+    .map((column) => [
+      column.label,
+      attributeInputValue(attributeSheet?.product.attributes[column.key]?.value) || 'Pendiente',
+    ]);
+  const heroIdentity = identityFields.length
+    ? identityFields
+    : [
+        ['Código de artículo', product.sku],
+        ['Código de proveedor', product.providerCode ?? 'Pendiente'],
+        ['Marca', product.brand],
+        ['Categoría', categoryName],
+        ['Tipo de aplicación', applicationSummary],
+        ['Código unificador', unifiedCode ?? 'Sin código'],
+      ];
   const editableAttributeCount =
     attributeSheet?.schema.columns.filter(
       (column) => column.sourceAuthority === 'pim' && column.permissions.edit,
@@ -1621,6 +2131,11 @@ export function ProductDetailView({
     (oem) => oem.active && oem.approvalStatus === 'approved',
   ).length;
 
+  const visibleTabs =
+    showProductStatus || showCompleteness
+      ? tabs
+      : tabs.filter((tab) => tab.id !== 'sources' && tab.id !== 'history');
+
   return (
     <>
       {attributeSheet || technicalSheet ? (
@@ -1628,7 +2143,7 @@ export function ProductDetailView({
           {attributeSheet ? (
             <EnrichmentDrawer
               sheet={attributeSheet}
-              open={editOpen}
+              open={editOpen && !canEditDirect}
               onClose={() => setEditOpen(false)}
               onSaved={(replicatedProducts) => {
                 setEditOpen(false);
@@ -1680,29 +2195,74 @@ export function ProductDetailView({
         </div>
       ) : null}
 
-      <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)_320px]">
-        <Card className="overflow-hidden p-3 sm:p-4">
-          <ProductArtwork category={categoryName} name={product.name} className="h-full min-h-64" />
-        </Card>
-
-        <div className="min-w-0 py-1">
-          <span className="text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">
-            Código de Artículo · Identidad ERP
+      <section
+        className={cn(
+          'grid min-w-0 items-start gap-5 pb-3 md:grid-cols-[minmax(170px,.55fr)_minmax(0,1.7fr)]',
+          showCompleteness &&
+            'xl:grid-cols-[minmax(180px,.55fr)_minmax(0,1.5fr)_minmax(250px,.8fr)]',
+        )}
+      >
+        <div className="min-w-0">
+          <ProductArtwork
+            category={categoryName}
+            name={product.name}
+            technical
+            className="aspect-[4/3] w-full"
+          />
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <span className="block text-[10px] text-muted-foreground">Marca</span>
+              <strong className="text-base">{product.brand}</strong>
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              Representación técnica · sin fotografía
+            </span>
+          </div>
+        </div>
+        <div className="min-w-0">
+          <span className="text-[10px] uppercase tracking-[.06em] text-muted-foreground">
+            Código artículo · identidad ERP
           </span>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-cdr-ink">
+              {product.sku}
+            </h1>
+            <span data-page-help-slot />
+            <ScreenGuide
+              objective="Ficha consolidada: identidad del SKU, especificaciones, relaciones, activos y trazabilidad."
+              actions={[
+                'Consulta las secciones de la ficha y las relaciones de su código unificador.',
+                'Edita los atributos permitidos por la plantilla; los datos ERP son de solo lectura.',
+                'Alterna entre métrico e imperial sin cambiar el valor registrado.',
+                'Descarga los atributos publicables en la ficha técnica.',
+              ]}
+              dataSource="Catálogo ERP, plantilla activa, aplicaciones, homólogos, documentos e historial del producto."
+            />
+          </div>
+          <p className="mt-1 text-base font-medium">{heroName}</p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            {heroDescription ?? 'Descripción técnica pendiente de completar'}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {showProductStatus ? (
               <StatusBadge tone={statusTone(product.status)}>
                 {statusLabel(product.status)}
               </StatusBadge>
             ) : null}
+            <StatusBadge tone="neutral">{applicationSummary}</StatusBadge>
             {templateLabel ? <StatusBadge tone="neutral">{templateLabel}</StatusBadge> : null}
           </div>
           {attributeSheet && categoryTemplateOptions.length > 1 ? (
-            <div className="mt-4 max-w-xl">
+            <div className="mt-3 max-w-xl">
               <Select
                 label="Subtipo de plantilla"
                 value={attributeSheet.schema.template.id}
-                disabled={!canReassignTemplate || assigningTemplate}
+                disabled={!canReassignTemplate || assigningTemplate || inlineDirty}
+                title={
+                  inlineDirty
+                    ? 'Guarda o cancela la edición antes de cambiar la plantilla.'
+                    : undefined
+                }
                 onChange={(event) => void changeTemplate(event.target.value)}
               >
                 {categoryTemplateOptions.map((option) => (
@@ -1711,187 +2271,133 @@ export function ProductDetailView({
                   </option>
                 ))}
               </Select>
-              <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">
-                {categoryTemplateOptions.length} variantes pertenecen a «
-                {attributeSheet.schema.category.name}» y conservan la misma categoría del ERP.
-                {!canReassignTemplate
-                  ? ' Tu rol puede consultarlas, pero no reasignar el producto.'
-                  : ''}
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {categoryTemplateOptions.length} variantes en «{attributeSheet.schema.category.name}
+                ».
               </p>
             </div>
           ) : null}
           {templateOptionsError ? (
-            <p className="mt-3 max-w-xl text-xs text-red-700" role="alert">
+            <p className="mt-2 text-xs text-red-700" role="alert">
               {templateOptionsError}
             </p>
           ) : null}
-          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-            {product.sku}
-          </p>
-          <h1 className="mt-1 break-words text-3xl font-semibold leading-tight tracking-[-0.035em] text-cdr-ink sm:text-4xl">
-            {product.name}
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
-            {product.description ??
-              'El contrato actual no entrega una descripción para este producto.'}
-          </p>
-
-          <div className="mt-4">
-            <ScreenGuide
-              objective="Ficha consolidada: mantiene la identidad del SKU y reúne atributos, relaciones heredadas, activos y trazabilidad real."
-              actions={[
-                'Consulta las seis secciones o usa los accesos rápidos del SKU.',
-                'Edita únicamente los atributos PIM permitidos por la plantilla; los datos ERP quedan bloqueados.',
-                'Alterna entre métrico e imperial sin cambiar el valor registrado por la fuente.',
-                'Genera la ficha técnica únicamente con los atributos que la plantilla marcó como publicables.',
-              ]}
-              dataSource="La identidad proviene del catálogo; los atributos, su procedencia, las aplicaciones, los homólogos y el historial se consultan en sus APIs operativas."
-              limitation="Los atributos replicables y las aplicaciones se heredan por código unificador; cada SKU conserva su propia identidad. La búsqueda solo considera homólogos activos y aprobados."
-            />
-          </div>
-
-          <dl className="mt-7 grid gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-2">
-            {[
-              ['Marca', product.brand],
-              ['Aplicación', applicationSummary],
-              ['Línea / Categoría', categoryName],
-              ['Dimensiones', product.dimensions ?? 'No disponibles en el contrato'],
-              ['Código de Proveedor', product.providerCode ?? 'No disponible'],
-              ['Código Unificador', unifiedCode ?? 'No registrado'],
-            ].map(([label, value]) => (
-              <div key={label} className="min-w-0">
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="mt-1 break-words text-sm font-semibold">{value}</dd>
+          <dl className="mt-3 grid gap-x-5 gap-y-1 sm:grid-cols-3">
+            {heroIdentity.map(([label, value]) => (
+              <div key={label} className="min-w-0 border-b py-1">
+                <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 break-words text-xs">{value}</dd>
               </div>
             ))}
           </dl>
-        </div>
-
-        <Card className="h-fit border-primary/20">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>
-                {showCompleteness || showProductStatus ? 'Control PIM' : 'Información PIM'}
-              </CardTitle>
-              <CheckCircle2 aria-hidden="true" className="size-5 text-primary" />
+          {!showCompleteness ? (
+            <div aria-label="Información PIM" className="mt-3 flex flex-wrap gap-2">
+              <span className="sr-only">Información PIM</span>
+              <Button
+                type="button"
+                variant="dark"
+                size="sm"
+                onClick={openEnrichment}
+                disabled={!attributeSheet || editableAttributeCount === 0}
+              >
+                <Pencil aria-hidden="true" className="size-3.5" />
+                Editar enriquecimiento
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setTechnicalSheetOpen(true)}
+                disabled={!technicalSheet}
+                title={technicalSheetError ?? undefined}
+              >
+                <FileText aria-hidden="true" className="size-3.5" />
+                Ficha técnica (PDF)
+              </Button>
             </div>
-            <CardDescription>
-              {showCompleteness || showProductStatus
-                ? 'Estado e identificación técnica de la ficha.'
-                : 'Identificación técnica de la ficha.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {showCompleteness ? (
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold">Calidad</span>
-                  <strong>
-                    {product.completeness === null ? 'Regla pendiente' : `${product.completeness}%`}
-                  </strong>
-                </div>
-                {product.completeness === null ? (
-                  <p className="rounded-md bg-slate-50 p-3 text-xs leading-relaxed text-muted-foreground">
-                    El backend todavía no publica un puntaje de calidad aprobado.
-                  </p>
-                ) : (
-                  <Progress value={product.completeness} label={`Completitud de ${product.sku}`} />
-                )}
-              </div>
-            ) : null}
-            <dl className="space-y-4 border-y py-4 text-sm">
-              {showProductStatus ? (
-                <div>
-                  <dt className="text-xs text-muted-foreground">Estado</dt>
-                  <dd className="mt-1 font-semibold">{statusLabel(product.status)}</dd>
-                </div>
-              ) : null}
-              <div>
-                <dt className="text-xs text-muted-foreground">Canal de Consulta</dt>
-                <dd className="mt-1 break-words font-semibold">
-                  {product.queryChannel ?? 'No informado'}
-                </dd>
-              </div>
-              {product.technicalId ? (
-                <div>
-                  <dt className="text-xs text-muted-foreground">ID Técnico</dt>
-                  <dd className="mt-1 break-words font-semibold">{product.technicalId}</dd>
-                </div>
-              ) : null}
-              <div>
-                <dt className="text-xs text-muted-foreground">Actualización</dt>
-                <dd className="mt-1 font-semibold">{formatDate(product.updatedAt)}</dd>
-              </div>
-            </dl>
-            <Button
-              type="button"
-              variant="dark"
-              className="w-full"
-              onClick={() => setEditOpen(true)}
-              disabled={!attributeSheet || editableAttributeCount === 0}
-            >
-              <Pencil aria-hidden="true" className="size-4" />
-              Editar enriquecimiento
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => setActiveTab('technical')}
-            >
-              Revisar información técnica
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => setTechnicalSheetOpen(true)}
-              disabled={!technicalSheet}
-              title={technicalSheetError ?? undefined}
-            >
-              <FileText aria-hidden="true" className="size-4" />
-              Ficha técnica (PDF)
-            </Button>
-            <button
-              type="button"
-              className="mx-auto flex items-center gap-2 text-xs font-semibold text-primary hover:underline"
-              onClick={() => setActiveTab('history')}
-            >
-              <History aria-hidden="true" className="size-4" /> Ver historial
-            </button>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section
-        className={cn(
-          'mt-5 rounded-xl border px-5 py-4',
-          unifiedCode
-            ? 'border-orange-200 bg-gradient-to-b from-orange-50 to-white'
-            : 'bg-slate-50',
-        )}
-        aria-label="Grupo del código unificador"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">
-              Código unificador recibido desde ERP
-            </span>
-            <h2 className="mt-1 font-mono text-xl font-bold">{unifiedCode ?? 'Sin asignar'}</h2>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Agrupa relaciones compartidas sin fusionar la identidad del SKU {product.sku}.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <StatusBadge tone="info">{applications.length} aplicaciones activas</StatusBadge>
-            <StatusBadge tone="success">{eligibleHomologCount} homólogos elegibles</StatusBadge>
-            <StatusBadge tone="info">{eligibleOemCount} OEM elegibles</StatusBadge>
-          </div>
+          ) : null}
         </div>
+        {showCompleteness ? (
+          <Card className="h-fit overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+              <h2 className="text-sm font-semibold">Control PIM</h2>
+              {showProductStatus ? (
+                <StatusBadge tone={statusTone(product.status)}>
+                  {statusLabel(product.status)}
+                </StatusBadge>
+              ) : null}
+            </div>
+            <div className="p-3">
+              <div className="mb-3">
+                <strong className="text-3xl font-semibold">
+                  {heroCompleteness === null ? '—' : `${heroCompleteness}%`}
+                </strong>
+                <span className="ml-2 text-[11px] text-muted-foreground">completitud</span>
+                {heroCompleteness !== null ? (
+                  <Progress
+                    className="mt-2"
+                    value={heroCompleteness}
+                    label={`Completitud de ${product.sku}`}
+                  />
+                ) : null}
+              </div>
+              <dl className="divide-y text-xs">
+                {[
+                  ['Fuente base', 'ERP · Sismetic / AX'],
+                  ['Código unificador', unifiedCode ?? 'Pendiente'],
+                  [
+                    'Atributos obligatorios',
+                    heroRequired.length
+                      ? `${heroRequired.length - heroMissing.length}/${heroRequired.length} completos`
+                      : 'Sin regla definida',
+                  ],
+                  ['Última actualización', formatDate(product.updatedAt)],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3 py-2">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="max-w-[60%] break-words text-right">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="mt-3 grid gap-1.5">
+                <Button
+                  type="button"
+                  variant="dark"
+                  size="sm"
+                  onClick={openEnrichment}
+                  disabled={!attributeSheet || editableAttributeCount === 0}
+                >
+                  <Pencil aria-hidden="true" className="size-3.5" />
+                  Editar enriquecimiento
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTechnicalSheetOpen(true)}
+                  disabled={!technicalSheet}
+                  title={technicalSheetError ?? undefined}
+                >
+                  <FileText aria-hidden="true" className="size-3.5" />
+                  Ficha técnica (PDF)
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setActiveTab('history')}
+                >
+                  <History aria-hidden="true" className="size-3.5" />
+                  Ver historial
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : null}
       </section>
 
       <section className="mt-4 min-w-0" aria-label="Detalle complementario">
-        <div className="sticky top-16 z-20 -mx-4 border-y bg-white/95 px-4 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-[35px] lg:px-[35px]">
+        <div className="sticky top-12 z-20 -mx-4 md:top-0 border-y bg-white/95 px-4 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-[35px] lg:px-[35px]">
           <dl
             className="grid grid-cols-3 gap-px border-b bg-slate-200 py-px"
             aria-label="Contexto persistente del producto"
@@ -1920,7 +2426,7 @@ export function ProductDetailView({
             aria-label="Secciones de la ficha"
           >
             <div className="flex min-w-max gap-1">
-              {tabs.map((tab) => {
+              {visibleTabs.map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
                 return (
@@ -1934,22 +2440,22 @@ export function ProductDetailView({
                     aria-controls={`panel-${tab.id}`}
                     onClick={() => setActiveTab(tab.id)}
                     onKeyDown={(event) => {
-                      const currentIndex = tabs.findIndex((item) => item.id === tab.id);
+                      const currentIndex = visibleTabs.findIndex((item) => item.id === tab.id);
                       let targetIndex: number | null = null;
 
                       if (event.key === 'ArrowRight') {
-                        targetIndex = (currentIndex + 1) % tabs.length;
+                        targetIndex = (currentIndex + 1) % visibleTabs.length;
                       } else if (event.key === 'ArrowLeft') {
-                        targetIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                        targetIndex = (currentIndex - 1 + visibleTabs.length) % visibleTabs.length;
                       } else if (event.key === 'Home') {
                         targetIndex = 0;
                       } else if (event.key === 'End') {
-                        targetIndex = tabs.length - 1;
+                        targetIndex = visibleTabs.length - 1;
                       }
 
                       if (targetIndex === null) return;
                       event.preventDefault();
-                      const target = tabs[targetIndex];
+                      const target = visibleTabs[targetIndex];
                       if (!target) return;
                       setActiveTab(target.id);
                       requestAnimationFrame(() =>
@@ -1978,7 +2484,54 @@ export function ProductDetailView({
           tabIndex={0}
           className="mt-5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
         >
+          <div hidden={activeTab !== 'technical'}>
+            <TechnicalPanel
+              product={product}
+              active={activeTab === 'technical'}
+              sheet={attributeSheet}
+              sheetError={attributeSheetError}
+              unitSystem={unitSystem}
+              onUnitSystemChange={changeUnitSystem}
+              canEditDirect={canEditDirect}
+              editRequest={inlineEditRequest}
+              onDirtyChange={setInlineDirty}
+              showCompleteness={showCompleteness}
+              onManageAssets={() => setActiveTab('documents')}
+              onSaved={(replicatedProducts) => {
+                setSaveNotice(
+                  replicatedProducts > 0
+                    ? `Cambios guardados y heredados a ${replicatedProducts} SKU del mismo código unificador.`
+                    : 'Cambios guardados para este SKU.',
+                );
+                setRevision((value) => value + 1);
+              }}
+            />
+          </div>
           {panel}
+        </div>
+      </section>
+      <section
+        className={cn(
+          'mt-5 rounded-xl border px-5 py-4',
+          unifiedCode ? 'border-slate-200 bg-white' : 'bg-slate-50',
+        )}
+        aria-label="Grupo del código unificador"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-[.08em] text-muted-foreground">
+              Código unificador recibido desde ERP
+            </span>
+            <h2 className="mt-1 font-mono text-xl font-bold">{unifiedCode ?? 'Sin asignar'}</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Agrupa relaciones compartidas sin fusionar la identidad del SKU {product.sku}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <StatusBadge tone="info">{applications.length} aplicaciones activas</StatusBadge>
+            <StatusBadge tone="success">{eligibleHomologCount} homólogos elegibles</StatusBadge>
+            <StatusBadge tone="info">{eligibleOemCount} OEM elegibles</StatusBadge>
+          </div>
         </div>
       </section>
     </>

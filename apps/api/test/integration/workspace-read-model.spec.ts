@@ -121,6 +121,76 @@ describe('PostgresWorkspaceReadModel', () => {
     }
   });
 
+  it('rolls product counts up to real root categories across leaves and template variants', async () => {
+    const branchId = '30000000-0000-4000-8000-000000000002';
+    const leafId = '30000000-0000-4000-8000-000000000003';
+    const secondLeafId = '30000000-0000-4000-8000-000000000004';
+    const emptyRootId = '30000000-0000-4000-8000-000000000005';
+    const inactiveLeafId = '30000000-0000-4000-8000-000000000006';
+    const variantTemplateId = '40000000-0000-4000-8000-000000000002';
+    const secondTemplateId = '40000000-0000-4000-8000-000000000003';
+    const inactiveTemplateId = '40000000-0000-4000-8000-000000000004';
+    const secondProductId = '10000000-0000-4000-8000-000000000002';
+    const thirdProductId = '10000000-0000-4000-8000-000000000003';
+    const inactiveProductId = '10000000-0000-4000-8000-000000000004';
+    await database.sql`
+      INSERT INTO catalog_categories (id, parent_id, slug, name, path, active)
+      VALUES
+        (${branchId}, ${CATEGORY_ID}, 'bolas', 'De bolas', 'rodamientos/bolas', true),
+        (${leafId}, ${branchId}, 'rigidos', 'Rígidos', 'rodamientos/bolas/rigidos', true),
+        (${secondLeafId}, ${branchId}, 'axiales', 'Axiales', 'rodamientos/bolas/axiales', true),
+        (${emptyRootId}, NULL, 'frenos', 'Frenos', 'frenos', true),
+        (${inactiveLeafId}, ${branchId}, 'inactivos', 'Inactivos', 'rodamientos/bolas/inactivos', false)
+    `;
+    await database.sql`
+      UPDATE attribute_templates SET category_id = ${leafId} WHERE id = ${TEMPLATE_ID}
+    `;
+    await database.sql`
+      INSERT INTO attribute_templates (id, category_id, variant_key, name, version, status)
+      VALUES
+        (${variantTemplateId}, ${leafId}, '22.2', 'Segunda variante', 1, 'active'),
+        (${secondTemplateId}, ${secondLeafId}, '23', 'Axial', 1, 'active'),
+        (${inactiveTemplateId}, ${inactiveLeafId}, '24', 'No vigente', 1, 'active')
+    `;
+    await database.sql`
+      INSERT INTO products (id, sku, name, status)
+      VALUES
+        (${secondProductId}, 'SKU-002', 'Segunda variante', 'in_review'),
+        (${thirdProductId}, 'SKU-003', 'Otra hoja', 'in_review'),
+        (${inactiveProductId}, 'SKU-004', 'Categoría inactiva', 'in_review')
+    `;
+    await database.sql`
+      INSERT INTO product_template_assignments (product_id, template_id)
+      VALUES
+        (${secondProductId}, ${variantTemplateId}),
+        (${thirdProductId}, ${secondTemplateId}),
+        (${inactiveProductId}, ${inactiveTemplateId})
+    `;
+
+    const reports = await readModel.read('reports', actor, { report: 'summary' });
+    const categories = reports.rows.filter((row) => row.values.section === 'Categoría');
+
+    expect(categories).toEqual([
+      {
+        id: `category:${CATEGORY_ID}`,
+        values: {
+          section: 'Categoría',
+          indicator: 'Rodamientos',
+          value: 3,
+        },
+      },
+      {
+        id: `category:${emptyRootId}`,
+        values: {
+          section: 'Categoría',
+          indicator: 'Frenos',
+          value: 0,
+        },
+      },
+    ]);
+    expect(() => workspaceSchema.parse(reports)).not.toThrow();
+  });
+
   it('exposes product catalogs as blocked without records or simulated write endpoints', async () => {
     const catalogs = await readModel.read('catalogs', actor);
 
@@ -282,7 +352,11 @@ describe('PostgresWorkspaceReadModel', () => {
     );
     expect(reports.rows).toContainEqual(
       expect.objectContaining({
-        values: { section: 'Categoría', indicator: 'Rodamientos', value: 1 },
+        values: {
+          section: 'Categoría',
+          indicator: 'Rodamientos',
+          value: 1,
+        },
       }),
     );
     expect(reports.actions).toContainEqual(

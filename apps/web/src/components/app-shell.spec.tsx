@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthActor } from '@/lib/auth';
 
@@ -31,6 +31,8 @@ beforeAll(() => {
     }),
   });
 });
+
+beforeEach(() => window.localStorage.clear());
 
 afterEach(cleanup);
 
@@ -66,6 +68,7 @@ describe('AppShell navigation', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mapa · 35 rutas' })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
     fireEvent.click(screen.getByRole('button', { name: 'Pantallas' }));
 
     expect(screen.getByText('Mapa de pantallas · 35 rutas')).toBeInTheDocument();
@@ -91,9 +94,43 @@ describe('AppShell navigation', () => {
     const navigation = screen.getByRole('navigation', { name: 'Módulos del PIM' });
     expect(within(navigation).queryByRole('link', { name: 'Catálogos' })).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
     fireEvent.click(screen.getByRole('button', { name: 'Pantallas' }));
 
     expect(screen.queryByRole('link', { name: 'Catálogos de productos' })).not.toBeInTheDocument();
+  });
+
+  it('does not send a reports-only actor to a product route from the logo or search', () => {
+    render(
+      <AppShell actor={{ ...actor, capabilities: ['menu:reports:view'] }}>
+        <p>Contenido</p>
+      </AppShell>,
+    );
+
+    expect(screen.getByRole('link', { name: 'CDR PIM, ir al inicio' })).toHaveAttribute(
+      'href',
+      '/reports',
+    );
+    expect(
+      screen.queryByRole('link', { name: 'Abrir la búsqueda del PIM' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('closes account tools with Escape and restores focus to the account button', () => {
+    render(
+      <AppShell actor={actor}>
+        <p>Contenido</p>
+      </AppShell>,
+    );
+    const account = screen.getByRole('button', { name: 'Cuenta de Admin' });
+    fireEvent.click(account);
+    expect(screen.getByRole('region', { name: 'Cuenta' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('region', { name: 'Cuenta' })).not.toBeInTheDocument();
+    expect(account).toHaveFocus();
+    expect(screen.getByRole('navigation', { name: 'Módulos del PIM' })).toBeInTheDocument();
   });
 
   it('skips unauthorized screens when paging from catalogs', () => {

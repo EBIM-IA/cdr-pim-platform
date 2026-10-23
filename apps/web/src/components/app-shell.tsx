@@ -9,7 +9,6 @@ import {
   BarChart3,
   BookOpen,
   Boxes,
-  ChevronDown,
   FileText,
   FileUp,
   FolderTree,
@@ -19,10 +18,11 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
+  PanelLeftClose,
+  ChevronUp,
   PackageCheck,
   PackageSearch,
   Search,
-  Settings,
   ShieldCheck,
   Sparkles,
   Users,
@@ -384,22 +384,47 @@ function Sidebar({
   open,
   collapsed,
   onClose,
+  onToggle,
   labelledBy,
-  capabilities,
+  actor,
+  onOpenIndex,
+  onOpenStates,
+  onLogout,
+  loggingOut,
+  logoutError,
 }: {
   open: boolean;
   collapsed: boolean;
   onClose: () => void;
+  onToggle: () => void;
   labelledBy: string;
-  capabilities: readonly AuthCapability[];
+  actor: AuthActor;
+  onOpenIndex: () => void;
+  onOpenStates: () => void;
+  onLogout: () => void;
+  loggingOut: boolean;
+  logoutError: string | null;
 }) {
   const pathname = usePathname();
-  const homeHref = capabilities.includes('menu:home:view') ? '/' : '/products';
+  const homeHref =
+    navigation.find((item) => actor.capabilities.includes(item.capability))?.href ??
+    '#main-content';
+  const searchHref = actor.capabilities.includes('menu:ai-quality:view')
+    ? '/quality?view=search'
+    : actor.capabilities.includes('menu:products:view')
+      ? '/products'
+      : null;
   const closeButton = useRef<HTMLButtonElement>(null);
+  const accountButton = useRef<HTMLButtonElement>(null);
+  const accountPanel = useRef<HTMLDivElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
   const [desktop, setDesktop] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountId = useId();
+  const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
 
   useEffect(() => {
-    const media = window.matchMedia('(min-width: 1024px)');
+    const media = window.matchMedia('(min-width: 721px)');
     const update = () => setDesktop(media.matches);
     update();
     media.addEventListener('change', update);
@@ -407,140 +432,263 @@ function Sidebar({
   }, []);
 
   useEffect(() => {
-    if (!open) return;
-    closeButton.current?.focus();
+    if (open && !desktop) closeButton.current?.focus();
+  }, [open, desktop]);
+
+  useEffect(() => {
+    if (!open || desktop) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (accountOpen) return;
       if (event.key === 'Escape') onClose();
+      if (event.key === 'Tab') {
+        const elements = sidebar.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled])',
+        );
+        const first = elements?.[0];
+        const last = elements?.[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
     };
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [onClose, open]);
+  }, [onClose, open, desktop, accountOpen]);
+
+  useEffect(() => {
+    if (!accountOpen) return;
+    accountPanel.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (
+        !accountPanel.current?.contains(event.target as Node) &&
+        !accountButton.current?.contains(event.target as Node)
+      ) {
+        setAccountOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setAccountOpen(false);
+        accountButton.current?.focus();
+      }
+      if (event.key === 'Tab') {
+        const items =
+          accountPanel.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
+        const first = items?.[0];
+        const last = items?.[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [accountOpen]);
+
+  const openTool = (action: () => void) => {
+    setAccountOpen(false);
+    onClose();
+    action();
+  };
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Cerrar menú de navegación"
-        className={cn(
-          'fixed inset-0 z-40 bg-black/45 transition-opacity lg:hidden',
-          open ? 'opacity-100' : 'pointer-events-none opacity-0',
-        )}
-        onClick={onClose}
-        tabIndex={open ? 0 : -1}
-      />
+      {open && !desktop ? (
+        <button
+          type="button"
+          aria-label="Cerrar menú de navegación"
+          className="fixed inset-0 z-40 bg-black/45"
+          onClick={onClose}
+          tabIndex={-1}
+        />
+      ) : null}
       <aside
+        ref={sidebar}
         id={labelledBy}
         aria-label="Navegación principal"
         aria-hidden={!open && !desktop}
         inert={!open && !desktop}
-        className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-[min(86vw,260px)] flex-col overflow-y-auto bg-cdr-orange px-3 pb-4 pt-3 text-white shadow-sidebar transition-[transform,width] lg:sticky lg:top-0 lg:z-20 lg:h-dvh lg:translate-x-0',
-          collapsed ? 'lg:w-16 lg:px-2' : 'lg:w-[220px]',
-          open ? 'translate-x-0' : '-translate-x-full',
-        )}
+        className={cn('cdr-sidebar', open && 'is-open')}
       >
-        <div
-          className={cn(
-            'mb-2 flex min-h-[94px] items-center justify-between px-3 lg:justify-center',
-            collapsed && 'lg:min-h-14 lg:px-0',
-          )}
-        >
+        <div className="cdr-side-head">
           <Link
             href={homeHref}
             onClick={onClose}
             aria-label="CDR PIM, ir al inicio"
-            className="flex items-center justify-center"
+            className="cdr-side-logo"
           >
             <Image
-              src="/brand/cdr-logo-white.png"
+              src="/brand/cdr-logo.png"
               alt="Casa del Rulimán"
               width={520}
               height={158}
               priority
-              className={cn('h-auto w-[160px]', collapsed && 'lg:hidden')}
+              className="cdr-logo-full"
             />
             <Image
               src="/brand/cdr-isotipo-white.png"
-              alt="Casa del Rulimán"
+              alt=""
               width={188}
               height={188}
-              className={cn('hidden h-auto w-[44px]', collapsed && 'lg:block')}
+              className="cdr-logo-mark"
             />
           </Link>
-          <Button
+          <button
+            type="button"
+            className="cdr-side-toggle"
+            onClick={onToggle}
+            aria-label={collapsed ? 'Expandir menú principal' : 'Contraer menú principal'}
+            aria-expanded={!collapsed}
+            aria-controls={labelledBy}
+            title={collapsed ? 'Expandir menú' : 'Contraer menú'}
+          >
+            <PanelLeftClose
+              aria-hidden="true"
+              className={cn('size-4', collapsed && 'rotate-180')}
+            />
+          </button>
+          <button
             ref={closeButton}
             type="button"
-            variant="ghost"
-            size="icon"
-            className="text-white hover:bg-white/15 hover:text-white lg:hidden"
+            className="cdr-side-close"
             onClick={onClose}
             aria-label="Cerrar menú"
           >
-            <X className="size-5" />
-          </Button>
+            <X aria-hidden="true" className="size-5" />
+          </button>
         </div>
-
-        <nav className="flex flex-1 flex-col gap-0.5" aria-label="Módulos del PIM">
+        {searchHref ? (
+          <Link
+            href={searchHref}
+            onClick={onClose}
+            className="cdr-side-search"
+            aria-label="Abrir la búsqueda del PIM"
+            title="Buscar en PIM"
+          >
+            <Search aria-hidden="true" className="size-4 shrink-0" />
+            <span>Buscar en PIM…</span>
+          </Link>
+        ) : null}
+        <nav aria-label="Módulos del PIM" className="cdr-side-nav">
           {navigation
-            .filter((item) => capabilities.includes(item.capability))
+            .filter((item) => actor.capabilities.includes(item.capability))
             .map((item) => {
               const Icon = item.icon;
               const active =
                 item.href === '/'
                   ? pathname === '/'
                   : Boolean(item.href && pathname.startsWith(item.href));
-              const content = (
-                <>
-                  <Icon aria-hidden="true" className="size-[18px] shrink-0" />
-                  <span className={cn(collapsed && 'lg:hidden')}>{item.label}</span>
-                  {!item.href ? (
-                    <span className="ml-auto text-[9px] uppercase tracking-wide">Próximo</span>
-                  ) : null}
-                </>
-              );
-              return item.href ? (
+              return (
                 <Link
                   key={item.label}
-                  href={item.href}
+                  href={item.href ?? homeHref}
                   onClick={onClose}
+                  aria-label={item.label}
+                  title={item.label}
                   aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'flex min-h-10 items-center gap-2.5 rounded-full px-3 py-2 text-[12.5px] font-bold leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
-                    collapsed && 'lg:justify-center lg:px-0',
-                    active ? 'bg-white/25 ring-1 ring-inset ring-white/25' : 'hover:bg-white/15',
-                  )}
+                  className={cn('cdr-nav-link', active && 'is-active')}
                 >
-                  {content}
+                  <Icon aria-hidden="true" className="size-[18px] shrink-0" />
+                  <span>{item.label}</span>
                 </Link>
-              ) : (
-                <span
-                  key={item.label}
-                  aria-disabled="true"
-                  className="flex min-h-10 items-center gap-2.5 rounded-full px-3 py-2 text-[12.5px] font-bold leading-tight text-white/55"
-                >
-                  {content}
-                </span>
               );
             })}
         </nav>
-
-        <div
-          className={cn(
-            'mt-5 border-t border-white/20 px-4 pt-4 text-[10px] leading-relaxed text-white/65',
-            collapsed && 'lg:hidden',
-          )}
-        >
-          <div className="mb-1 flex items-center gap-2 font-semibold text-white">
-            <Settings aria-hidden="true" className="size-3.5" />
-            CDR PIM · Plataforma operacional
-          </div>
-          Catálogo maestro de productos
+        <div className="cdr-side-foot">
+          <button
+            ref={accountButton}
+            type="button"
+            className="cdr-side-account"
+            onClick={() => setAccountOpen((value) => !value)}
+            aria-expanded={accountOpen}
+            aria-controls={accountId}
+            aria-label={`Cuenta de ${actorName(actor.email)}`}
+            title={`${actor.email} · ${roleLabel}`}
+          >
+            <span className="cdr-account-avatar" aria-hidden="true">
+              {actorInitials(actor.email)}
+            </span>
+            <span className="cdr-account-text">
+              <strong>{actorName(actor.email)}</strong>
+              <small>{roleLabel}</small>
+            </span>
+            <ChevronUp aria-hidden="true" className="cdr-account-caret size-3.5" />
+          </button>
         </div>
       </aside>
+      {accountOpen ? (
+        <div
+          ref={accountPanel}
+          id={accountId}
+          className="cdr-account-panel"
+          role="region"
+          aria-label="Cuenta"
+        >
+          <div className="flex items-center gap-2.5 border-b p-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs text-white">
+              {actorInitials(actor.email)}
+            </span>
+            <div className="min-w-0">
+              <strong className="block truncate text-sm">{actorName(actor.email)}</strong>
+              <small className="block truncate text-xs text-muted-foreground">{actor.email}</small>
+            </div>
+          </div>
+          <div className="border-b px-3 py-2.5 text-xs">
+            <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
+              Perfil
+            </span>
+            <strong className="mt-1 block font-medium">{roleLabel}</strong>
+          </div>
+          <button
+            type="button"
+            className="cdr-account-action"
+            onClick={() => openTool(onOpenIndex)}
+          >
+            <LayoutGrid aria-hidden="true" className="size-4" />
+            Pantallas
+          </button>
+          <button
+            type="button"
+            className="cdr-account-action"
+            onClick={() => openTool(onOpenStates)}
+          >
+            <ShieldCheck aria-hidden="true" className="size-4" />
+            Estados UX
+          </button>
+          {logoutError ? (
+            <p role="alert" className="px-3 py-2 text-xs text-destructive">
+              {logoutError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="cdr-account-action border-t"
+            onClick={onLogout}
+            disabled={loggingOut}
+          >
+            <LogOut aria-hidden="true" className="size-4" />
+            {loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -629,7 +777,7 @@ function FooterPager({
     <footer
       className={cn(
         'fixed bottom-0 left-0 right-0 z-30 flex h-10 items-center justify-between gap-4 border-t border-border bg-white/95 px-4 backdrop-blur transition-[left] sm:px-6 lg:px-[35px]',
-        collapsed ? 'lg:left-16' : 'lg:left-[220px]',
+        collapsed ? 'cdr-footer is-collapsed' : 'cdr-footer',
       )}
     >
       <small className="hidden truncate text-[10px] text-muted-foreground sm:block">
@@ -648,6 +796,7 @@ function FooterPager({
           size="sm"
           className="h-7 px-2.5 text-[11px]"
           onClick={onOpenIndex}
+          data-open-screen-index
         >
           Mapa · {TOTAL_SCREEN_COUNT} rutas
         </Button>
@@ -671,6 +820,8 @@ function FooterPager({
 }
 
 export function AppShell({ children, actor }: { children: ReactNode; actor: AuthActor }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [screenIndexOpen, setScreenIndexOpen] = useState(false);
@@ -679,37 +830,64 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const navigationId = useId();
   const menuButton = useRef<HTMLButtonElement>(null);
-  const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
+  const dialog = useRef<HTMLDivElement>(null);
+  const screen = pageSequence.find(
+    (item) => item.reference === referencePage(pathname, searchParams.get('view')),
+  );
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(SIDEBAR_PREFERENCE_KEY);
-      if (saved === 'collapsed') setSidebarCollapsed(true);
-      if (saved === 'expanded') setSidebarCollapsed(false);
+      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_PREFERENCE_KEY) === 'collapsed');
     } catch {
-      // Storage can be unavailable in hardened/private browser modes; navigation still works.
+      // Preferences are optional; navigation remains available without browser storage.
     }
   }, []);
 
+  useEffect(() => {
+    if (!screenIndexOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    dialog.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setScreenIndexOpen(false);
+      if (event.key === 'Tab') {
+        const items = dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled])',
+        );
+        const first = items?.[0];
+        const last = items?.[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      if (previous?.isConnected) previous.focus();
+      else document.querySelector<HTMLButtonElement>('[data-open-screen-index]')?.focus();
+    };
+  }, [screenIndexOpen]);
+
   const closeMenu = () => {
     setMenuOpen(false);
-    requestAnimationFrame(() => menuButton.current?.focus());
+    if (window.matchMedia('(max-width: 720px)').matches)
+      requestAnimationFrame(() => menuButton.current?.focus());
   };
 
   const toggleNavigation = () => {
-    if (window.matchMedia('(min-width: 1024px)').matches) {
-      setSidebarCollapsed((value) => {
-        const next = !value;
-        try {
-          window.localStorage.setItem(SIDEBAR_PREFERENCE_KEY, next ? 'collapsed' : 'expanded');
-        } catch {
-          // Preference persistence is optional and never blocks navigation.
-        }
-        return next;
-      });
-      return;
-    }
-    setMenuOpen(true);
+    setSidebarCollapsed((value) => {
+      const next = !value;
+      try {
+        window.localStorage.setItem(SIDEBAR_PREFERENCE_KEY, next ? 'collapsed' : 'expanded');
+      } catch {
+        /* Optional UI preference. */
+      }
+      return next;
+    });
   };
 
   const openScreenIndex = (mode: 'map' | 'states') => {
@@ -721,7 +899,6 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
     if (loggingOut) return;
     setLoggingOut(true);
     setLogoutError(null);
-
     try {
       await logoutSession();
       window.location.replace('/login');
@@ -737,196 +914,67 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
 
   return (
     <ColumnOrderUserProvider userId={actor.id}>
-      <div className="min-h-dvh w-full max-w-full overflow-x-clip bg-white">
+      <div
+        className="cdr-app min-h-dvh w-full max-w-full overflow-x-clip bg-white"
+        data-collapsed={sidebarCollapsed}
+      >
         <a
           href="#main-content"
           className="sr-only z-[100] rounded-md bg-cdr-ink px-4 py-2 text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
         >
           Saltar al contenido
         </a>
-        <div className="flex min-h-dvh w-full max-w-full bg-white">
+        <div className="flex min-h-dvh w-full max-w-full" inert={screenIndexOpen}>
           <Sidebar
             open={menuOpen}
             collapsed={sidebarCollapsed}
             onClose={closeMenu}
+            onToggle={toggleNavigation}
             labelledBy={navigationId}
-            capabilities={actor.capabilities}
+            actor={actor}
+            onOpenIndex={() => openScreenIndex('map')}
+            onOpenStates={() => openScreenIndex('states')}
+            onLogout={() => void handleLogout()}
+            loggingOut={loggingOut}
+            logoutError={logoutError}
           />
           <div className="min-w-0 max-w-full flex-1">
-            <header className="sticky top-0 z-30 flex h-14 max-w-full items-center justify-between gap-2 border-b border-border bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-[35px]">
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                <Button
-                  ref={menuButton}
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={toggleNavigation}
-                  aria-expanded={menuOpen || !sidebarCollapsed}
-                  aria-controls={navigationId}
-                  aria-label={
-                    sidebarCollapsed ? 'Expandir menú principal' : 'Contraer menú principal'
-                  }
-                >
-                  <Menu className="size-5" />
-                </Button>
-                <div className="relative">
-                  <Button
-                    type="button"
-                    className="h-9 rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
-                    onClick={() => {
-                      if (screenIndexOpen && screenIndexMode === 'map') {
-                        setScreenIndexOpen(false);
-                      } else {
-                        openScreenIndex('map');
-                      }
-                    }}
-                    aria-expanded={screenIndexOpen}
-                    aria-controls="screen-index"
-                  >
-                    <LayoutGrid aria-hidden="true" className="size-4" />
-                    Pantallas
-                    <ChevronDown aria-hidden="true" className="size-3.5" />
-                  </Button>
-                  {screenIndexOpen ? (
-                    <div
-                      id="screen-index"
-                      className="absolute left-0 top-11 z-50 max-h-[min(76vh,720px)] w-[min(88vw,760px)] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-5"
-                    >
-                      {screenIndexMode === 'map' ? (
-                        <>
-                          <div className="mb-4 flex items-start justify-between gap-4">
-                            <div>
-                              <strong className="text-sm text-cdr-ink">
-                                Mapa de pantallas · {TOTAL_SCREEN_COUNT} rutas
-                              </strong>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Inicio de sesión más {AUTHENTICATED_SCREEN_COUNT} rutas
-                                autenticadas. Cada pantalla identifica sus capacidades operativas y
-                                sus límites actuales.
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-primary">
-                              {TOTAL_SCREEN_COUNT} rutas
-                            </span>
-                          </div>
-                          <div className="mb-3 rounded-md bg-slate-50 px-3 py-2 text-[11px] text-muted-foreground">
-                            <b className="text-foreground">Inicio de sesión</b> · acceso protegido;
-                            disponible al cerrar la sesión actual.
-                          </div>
-                          <div className="grid gap-4 sm:grid-cols-3">
-                            {screenIndex.map((group) => (
-                              <section key={group.label}>
-                                <h2 className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
-                                  {group.label}
-                                </h2>
-                                <div className="grid gap-1">
-                                  {group.links
-                                    .filter(([, , capability]) =>
-                                      actor.capabilities.includes(capability),
-                                    )
-                                    .map(([label, href]) => (
-                                      <Link
-                                        key={label}
-                                        href={href}
-                                        onClick={() => setScreenIndexOpen(false)}
-                                        className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-orange-50 hover:text-primary"
-                                      >
-                                        {label}
-                                      </Link>
-                                    ))}
-                                </div>
-                              </section>
-                            ))}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="mb-4">
-                            <strong className="text-sm text-cdr-ink">Estados UX compartidos</strong>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Comportamientos verificables que complementan las {TOTAL_SCREEN_COUNT}{' '}
-                              pantallas.
-                            </p>
-                          </div>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            {uxStates.map(([label, description]) => (
-                              <div key={label} className="rounded-lg border bg-slate-50 p-3">
-                                <strong className="text-xs">{label}</strong>
-                                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                                  {description}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-4">
-                <Button
-                  asChild
-                  variant="secondary"
-                  className="max-w-[180px] px-3 sm:w-[240px] sm:justify-start"
-                >
-                  <Link
-                    href={
-                      actor.capabilities.includes('menu:ai-quality:view')
-                        ? '/quality?view=search'
-                        : '/products'
-                    }
-                    aria-label="Abrir la búsqueda del PIM"
-                  >
-                    <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="hidden truncate text-muted-foreground sm:inline">
-                      Buscar en PIM…
-                    </span>
-                  </Link>
-                </Button>
-                <div className="hidden max-w-[220px] text-right leading-tight md:block">
-                  <strong className="block truncate text-sm" title={actor.email}>
-                    {actorName(actor.email)}
-                  </strong>
-                  <span
-                    className="mt-1 block truncate rounded-md border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground"
-                    title={roleLabel}
-                  >
-                    {roleLabel}
-                  </span>
-                </div>
-                <span
-                  className="grid size-10 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs font-semibold text-white"
-                  aria-label={`Perfil: ${actor.email}`}
-                >
-                  {actorInitials(actor.email)}
-                </span>
-                {logoutError ? (
-                  <span role="alert" className="hidden max-w-48 text-xs text-destructive sm:inline">
-                    {logoutError}
-                  </span>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => void handleLogout()}
-                  disabled={loggingOut}
-                  aria-label={loggingOut ? 'Cerrando sesión' : 'Cerrar sesión'}
-                  title={loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
-                >
-                  <LogOut aria-hidden="true" className="size-4" />
-                </Button>
-              </div>
+            <header className="cdr-mobile-bar">
+              <button
+                ref={menuButton}
+                type="button"
+                className="grid size-8 shrink-0 place-items-center rounded-md hover:bg-white/10"
+                onClick={() => setMenuOpen(true)}
+                aria-expanded={menuOpen}
+                aria-controls={navigationId}
+                aria-label="Abrir menú principal"
+              >
+                <Menu aria-hidden="true" className="size-5" />
+              </button>
+              <Image src="/brand/cdr-isotipo-white.png" alt="" width={24} height={24} />
+              <span className="truncate">{screen?.label ?? 'CDR PIM'}</span>
             </header>
-
             <main
               id="main-content"
               tabIndex={-1}
-              className="min-h-[calc(100dvh-96px)] min-w-0 max-w-full overflow-x-clip bg-white px-3 pb-16 pt-4 outline-none sm:px-5 lg:px-[35px]"
+              className="min-h-dvh min-w-0 max-w-full bg-white px-3 pb-16 pt-5 outline-none min-[721px]:px-6 min-[1051px]:px-[35px] min-[1051px]:pt-6"
             >
+              {!pathname.startsWith('/products/') ? (
+                <nav
+                  aria-label="Ruta de navegación"
+                  className="mb-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                >
+                  {actor.capabilities.includes('menu:home:view') ? (
+                    <>
+                      <Link href="/" className="hover:text-foreground">
+                        Inicio
+                      </Link>
+                      <span aria-hidden="true">›</span>
+                    </>
+                  ) : null}
+                  <span aria-current="page">{screen?.label ?? 'CDR PIM'}</span>
+                </nav>
+              ) : null}
               {children}
             </main>
             <FooterPager
@@ -937,6 +985,78 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
             />
           </div>
         </div>
+        {screenIndexOpen ? (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setScreenIndexOpen(false);
+            }}
+          >
+            <div
+              ref={dialog}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="screen-index-title"
+              className="max-h-[85dvh] w-full max-w-3xl overflow-y-auto rounded-xl border bg-white p-4 shadow-xl sm:p-6"
+            >
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="screen-index-title" className="text-base font-semibold">
+                    {screenIndexMode === 'map'
+                      ? `Mapa de pantallas · ${TOTAL_SCREEN_COUNT} rutas`
+                      : 'Estados UX compartidos'}
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Inicio de sesión más {AUTHENTICATED_SCREEN_COUNT} rutas autenticadas. Las
+                    opciones disponibles dependen de tu perfil.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="grid size-8 shrink-0 place-items-center rounded-md hover:bg-muted"
+                  aria-label="Cerrar panel de pantallas"
+                  onClick={() => setScreenIndexOpen(false)}
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              </div>
+              {screenIndexMode === 'map' ? (
+                <div className="grid gap-5 sm:grid-cols-3">
+                  {screenIndex.map((group) => (
+                    <section key={group.label}>
+                      <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+                        {group.label}
+                      </h3>
+                      <div className="grid gap-1">
+                        {group.links
+                          .filter(([, , capability]) => actor.capabilities.includes(capability))
+                          .map(([label, href]) => (
+                            <Link
+                              key={label}
+                              href={href}
+                              onClick={() => setScreenIndexOpen(false)}
+                              className="rounded-md px-2 py-1.5 text-xs hover:bg-muted"
+                            >
+                              {label}
+                            </Link>
+                          ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {uxStates.map(([label, description]) => (
+                    <div key={label} className="rounded-lg border p-3">
+                      <strong className="text-xs">{label}</strong>
+                      <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </ColumnOrderUserProvider>
   );

@@ -548,7 +548,7 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
       />
 
       <nav
-        className="mb-5 flex gap-2 overflow-x-auto pb-1"
+        className="mb-5 flex gap-1 overflow-x-auto border-b"
         aria-label={`Vistas de ${definition.label}`}
       >
         {views.map((view) => {
@@ -561,10 +561,10 @@ export function ReferenceWorkspace({ definition }: { definition: ModuleDefinitio
               onClick={() => changeView(view.id)}
               aria-current={current ? 'page' : undefined}
               className={cn(
-                'inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition',
+                'inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-2 text-sm transition',
                 current
-                  ? 'border-primary bg-primary text-white'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200 hover:bg-orange-50',
+                  ? 'border-primary bg-white text-primary'
+                  : 'border-transparent text-slate-600 hover:bg-slate-50',
               )}
             >
               <Icon className="size-4" aria-hidden="true" /> {view.label}

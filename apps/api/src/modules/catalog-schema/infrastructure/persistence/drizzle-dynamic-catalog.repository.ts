@@ -55,6 +55,21 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
+/** One predicate keeps the workbook schema, pagination and facets on the same real subtree. */
+function workbookCategorySubtreeSql(categoryId: Uuid): SQL<boolean> {
+  return sql<boolean>`${catalogCategories.id} IN (
+    WITH RECURSIVE selected_categories AS (
+      SELECT id FROM catalog_categories WHERE id = ${categoryId} AND active = TRUE
+      UNION
+      SELECT child.id
+      FROM catalog_categories child
+      INNER JOIN selected_categories parent ON child.parent_id = parent.id
+      WHERE child.active = TRUE
+    )
+    SELECT id FROM selected_categories
+  )`;
+}
+
 function normalizeAxFilterText(value: string): string {
   return value
     .normalize('NFD')
@@ -186,7 +201,36 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         ),
       )
       .orderBy(catalogCategories.path, attributeTemplates.variantKey);
-    return rows.map((row) => ({ ...row, id: row.id as Uuid, templateId: row.templateId as Uuid }));
+    if (rows.length === 0) return [];
+    const tree = await this.db
+      .select({
+        id: catalogCategories.id,
+        parentId: catalogCategories.parentId,
+        slug: catalogCategories.slug,
+        name: catalogCategories.name,
+        path: catalogCategories.path,
+      })
+      .from(catalogCategories)
+      .where(eq(catalogCategories.active, true));
+    const byId = new Map(tree.map((category) => [category.id, category]));
+    return rows.map((row) => {
+      const ancestors: Array<{ id: Uuid; slug: string; name: string; path: string }> = [];
+      const visited = new Set<string>([row.id]);
+      let parentId = byId.get(row.id)?.parentId;
+      while (parentId && !visited.has(parentId)) {
+        visited.add(parentId);
+        const parent = byId.get(parentId);
+        if (!parent) break;
+        ancestors.unshift({
+          id: parent.id as Uuid,
+          slug: parent.slug,
+          name: parent.name,
+          path: parent.path,
+        });
+        parentId = parent.parentId;
+      }
+      return { ...row, id: row.id as Uuid, templateId: row.templateId as Uuid, ancestors };
+    });
   }
 
   async getActiveSchema(
@@ -300,7 +344,11 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
   async getProductSheet(
     productId: Uuid,
     roles: readonly string[],
-  ): Promise<{ schema: DynamicCatalogSchema; product: CatalogGridProduct } | null> {
+  ): Promise<{
+    schema: DynamicCatalogSchema;
+    product: CatalogGridProduct;
+    completeness?: number | null;
+  } | null> {
     const rows = await this.db
       .select({
         id: products.id,
@@ -310,6 +358,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         status: products.status,
         categoryId: attributeTemplates.categoryId,
         templateId: attributeTemplates.id,
+        completeness: workbookCompletenessSql(),
       })
       .from(products)
       .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
@@ -317,6 +366,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
+      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(and(eq(products.id, productId), eq(attributeTemplates.status, 'active')))
       .limit(1);
     const row = rows[0];
@@ -330,6 +380,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     const cells = await this.loadCells([productId], schema.attributes);
     return {
       schema,
+      completeness: row.completeness,
       product: {
         id: row.id as Uuid,
         sku: row.sku,
@@ -428,14 +479,8 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     if (options.roles.length === 0)
       return { columns: [], facets: emptyFacets, items: [], total: 0 };
     const workbookSchema = await this.loadWorkbookSchema(options.categoryId, options.roles);
-    if (workbookSchema.columns.length === 0)
-      return { columns: [], facets: emptyFacets, items: [], total: 0 };
-
-    const filters: SQL[] = [
-      eq(attributeTemplates.status, 'active'),
-      eq(catalogCategories.active, true),
-    ];
-    if (options.categoryId) filters.push(eq(catalogCategories.id, options.categoryId));
+    const filters: SQL[] = [];
+    if (options.categoryId) filters.push(workbookCategorySubtreeSql(options.categoryId));
     if (options.brand) filters.push(ilike(products.brand, escapeLike(options.brand)));
     if (options.status) filters.push(eq(products.status, options.status));
     if (options.applicationType) {
@@ -474,7 +519,9 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     if (options.q) {
       const pattern = `%${escapeLike(options.q)}%`;
       const visibleIds = workbookSchema.columns.map((column) => column.id);
-      const attributeSearch = sql<boolean>`EXISTS (
+      const attributeSearch =
+        visibleIds.length > 0
+          ? sql<boolean>`EXISTS (
         SELECT 1
         FROM product_attribute_values qv
         INNER JOIN template_attribute_assignments qta
@@ -485,6 +532,8 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           ON qra.template_id = qta.template_id
           AND qra.attribute_definition_id = qta.attribute_definition_id
         WHERE qv.product_id = ${products.id}
+          AND ${attributeTemplates.status} = 'active'
+          AND ${catalogCategories.active} = TRUE
           AND qv.attribute_definition_id IN (
             ${sql.join(
               visibleIds.map((id) => sql`${id}`),
@@ -506,7 +555,8 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
             qv.value_date::text,
             qv.value_json::text
           ) ILIKE ${pattern}
-      )`;
+      )`
+          : sql<boolean>`FALSE`;
       const identifierSearch = sql<boolean>`EXISTS (
         SELECT 1 FROM product_identifiers qi
         WHERE qi.product_id = ${products.id}
@@ -523,7 +573,10 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       if (search) filters.push(search);
     }
     for (const filter of options.filters) {
-      filters.push(this.attributeFilterSql(filter, workbookSchema.columns));
+      filters.push(
+        sql`${attributeTemplates.status} = 'active' AND ${catalogCategories.active} = TRUE`,
+        this.attributeFilterSql(filter, workbookSchema.columns),
+      );
     }
     for (const columnFilter of options.columnFilters ?? []) {
       filters.push(this.workbookColumnFilterSql(columnFilter, workbookSchema.columns));
@@ -548,15 +601,17 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
+        templateStatus: attributeTemplates.status,
+        categoryActive: catalogCategories.active,
         completeness: workbookCompletenessSql(),
       })
       .from(products)
-      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
-      .innerJoin(
+      .leftJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .leftJoin(
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
-      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(where)
       .orderBy(workbookOrder, asc(products.sku))
       .limit(options.pageSize)
@@ -564,18 +619,18 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     const totals = await this.db
       .select({ value: count() })
       .from(products)
-      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
-      .innerJoin(
+      .leftJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .leftJoin(
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
-      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(where);
 
     const productIds = rows.map((row) => row.id as Uuid);
     const definitionIds = workbookSchema.columns.map((column) => column.id);
     const valueRows =
-      productIds.length === 0
+      productIds.length === 0 || definitionIds.length === 0
         ? []
         : await this.db
             .select()
@@ -667,7 +722,12 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     }
 
     const items: CatalogWorkbookProduct[] = rows.map((row) => {
-      const templateAttributes = workbookSchema.byTemplate.get(row.templateId) ?? new Map();
+      const activeTemplate =
+        row.templateId !== null && row.templateStatus === 'active' && row.categoryActive === true;
+      const templateAttributes =
+        activeTemplate && row.templateId
+          ? (workbookSchema.byTemplate.get(row.templateId) ?? new Map())
+          : new Map<string, TemplateAttribute>();
       const productValues = valuesByProduct.get(row.id) ?? new Map();
       const attributes: Record<string, CatalogWorkbookProduct['attributes'][string]> = {};
       for (const column of workbookSchema.columns) {
@@ -711,13 +771,23 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         brand: row.brand,
         status: row.status,
         updatedAt: row.updatedAt,
-        category: { id: row.categoryId as Uuid, name: row.categoryName },
-        template: {
-          id: row.templateId as Uuid,
-          variantKey: row.templateVariantKey,
-          name: row.templateName,
-          version: row.templateVersion,
-        },
+        category:
+          row.categoryId && row.categoryName
+            ? { id: row.categoryId as Uuid, name: row.categoryName }
+            : null,
+        template:
+          activeTemplate &&
+          row.templateId &&
+          row.templateVariantKey &&
+          row.templateName &&
+          row.templateVersion
+            ? {
+                id: row.templateId as Uuid,
+                variantKey: row.templateVariantKey,
+                name: row.templateName,
+                version: row.templateVersion,
+              }
+            : null,
         providerCode:
           attributeText(providerAttribute) ??
           identifiersByProduct.get(row.id)?.get('manufacturer_part_number') ??
@@ -728,20 +798,18 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         attributes,
       };
     });
-    const facetScope = and(
-      eq(attributeTemplates.status, 'active'),
-      eq(catalogCategories.active, true),
-      options.categoryId ? eq(catalogCategories.id, options.categoryId) : undefined,
-    );
+    const facetScope = options.categoryId
+      ? workbookCategorySubtreeSql(options.categoryId)
+      : undefined;
     const facetRows = await this.db
       .selectDistinct({ brand: products.brand, status: products.status })
       .from(products)
-      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
-      .innerJoin(
+      .leftJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .leftJoin(
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
-      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(facetScope);
     const applicationFacetRows = await this.db
       .selectDistinct({ vehicleType: groupApplications.vehicleType })
@@ -750,15 +818,15 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         equivalenceGroupMembers,
         eq(equivalenceGroupMembers.groupId, groupApplications.groupId),
       )
-      .innerJoin(
+      .leftJoin(
         productTemplateAssignments,
         eq(productTemplateAssignments.productId, equivalenceGroupMembers.productId),
       )
-      .innerJoin(
+      .leftJoin(
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
-      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(
         and(
           facetScope,
@@ -777,15 +845,15 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           eq(attributeDefinitions.key, 'tipo_aplicacion'),
         ),
       )
-      .innerJoin(
+      .leftJoin(
         productTemplateAssignments,
         eq(productTemplateAssignments.productId, productAttributeValues.productId),
       )
-      .innerJoin(
+      .leftJoin(
         attributeTemplates,
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
-      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(and(facetScope, isNull(productAttributeValues.deletedAt)));
 
     return {
@@ -1371,7 +1439,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         and(
           eq(attributeTemplates.status, 'active'),
           eq(catalogCategories.active, true),
-          categoryId ? eq(catalogCategories.id, categoryId) : undefined,
+          categoryId ? workbookCategorySubtreeSql(categoryId) : undefined,
           eq(templateAttributeAssignments.active, true),
           eq(attributeDefinitions.active, true),
           inArray(templateAttributeRoleAccess.role, [...roles]),
@@ -1469,10 +1537,10 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       ? workbookAttributeDisplaySql(attribute)
       : workbookBaseColumnSql(filter.key, columns);
     const applicable = attribute
-      ? sql<boolean>`${attributeTemplates.id} IN (${sql.join(
+      ? sql<boolean>`COALESCE(${attributeTemplates.id} IN (${sql.join(
           attribute.applicableTemplateIds.map((id) => sql`${id}`),
           sql`, `,
-        )})`
+        )}), FALSE) AND ${catalogCategories.active} = TRUE`
       : sql<boolean>`TRUE`;
     if (filter.expression !== undefined) {
       const columnLabel = sql<string>`CASE
@@ -1511,7 +1579,11 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       throw new ValidationError('Workbook sort column is not visible', { column: sort.key });
     }
     const expression = attribute
-      ? workbookAttributeSortSql(attribute)
+      ? sql`CASE WHEN ${catalogCategories.active} = TRUE
+          AND ${attributeTemplates.id} IN (${sql.join(
+            attribute.applicableTemplateIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}) THEN ${workbookAttributeSortSql(attribute)} ELSE NULL END`
       : workbookBaseColumnSql(sort.key, columns);
     return sort.direction === 'asc'
       ? sql`${expression} ASC NULLS LAST`
@@ -1611,7 +1683,9 @@ function workbookIdentifierSql(type: string): SQL<string> {
 function workbookBaseColumnSql(key: string, columns: readonly CatalogWorkbookColumn[]): SQL {
   if (key === 'base:sku') return sql`${products.sku}`;
   if (key === 'base:name') return sql`${products.name}`;
-  if (key === 'base:template') return sql`${attributeTemplates.name}`;
+  if (key === 'base:template')
+    return sql`CASE WHEN ${attributeTemplates.status} = 'active'
+      AND ${catalogCategories.active} = TRUE THEN ${attributeTemplates.name} ELSE NULL END`;
   if (key === 'base:category') return sql`${catalogCategories.name}`;
   if (key === 'base:brand') return sql`${products.brand}`;
   if (key === 'base:application') return workbookApplicationSql();
@@ -1623,7 +1697,9 @@ function workbookBaseColumnSql(key: string, columns: readonly CatalogWorkbookCol
       WHEN 'archived' THEN 'Archivado'
       ELSE ${products.status}
     END`;
-    return sql`CONCAT(${label}, ' · ', ${workbookCompletenessSql()}, '%')`;
+    const completeness = workbookCompletenessSql();
+    return sql`CASE WHEN ${completeness} IS NULL THEN ${label}
+      ELSE CONCAT(${label}, ' · ', ${completeness}, '%') END`;
   }
   if (key === 'base:provider') {
     const attribute = columns.find((column) => column.key === 'codigo_proveedor');
@@ -1638,8 +1714,12 @@ function workbookBaseColumnSql(key: string, columns: readonly CatalogWorkbookCol
   throw new ValidationError('Unknown workbook base column', { column: key });
 }
 
-function workbookCompletenessSql(): SQL<number> {
-  return sql<number>`COALESCE((
+function workbookCompletenessSql(): SQL<number | null> {
+  return sql<number | null>`CASE
+    WHEN ${attributeTemplates.id} IS NULL
+      OR ${attributeTemplates.status} <> 'active'
+      OR ${catalogCategories.active} IS NOT TRUE THEN NULL
+    ELSE COALESCE((
     SELECT CASE
       WHEN readiness.required = 0 THEN 100
       ELSE ROUND(100.0 * readiness.completed / readiness.required)::int
@@ -1700,7 +1780,7 @@ function workbookCompletenessSql(): SQL<number> {
             )
         ) AS completed
     ) readiness
-  ), 100)::int`;
+  ), 100)::int END`;
 }
 
 /** Normalize the workbook's known spelling variants without inventing new application scopes. */

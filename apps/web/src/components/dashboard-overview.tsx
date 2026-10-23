@@ -26,15 +26,6 @@ interface ActivityItem {
   action: string;
 }
 
-const familyDefinitions = [
-  { name: 'Rodamientos', patterns: ['rodamiento', 'cojinete'] },
-  { name: 'Retenes y sellos', patterns: ['reten', 'sello'] },
-  { name: 'Frenos', patterns: ['freno', 'pastilla', 'disco'] },
-  { name: 'Transmisión', patterns: ['transmision', 'cardan', 'cruceta'] },
-  { name: 'Lubricantes y fluidos', patterns: ['aceite', 'grasa', 'lubric', 'fluido'] },
-  { name: 'Fijación', patterns: ['perno', 'tuerca', 'arandela', 'fijacion'] },
-] as const;
-
 const activityTones = {
   amber: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700' },
   blue: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-600' },
@@ -42,25 +33,9 @@ const activityTones = {
   red: { dot: 'bg-red-500', badge: 'bg-red-50 text-red-600' },
 };
 
-function normalized(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/gu, '')
-    .toLowerCase();
-}
-
 function metric(workspace: WorkspaceDto | null, key: string): number {
   const value = workspace?.metrics.find((item) => item.key === key)?.value;
   return typeof value === 'number' ? value : 0;
-}
-
-function familyForCategory(category: string): string {
-  const haystack = normalized(category);
-  return (
-    familyDefinitions.find((family) =>
-      family.patterns.some((pattern) => haystack.includes(pattern)),
-    )?.name ?? 'Otros'
-  );
 }
 
 function auditActivity(change: AuditChangeDto): ActivityItem {
@@ -88,7 +63,7 @@ function DashboardSkeleton() {
       <span className="sr-only" role="status">
         Cargando indicadores…
       </span>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {Array.from({ length: 5 }, (_, index) => (
           <Skeleton key={index} className="h-[104px] rounded-xl" />
         ))}
@@ -166,20 +141,17 @@ export function DashboardOverview() {
   const blockedIntegrations = metric(reports.workspace, 'blocked-external-systems');
 
   const families = useMemo(() => {
-    const counts = new Map<string, number>(familyDefinitions.map((family) => [family.name, 0]));
-    const categoryRows =
-      reports.workspace?.rows.filter((row) => row.values.section === 'Categoría') ?? [];
-    for (const row of categoryRows) {
-      const family = familyForCategory(String(row.values.indicator ?? ''));
-      const productCount = Number(row.values.value ?? 0);
-      if (family !== 'Otros' && Number.isFinite(productCount)) {
-        counts.set(family, (counts.get(family) ?? 0) + productCount);
-      }
-    }
-    return familyDefinitions.map((family) => ({
-      name: family.name,
-      count: counts.get(family.name) ?? 0,
-    }));
+    return (reports.workspace?.rows ?? [])
+      .filter((row) => row.values.section === 'Categoría')
+      .map((row) => ({
+        name: String(row.values.indicator ?? ''),
+        categoryId: /^category:[0-9a-f-]{36}$/iu.test(row.id)
+          ? row.id.slice('category:'.length)
+          : null,
+        count: Number(row.values.value ?? 0),
+      }))
+      .filter((row) => row.name && Number.isFinite(row.count))
+      .sort((left, right) => left.name.localeCompare(right.name, 'es'));
   }, [reports.workspace]);
   const maximumFamily = Math.max(...families.map((family) => family.count), 1);
 
@@ -234,7 +206,7 @@ export function DashboardOverview() {
         actionsLabel="Qué puedes probar"
         actions={[
           'Haz clic en cualquier indicador para ir al módulo que lo explica.',
-          'La franja «Muestra navegable» cuenta los SKU reales disponibles en este entorno.',
+          'La franja «Catálogo actual» cuenta los SKU reales disponibles en este entorno.',
         ]}
         dataSource="Todos los valores se calculan con datos persistidos y proyecciones autenticadas de la API. Cuando el backend aún no mide un indicador se presenta como no disponible."
       />
@@ -254,7 +226,7 @@ export function DashboardOverview() {
         <div className="space-y-[18px]">
           <section
             aria-label="Indicadores principales"
-            className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"
+            className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
           >
             <MetricCard
               label="Productos"
@@ -274,7 +246,7 @@ export function DashboardOverview() {
             <MetricCard
               label="Pendientes"
               value={formatNumber(pending)}
-              note="en revisión en la muestra"
+              note="productos en revisión"
               icon={Clock3}
               tone="red"
               href="/quality?view=review"
@@ -298,7 +270,7 @@ export function DashboardOverview() {
 
           <Card className="flex min-h-[43px] flex-wrap items-center gap-x-6 gap-y-2 px-[18px] py-2.5 text-xs">
             <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-primary">
-              Muestra navegable
+              Catálogo actual
             </span>
             <Link
               href="/products"
@@ -341,13 +313,17 @@ export function DashboardOverview() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="min-h-[290px] p-[22px]">
               <h2 className="text-[17px] font-semibold tracking-[-0.02em]">
-                Productos por familia · catálogo completo
+                Productos por Familia
               </h2>
               <div className="mt-[22px]">
                 {families.map((family) => (
                   <Link
                     key={family.name}
-                    href={`/products?q=${encodeURIComponent(family.name)}`}
+                    href={
+                      family.categoryId
+                        ? `/products?category=${encodeURIComponent(family.categoryId)}`
+                        : `/products?q=${encodeURIComponent(family.name)}`
+                    }
                     className="flex items-center gap-3 py-[9px] text-xs hover:text-primary"
                   >
                     <span className="w-[110px] shrink-0 text-muted-foreground">{family.name}</span>

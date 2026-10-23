@@ -1,5 +1,5 @@
-import { ConflictError, FixedClock, assertUuid } from '@cdr/shared';
-import { describe, expect, it } from 'vitest';
+import { ConflictError, FixedClock, ValidationError, assertUuid } from '@cdr/shared';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import { ExternalHomolog, HomologApprovalStatus } from '../domain/entities/external-homolog';
@@ -83,9 +83,58 @@ function persistedHomolog() {
 }
 
 describe('manual external homolog mutations', () => {
+  it('rejects a catalogue SKU on create before writing either the homolog or audit', async () => {
+    const repository = new MemoryHomologRepository();
+    const policy = externalReferencePolicy();
+    policy.assertExternalReference.mockRejectedValue(
+      new ValidationError('Already a catalogue SKU'),
+    );
+    const create = new CreateExternalHomologUseCase(repository, new FixedClock(changedAt), policy);
+
+    await expect(
+      create.execute(
+        {
+          unifiedCode: 'D1672',
+          externalCode: 'D1672',
+          externalBrand: 'AKEBONO',
+          active: true,
+          approvalStatus: 'pending',
+        },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(repository.item).toBeNull();
+    expect(repository.audits).toEqual([]);
+  });
+
+  it('checks the final code and brand on update before persisting or auditing', async () => {
+    const repository = new MemoryHomologRepository();
+    repository.item = persistedHomolog();
+    const policy = externalReferencePolicy();
+    policy.assertExternalReference.mockRejectedValue(
+      new ValidationError('Already a catalogue SKU'),
+    );
+    const update = new UpdateExternalHomologUseCase(repository, new FixedClock(changedAt), policy);
+
+    await expect(
+      update.execute(
+        homologId,
+        { expectedUpdatedAt: originalAt.toISOString(), externalCode: 'D1672' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(policy.assertExternalReference).toHaveBeenCalledWith('D1672', 'BOSCH');
+    expect(repository.item.toSnapshot().externalCode).toBe('D-EXT');
+    expect(repository.audits).toEqual([]);
+  });
+
   it('delegates create and its audit to the same repository unit of work', async () => {
     const repository = new MemoryHomologRepository();
-    const create = new CreateExternalHomologUseCase(repository, new FixedClock(changedAt));
+    const create = new CreateExternalHomologUseCase(
+      repository,
+      new FixedClock(changedAt),
+      externalReferencePolicy(),
+    );
 
     await create.execute(
       {
@@ -107,7 +156,11 @@ describe('manual external homolog mutations', () => {
   it('rejects a stale update without persisting or auditing it', async () => {
     const repository = new MemoryHomologRepository();
     repository.item = persistedHomolog();
-    const update = new UpdateExternalHomologUseCase(repository, new FixedClock(changedAt));
+    const update = new UpdateExternalHomologUseCase(
+      repository,
+      new FixedClock(changedAt),
+      externalReferencePolicy(),
+    );
 
     await expect(
       update.execute(
@@ -133,3 +186,7 @@ describe('manual external homolog mutations', () => {
     ]);
   });
 });
+
+function externalReferencePolicy() {
+  return { assertExternalReference: vi.fn(async () => undefined) };
+}
