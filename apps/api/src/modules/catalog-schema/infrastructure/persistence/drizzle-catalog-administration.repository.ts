@@ -22,6 +22,7 @@ import {
   catalogCategories,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
+  templateAssetRequirements,
 } from './catalog-schema.tables';
 import { recordAuditWithin } from './record-audit-within-transaction';
 
@@ -123,7 +124,29 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
       .where(eq(attributeTemplates.id, id))
       .limit(1);
     if (!header) return null;
-    return { ...toTemplate(header), attributes: await this.loadTemplateAttributes(id) };
+    const assetRequirements = await this.db
+      .select({
+        type: templateAssetRequirements.typeCode,
+        required: templateAssetRequirements.required,
+      })
+      .from(templateAssetRequirements)
+      .where(
+        and(
+          eq(templateAssetRequirements.templateId, id),
+          eq(templateAssetRequirements.active, true),
+        ),
+      )
+      .orderBy(templateAssetRequirements.typeCode);
+    return {
+      ...toTemplate(header),
+      attributes: await this.loadTemplateAttributes(id),
+      assetRequirements: assetRequirements.map((requirement) => ({
+        ...requirement,
+        type: requirement.type as NonNullable<
+          AdminAttributeTemplate['assetRequirements']
+        >[number]['type'],
+      })),
+    };
   }
 
   async updateTemplateAttribute(

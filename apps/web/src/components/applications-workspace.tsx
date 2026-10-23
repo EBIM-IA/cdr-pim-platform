@@ -2,15 +2,12 @@
 
 import type { GroupApplicationDto, UpdateGroupApplicationInput } from '@cdr/contracts';
 import {
-  CarFront,
   Check,
   Columns3,
   Download,
-  Layers3,
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
   Trash2,
   Upload,
   X,
@@ -29,11 +26,11 @@ import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
-import { TableExportButtons } from '@/components/table-export-buttons';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { downloadCsv, downloadXlsx } from '@/lib/tabular-export';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   createApplication,
@@ -111,17 +108,12 @@ const applicationTableColumns: readonly ExcelTableColumn<
 >[] = [
   {
     key: 'unifiedCode',
-    label: 'Código',
+    label: 'Código Unificador',
     getValue: (application) => application.unifiedCode,
   },
   {
-    key: 'vehicleType',
-    label: 'Contexto',
-    getValue: (application) => application.vehicleType,
-  },
-  {
     key: 'make',
-    label: 'Marca',
+    label: 'Marca Vehículo',
     getValue: (application) => application.make,
   },
   {
@@ -143,6 +135,11 @@ const applicationTableColumns: readonly ExcelTableColumn<
   { key: 'subarea', label: 'Subárea', getValue: (application) => application.subarea },
   { key: 'engine', label: 'Motor', getValue: (application) => application.engine },
   { key: 'notes', label: 'Notas', getValue: (application) => application.notes },
+  {
+    key: 'vehicleType',
+    label: 'Contexto',
+    getValue: (application) => application.vehicleType,
+  },
   {
     key: 'source',
     label: 'Origen',
@@ -198,13 +195,11 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [vehicleTypeFilter, setVehicleTypeFilter] = useState('');
-  const [bodyStyleFilter, setBodyStyleFilter] = useState('');
-  const [makeFilter, setMakeFilter] = useState('');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingCell, setEditingCell] = useState<EditingApplicationCell | null>(null);
   const [cellSaving, setCellSaving] = useState(false);
+  const [editedCells, setEditedCells] = useState<Set<string>>(new Set());
   const [form, setForm] = useState<ApplicationForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -242,28 +237,25 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     const normalized = query.trim().toLocaleLowerCase('es');
     return items.filter(
       (item) =>
-        (!normalized ||
-          [
-            item.unifiedCode,
-            item.vehicleType,
-            item.make,
-            item.model,
-            item.bodyStyle,
-            item.fuel,
-            item.traction,
-            item.displacement,
-            item.area,
-            item.subarea,
-            item.engine,
-            item.notes,
-          ]
-            .filter(Boolean)
-            .some((value) => String(value).toLocaleLowerCase('es').includes(normalized))) &&
-        (!vehicleTypeFilter || item.vehicleType === vehicleTypeFilter) &&
-        (!bodyStyleFilter || item.bodyStyle === bodyStyleFilter) &&
-        (!makeFilter || item.make === makeFilter),
+        !normalized ||
+        [
+          item.unifiedCode,
+          item.vehicleType,
+          item.make,
+          item.model,
+          item.bodyStyle,
+          item.fuel,
+          item.traction,
+          item.displacement,
+          item.area,
+          item.subarea,
+          item.engine,
+          item.notes,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLocaleLowerCase('es').includes(normalized)),
     );
-  }, [bodyStyleFilter, items, makeFilter, query, vehicleTypeFilter]);
+  }, [items, query]);
 
   const unifiedCodes = useMemo(
     () => [...new Set(items.map((item) => item.unifiedCode))].sort(),
@@ -287,38 +279,6 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const exportRows = applicationTable.visibleRows.map((item) =>
     orderedApplicationColumns.map((column) => column.getValue(item)),
   );
-  const vehicleTypes = useMemo(
-    () =>
-      [
-        ...new Set(
-          items
-            .map((item) => item.vehicleType)
-            .filter((value): value is NonNullable<GroupApplicationDto['vehicleType']> =>
-              Boolean(value),
-            ),
-        ),
-      ].sort(),
-    [items],
-  );
-  const makes = useMemo(
-    () =>
-      [
-        ...new Set(
-          items.map((item) => item.make).filter((value): value is string => Boolean(value)),
-        ),
-      ].sort(),
-    [items],
-  );
-  const bodyStyles = useMemo(
-    () =>
-      [
-        ...new Set(
-          items.map((item) => item.bodyStyle).filter((value): value is string => Boolean(value)),
-        ),
-      ].sort(),
-    [items],
-  );
-
   const downloadTemplate = () => {
     const content =
       'codigo_unificador,marca_vehiculo,modelo,tipo,combustible,traccion,cilindraje,anio_desde,anio_hasta,area,subarea,motor,notas\n';
@@ -344,8 +304,15 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     setSaving(true);
     setError(null);
     try {
-      if (!form.vehicleType || !form.make.trim() || !form.model.trim()) {
-        throw new Error('Contexto de aplicación, marca y modelo son obligatorios.');
+      if (
+        !form.unifiedCode.trim() ||
+        !form.vehicleType ||
+        !form.make.trim() ||
+        !form.model.trim()
+      ) {
+        throw new Error(
+          'Código unificador, contexto de aplicación, marca y modelo son obligatorios.',
+        );
       }
       const fields = {
         vehicleType: form.vehicleType,
@@ -362,7 +329,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         engine: form.engine,
         notes: form.notes,
       };
-      const created = await createApplication({ unifiedCode: form.unifiedCode, ...fields });
+      const created = await createApplication({ unifiedCode: form.unifiedCode.trim(), ...fields });
       setItems((current) => [created, ...current]);
       setNotice('Aplicación creada para todo el código unificador.');
       closeForm();
@@ -388,6 +355,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       );
       setNotice('Celda actualizada y registrada en Auditoría.');
       setItems((rows) => rows.map((row) => (row.id === item.id ? updated : row)));
+      setEditedCells((cells) => new Set([...cells, `${item.id}:${current.column}`]));
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : 'No fue posible guardar la celda.',
@@ -473,164 +441,124 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       />
 
       <div
-        className="sticky top-0 z-20 -mx-1 mb-5 flex flex-wrap items-center gap-2 border-y bg-cdr-canvas/95 px-1 py-2 backdrop-blur"
+        className="sticky top-0 z-20 -mx-1 mb-2 flex flex-wrap items-center gap-1.5 bg-white/95 px-1 py-1.5 backdrop-blur [&_button]:h-[30px] [&_button]:min-h-[30px] [&_button]:text-xs [&_a]:min-h-[30px] [&_a]:text-xs"
         aria-label="Acciones generales de aplicaciones"
       >
-        <Button type="button" size="sm" variant="outline" onClick={load} disabled={loading}>
-          <RefreshCw aria-hidden="true" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-          Actualizar
-        </Button>
-        <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>
-          <Download aria-hidden="true" className="size-4" /> Plantilla CSV
-        </Button>
-        <Button size="sm" variant="outline" asChild>
-          <Link href="/imports?view=new&target=applications">
-            <Upload aria-hidden="true" className="size-4" /> Importar
-          </Link>
-        </Button>
-        <TableExportButtons
-          filename={
-            view === 'context'
-              ? `aplicaciones-${effectiveCode || 'sin-codigo'}`
-              : 'aplicaciones-filtradas'
-          }
-          sheetName="Aplicaciones"
-          headers={orderedApplicationColumns.map((column) => column.label)}
-          rows={exportRows}
-          disabled={loading}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={applicationColumnOrder.resetOrder}
-          disabled={applicationColumnOrder.isDefaultOrder}
-        >
-          <Columns3 aria-hidden="true" className="size-4" /> Restaurar columnas
-        </Button>
+        <nav className="mr-2 flex flex-wrap gap-1.5" aria-label="Vistas de aplicaciones">
+          <button
+            type="button"
+            aria-current={view === 'all' ? 'page' : undefined}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 ${view === 'all' ? 'border-primary bg-orange-50 text-primary shadow-[inset_0_-2px_0_var(--color-primary)]' : 'border-border text-muted-foreground'}`}
+            onClick={() => setView('all')}
+          >
+            Todas las aplicaciones · tabla{' '}
+            <span className="rounded-md bg-orange-50 px-2 py-0.5">{items.length}</span>
+          </button>
+          <button
+            type="button"
+            aria-current={view === 'context' ? 'page' : undefined}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 ${view === 'context' ? 'border-primary bg-orange-50 text-primary shadow-[inset_0_-2px_0_var(--color-primary)]' : 'border-border text-muted-foreground'}`}
+            onClick={() => setView('context')}
+          >
+            Código unificador en contexto{' '}
+            <span className="rounded-md bg-orange-50 px-2 py-0.5">{contextRows.length}</span>
+          </button>
+        </nav>
         {canWrite ? (
           <>
             <Button
-              type="button"
               size="sm"
               disabled={showForm}
+              aria-label="Agregar fila"
               onClick={() => {
                 closeForm();
-                setForm({ ...emptyForm, unifiedCode: effectiveCode });
+                setForm({ ...emptyForm, unifiedCode: view === 'context' ? effectiveCode : '' });
                 setShowForm(true);
               }}
             >
-              <Plus aria-hidden="true" className="size-4" /> Agregar fila
+              <Plus className="size-3.5" aria-hidden="true" /> Nuevo
             </Button>
             <Button
-              type="button"
               size="sm"
               variant="outline"
+              aria-label={`Eliminar selección (${selectedIds.size})`}
               onClick={() => void deactivateSelected()}
               disabled={deleting || selectedIds.size === 0}
             >
-              <Trash2 aria-hidden="true" className="size-4" />
-              {deleting ? 'Eliminando…' : `Eliminar selección (${selectedIds.size})`}
+              <Trash2 className="size-3.5" aria-hidden="true" />
+              {deleting ? 'Eliminando…' : 'Eliminar'}
+              {selectedIds.size ? ` (${selectedIds.size})` : ''}
             </Button>
-            {includeInactive ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void reactivateSelected()}
-                disabled={restoring || selectedIds.size === 0}
-              >
-                <RotateCcw aria-hidden="true" className="size-4" />
-                {restoring ? 'Reactivando…' : 'Reactivar selección'}
-              </Button>
-            ) : null}
           </>
         ) : null}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {selectedIds.size} seleccionados
-        </span>
+        {canWrite ? (
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/imports?view=new&target=applications">
+              <Upload className="size-3.5" aria-hidden="true" />
+              Importar
+            </Link>
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" disabled>
+            <Upload className="size-3.5" aria-hidden="true" />
+            Importar
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={loading || !exportRows.length}
+          onClick={() =>
+            downloadXlsx(
+              {
+                headers: orderedApplicationColumns.map((column) => column.label),
+                rows: exportRows,
+                sheetName: 'Aplicaciones',
+              },
+              view === 'context' ? `aplicaciones-${effectiveCode}` : 'aplicaciones-filtradas',
+            )
+          }
+        >
+          <Download className="size-3.5" aria-hidden="true" />
+          Exportar Excel
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={downloadTemplate}
+          title="Descargar plantilla CSV"
+        >
+          Plantilla
+        </Button>
+        <label className="ml-auto min-w-40 flex-[1_1_180px] text-xs">
+          <span className="sr-only">Buscar aplicaciones</span>
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar en la tabla…"
+            className="h-[30px] min-h-[30px] bg-slate-50 text-xs"
+          />
+        </label>
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Actualizar aplicaciones"
+          onClick={load}
+          disabled={loading}
+        >
+          <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Restaurar columnas"
+          title="Restaurar columnas"
+          onClick={applicationColumnOrder.resetOrder}
+          disabled={applicationColumnOrder.isDefaultOrder}
+        >
+          <Columns3 className="size-3.5" aria-hidden="true" />
+        </Button>
       </div>
-
-      <nav className="mb-4 flex flex-wrap gap-1 border-b" aria-label="Vistas de aplicaciones">
-        <button
-          type="button"
-          aria-current={view === 'all' ? 'page' : undefined}
-          className={`inline-flex min-h-10 items-center gap-2 border-b-2 px-4 py-2 text-sm ${view === 'all' ? 'border-primary bg-white text-primary' : 'border-transparent text-muted-foreground hover:bg-slate-50'}`}
-          onClick={() => setView('all')}
-        >
-          Todas las aplicaciones · tabla
-          <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600">{items.length}</span>
-        </button>
-        <button
-          type="button"
-          aria-current={view === 'context' ? 'page' : undefined}
-          className={`inline-flex min-h-10 items-center gap-2 border-b-2 px-4 py-2 text-sm ${view === 'context' ? 'border-primary bg-white text-primary' : 'border-transparent text-muted-foreground hover:bg-slate-50'}`}
-          onClick={() => setView('context')}
-        >
-          Código unificador en contexto
-          <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600">
-            {contextRows.length}
-          </span>
-        </button>
-      </nav>
-
-      {view === 'context' ? (
-        <Card className="mb-5 overflow-hidden">
-          <div className="grid gap-5 border-b bg-slate-50/70 p-5 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,2fr)] lg:items-end">
-            <Select
-              label="Código unificador"
-              value={effectiveCode}
-              onChange={(event) => setSelectedCode(event.target.value)}
-            >
-              {unifiedCodes.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </Select>
-            <div className="flex flex-wrap gap-3">
-              <div className="min-w-40 rounded-xl border bg-white p-4">
-                <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Layers3 className="size-4 text-primary" /> Aplicaciones heredadas
-                </span>
-                <strong className="mt-1 block text-2xl">{contextRows.length}</strong>
-              </div>
-              <div className="min-w-40 rounded-xl border bg-white p-4">
-                <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <CarFront className="size-4 text-primary" /> Marcas / industrias
-                </span>
-                <strong className="mt-1 block text-2xl">
-                  {new Set(contextRows.map((item) => item.make).filter(Boolean)).size}
-                </strong>
-              </div>
-              <div className="min-w-48 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-950">
-                <strong className="block">Regla de herencia vigente</strong>
-                <span className="mt-1 block leading-relaxed opacity-75">
-                  El backend persiste la aplicación en el grupo; no duplica registros por SKU.
-                </span>
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-
-      {view === 'all' ? (
-        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumen">
-          {[
-            ['Aplicaciones', items.length, 'registradas'],
-            ['Códigos unificadores', unifiedCodes.length, 'grupos con aplicaciones'],
-            ['Marcas / industrias', makes.length, 'valores registrados'],
-            ['Inactivas', items.filter((item) => !item.active).length, 'con historial'],
-          ].map(([label, value, note]) => (
-            <Card key={label} className="min-h-28 p-5">
-              <small className="text-muted-foreground">{label}</small>
-              <strong className="mt-1 block text-2xl">{value}</strong>
-              <span className="text-[10px] text-muted-foreground">{note}</span>
-            </Card>
-          ))}
-        </section>
-      ) : null}
-
       {notice ? (
         <div
           className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
@@ -648,74 +576,6 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         </div>
       ) : null}
 
-      <Card className="mb-5 p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_180px_180px_200px_auto_auto] xl:items-end">
-          <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-            Buscar aplicaciones
-            <span className="relative block">
-              <Search
-                aria-hidden="true"
-                className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
-              />
-              <Input
-                className="pl-9"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Código, marca, modelo, tipo, combustible o área"
-              />
-            </span>
-          </label>
-          <Select
-            label="Contexto"
-            value={vehicleTypeFilter}
-            onChange={(event) => setVehicleTypeFilter(event.target.value)}
-          >
-            <option value="">Todos</option>
-            {vehicleTypes.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Tipo"
-            value={bodyStyleFilter}
-            onChange={(event) => setBodyStyleFilter(event.target.value)}
-          >
-            <option value="">Todos</option>
-            {bodyStyles.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Marca / industria"
-            value={makeFilter}
-            onChange={(event) => setMakeFilter(event.target.value)}
-          >
-            <option value="">Todas</option>
-            {makes.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </Select>
-          <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(e) => setIncludeInactive(e.target.checked)}
-            />{' '}
-            Mostrar inactivos
-          </label>
-          <Button variant="ghost" onClick={load} disabled={loading}>
-            <RefreshCw aria-hidden="true" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-            Actualizar
-          </Button>
-        </div>
-      </Card>
-
       {loading ? (
         <Skeleton className="h-80 rounded-xl" />
       ) : tableRows.length === 0 && !showForm ? (
@@ -726,6 +586,27 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         />
       ) : (
         <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2">
+            <div className="min-w-0 flex-[1_1_600px]">
+              <h2 className="mr-2 inline text-sm font-semibold">
+                Aplicaciones · {tableRows.length}
+              </h2>
+              <p className="inline text-xs text-muted-foreground">
+                Una fila por vehículo y código unificador; se comparte con todos los SKU del grupo.{' '}
+                {unifiedCodes.length} códigos unificadores con aplicaciones.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+              <span>
+                <i className="mr-1 inline-block size-3 rounded-sm border border-red-200 bg-red-50 align-middle" />
+                Obligatorio sin valor
+              </span>
+              <span>
+                <i className="mr-1 inline-block size-3 rounded-sm border border-orange-200 align-middle shadow-[inset_2px_0_0_#ff5a00]" />
+                Editado en esta sesión
+              </span>
+            </div>
+          </div>
           <ExcelTableFilterBar
             filteredColumns={applicationTable.filteredColumnKeys.map(
               (key) => applicationTableColumns.find((column) => column.key === key)?.label ?? key,
@@ -746,12 +627,13 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             onClear={applicationTable.clear}
           />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[2700px] text-left text-sm">
+            <table className="w-full min-w-[2250px] text-left text-sm">
               <thead className="border-b bg-slate-50 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="w-12 px-4 py-3">
                     <input
                       type="checkbox"
+                      disabled={!canWrite}
                       aria-label="Seleccionar todas las aplicaciones visibles"
                       checked={
                         applicationTable.visibleRows.length > 0 &&
@@ -800,10 +682,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                   />
                 ) : null}
                 {applicationTable.visibleRows.map((item) => (
-                  <tr key={item.id} className="hover:bg-orange-50/40">
+                  <tr
+                    key={item.id}
+                    className={selectedIds.has(item.id) ? 'bg-orange-50' : 'hover:bg-orange-50/40'}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
+                        disabled={!canWrite}
                         aria-label={`Seleccionar aplicación ${item.make} ${item.model}`}
                         checked={selectedIds.has(item.id)}
                         onChange={() => toggleSelection(item.id)}
@@ -815,6 +701,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                         item={item}
                         column={column}
                         canWrite={canWrite}
+                        edited={editedCells.has(`${item.id}:${column}`)}
                         editingCell={editingCell}
                         saving={cellSaving}
                         onStart={(editableColumn) =>
@@ -855,8 +742,75 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               </tbody>
             </table>
           </div>
+          <p className="border-t px-3.5 py-2 text-[11px] text-muted-foreground">
+            {canWrite
+              ? 'Clic en una celda o empieza a escribir para editar · se guarda al salir de la celda (Tab, Enter o clic fuera) · Esc cancela · * obligatorio.'
+              : 'Acceso de consulta: puedes filtrar, ordenar y exportar las aplicaciones.'}
+          </p>
         </Card>
       )}
+      {view === 'context' ? (
+        <Card className="mt-3 grid gap-4 p-4 sm:grid-cols-2">
+          <div>
+            <h2 className="text-sm font-semibold">Aplicaciones heredadas</h2>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Los SKU de un mismo código unificador comparten sus aplicaciones. Cada registro
+              conserva su información y trazabilidad.
+            </p>
+          </div>
+          <Select
+            label="Código unificador"
+            value={effectiveCode}
+            onChange={(event) => setSelectedCode(event.target.value)}
+          >
+            {unifiedCodes.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </Select>
+        </Card>
+      ) : null}
+      <details className="mt-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer">Más opciones</summary>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+            />
+            Mostrar inactivos
+          </label>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!exportRows.length}
+            onClick={() =>
+              downloadCsv(
+                {
+                  headers: orderedApplicationColumns.map((column) => column.label),
+                  rows: exportRows,
+                },
+                'aplicaciones-filtradas',
+              )
+            }
+          >
+            Exportar CSV
+          </Button>
+          {includeInactive && canWrite ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void reactivateSelected()}
+              disabled={restoring || !selectedIds.size}
+            >
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              Reactivar selección
+            </Button>
+          ) : null}
+        </div>
+      </details>
     </>
   );
 }
@@ -992,6 +946,7 @@ function ApplicationDataCell({
   item,
   column,
   canWrite,
+  edited,
   editingCell,
   saving,
   onStart,
@@ -1002,6 +957,7 @@ function ApplicationDataCell({
   item: GroupApplicationDto;
   column: ApplicationTableColumnKey;
   canWrite: boolean;
+  edited: boolean;
   editingCell: EditingApplicationCell | null;
   saving: boolean;
   onStart: (column: EditableApplicationColumn) => void;
@@ -1030,6 +986,7 @@ function ApplicationDataCell({
       item={item}
       column={column}
       canWrite={canWrite && item.active}
+      edited={edited}
       editing={
         editingCell?.applicationId === item.id && editingCell.column === column ? editingCell : null
       }
@@ -1046,6 +1003,7 @@ function InlineApplicationCell({
   item,
   column,
   canWrite,
+  edited,
   editing,
   saving,
   onStart,
@@ -1056,6 +1014,7 @@ function InlineApplicationCell({
   item: GroupApplicationDto;
   column: EditableApplicationColumn;
   canWrite: boolean;
+  edited: boolean;
   editing: EditingApplicationCell | null;
   saving: boolean;
   onStart: () => void;
@@ -1079,7 +1038,7 @@ function InlineApplicationCell({
 
   if (!editing) {
     return (
-      <td className="max-w-64 px-4 py-3">
+      <td className={`max-w-64 px-4 py-3 ${edited ? 'shadow-[inset_2px_0_0_#ff5a00]' : ''}`}>
         {canWrite ? (
           <button
             type="button"

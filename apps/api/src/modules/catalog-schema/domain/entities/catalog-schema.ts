@@ -131,6 +131,7 @@ export interface CatalogWorkbookProduct {
   readonly applicationTypes: readonly string[];
   readonly completeness: number | null;
   readonly attributes: Readonly<Record<string, CatalogWorkbookCell>>;
+  readonly assetRequirements?: readonly TemplateAssetRequirement[];
 }
 
 export function validateAttributeValue(

@@ -2,14 +2,12 @@
 
 import {
   PRODUCT_ASSET_MAX_BYTES,
+  type CatalogCategorySummaryDto,
   type ProductAssetBulkResultDto,
   type ProductAssetDto,
   type ProductAssetType,
 } from '@cdr/contracts';
 import {
-  ChevronLeft,
-  ChevronRight,
-  Download,
   FileArchive,
   FileCheck2,
   FileSpreadsheet,
@@ -24,6 +22,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
+import { matchesAxFilterExpression } from '@/components/excel-table-filter';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -32,19 +31,27 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useProductsData } from '@/components/use-products-data';
-import { fetchProduct } from '@/lib/catalog-api';
-import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
+import { fetchCatalogCategories } from '@/lib/dynamic-catalog-api';
+import {
+  documentCoverage,
+  documentFilterValue,
+  documentRequirement,
+  documentState,
+  fetchDocumentsCatalog,
+  type DocumentAssets,
+  type DocumentProduct,
+} from '@/lib/documents-view';
 import {
   deleteProductAsset,
-  listProductAssetsBatch,
   processProductAssetZip,
   productAssetDownloadUrl,
   uploadProductAsset,
 } from '@/lib/product-assets-api';
 import { downloadXlsx } from '@/lib/tabular-export';
-import type { Product } from '@/lib/types';
 import { cn } from '@/lib/utils';
+
+import styles from './documents-workspace.module.css';
 
 const ASSET_TYPES: ReadonlyArray<{
   value: ProductAssetType;
@@ -65,12 +72,7 @@ const ASSET_TYPES: ReadonlyArray<{
     accept: '.pdf,.png,.jpg,.jpeg,.dwg,application/pdf,image/png,image/jpeg,image/vnd.dwg',
   },
   { value: 'FT', label: 'Ficha técnica', formats: '.pdf', accept: '.pdf,application/pdf' },
-  {
-    value: 'MSDS',
-    label: 'Ficha de seguridad',
-    formats: '.pdf',
-    accept: '.pdf,application/pdf',
-  },
+  { value: 'MSDS', label: 'Ficha de seguridad', formats: '.pdf', accept: '.pdf,application/pdf' },
   {
     value: 'CERT',
     label: 'Certificado',
@@ -78,187 +80,144 @@ const ASSET_TYPES: ReadonlyArray<{
     accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',
   },
 ];
-
-type AssetMap = Readonly<Record<string, ProductAssetDto[]>>;
+const BASE_COLUMNS = [
+  { key: 'name', label: 'Descripción' },
+  { key: 'category', label: 'Categoría' },
+  { key: 'providerCode', label: 'Código de proveedor' },
+  { key: 'unifiedCode', label: 'Código unificador' },
+  { key: 'application', label: 'Tipo de aplicación' },
+  { key: 'brand', label: 'Marca de artículo' },
+] as const;
 
 export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
-  const [page, setPage] = useState(1);
-  const [contextProductId, setContextProductId] = useState('');
-  const [contextInitialized, setContextInitialized] = useState(false);
-  const [contextProduct, setContextProduct] = useState<Product | null>(null);
-  const [contextSettled, setContextSettled] = useState(false);
-  // Keep the batch within its contractual limit while reserving one row for a deep-linked SKU.
-  const productsPageSize = contextProduct ? 99 : 100;
-  const productsState = useProductsData({ page, pageSize: productsPageSize });
-  const [assetsByProduct, setAssetsByProduct] = useState<AssetMap>({});
-  const [assetsLoading, setAssetsLoading] = useState(false);
-  const [assetsError, setAssetsError] = useState<string | null>(null);
-  const [baseData, setBaseData] = useState<
-    Readonly<Record<string, { providerCode?: string; unifiedCode?: string }>>
-  >({});
-  const [baseLoading, setBaseLoading] = useState(true);
-  const [baseError, setBaseError] = useState<string | null>(null);
+  const [products, setProducts] = useState<DocumentProduct[]>([]);
+  const [categories, setCategories] = useState<CatalogCategorySummaryDto[]>([]);
+  const [assetsByProduct, setAssetsByProduct] = useState<DocumentAssets>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [query, setQuery] = useState('');
-  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [view, setView] = useState<'table' | 'context'>('table');
+  const [selectedId, setSelectedId] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [uploadingSlots, setUploadingSlots] = useState<ReadonlySet<string>>(new Set());
+  const pendingUploads = useRef(new Set<string>());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [bulkResult, setBulkResult] = useState<ProductAssetBulkResultDto | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
-  const bulkRef = useRef<HTMLDivElement>(null);
-
-  const catalogHasContext = productsState.products.some(
-    (product) => product.id === contextProductId,
-  );
+  const validatedZip = useRef<File | null>(null);
+  const bulkInFlight = useRef(false);
 
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get('productId') ?? '';
-    setContextProductId(requested);
-    setContextInitialized(true);
-    if (!requested) setContextSettled(true);
+    const requested = new URLSearchParams(window.location.search).get('productId');
+    if (requested) {
+      setSelectedId(requested);
+      setView('context');
+    }
   }, []);
-
-  useEffect(() => {
-    if (!contextInitialized) return;
-    if (!contextProductId || catalogHasContext) {
-      setContextProduct(null);
-      setContextSettled(true);
-      return;
-    }
-    if (productsState.loading) return;
-    const controller = new AbortController();
-    setContextSettled(false);
-    void fetchProduct(contextProductId, controller.signal)
-      .then(setContextProduct)
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === 'AbortError') return;
-        setContextProduct(null);
-      })
-      .finally(() => setContextSettled(true));
-    return () => controller.abort();
-  }, [catalogHasContext, contextInitialized, contextProductId, productsState.loading]);
-
   useEffect(() => {
     const controller = new AbortController();
-    setBaseLoading(true);
-    setBaseError(null);
-    void fetchCatalogWorkbook({ page, pageSize: productsPageSize, filter: [] }, controller.signal)
-      .then((result) => {
-        setBaseData(
-          Object.fromEntries(
-            result.items.map((product) => [
-              product.id,
-              {
-                providerCode: product.providerCode ?? undefined,
-                unifiedCode: product.unifiedCode ?? undefined,
-              },
-            ]),
-          ),
+    setLoading(true);
+    setError(null);
+    void Promise.all([
+      fetchDocumentsCatalog(controller.signal),
+      fetchCatalogCategories(controller.signal).catch(() => []),
+    ])
+      .then(([catalog, categoryRows]) => {
+        if (controller.signal.aborted) return;
+        setProducts(catalog.products);
+        setAssetsByProduct(catalog.assets);
+        setCategories(categoryRows);
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(
+          cause instanceof Error ? cause.message : 'No fue posible consultar los documentos.',
         );
       })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === 'AbortError') return;
-        setBaseData({});
-        setBaseError(
-          error instanceof Error
-            ? error.message
-            : 'No fue posible consultar los códigos base del catálogo.',
-        );
-      })
-      .finally(() => setBaseLoading(false));
-    return () => controller.abort();
-  }, [page, productsPageSize, revision]);
-
-  const matrixProducts = useMemo(() => {
-    const products: Product[] = [];
-    const seen = new Set<string>();
-    for (const product of [page === 1 ? contextProduct : null, ...productsState.products]) {
-      if (!product || seen.has(product.id)) continue;
-      // The reserved context row replaces (rather than duplicates) its natural paginated row.
-      if (page > 1 && contextProduct && product.id === contextProduct.id) continue;
-      const base = baseData[product.id];
-      products.push({
-        ...product,
-        providerCode: base?.providerCode ?? product.providerCode,
-        unifiedCode: base?.unifiedCode ?? product.unifiedCode,
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
-      seen.add(product.id);
-      if (products.length === 100) break;
-    }
-    return products;
-  }, [baseData, contextProduct, page, productsState.products]);
-  const productIds = matrixProducts.map((product) => product.id);
-  const batchKey = productIds.join(',');
-
-  useEffect(() => {
-    if (!batchKey) {
-      setAssetsByProduct({});
-      setAssetsLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setAssetsLoading(true);
-    setAssetsError(null);
-    void listProductAssetsBatch(batchKey.split(','), controller.signal)
-      .then((items) => {
-        setAssetsByProduct(
-          Object.fromEntries(items.map((item) => [item.productId, item.assets])) as AssetMap,
-        );
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === 'AbortError') return;
-        setAssetsByProduct({});
-        setAssetsError(
-          error instanceof Error ? error.message : 'No fue posible consultar los activos.',
-        );
-      })
-      .finally(() => setAssetsLoading(false));
     return () => controller.abort();
-  }, [batchKey, revision]);
+  }, [revision]);
 
-  const filteredProducts = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('es');
-    if (!normalized) return matrixProducts;
-    return matrixProducts.filter((product) =>
-      [product.sku, product.name, product.brand, product.providerCode, product.unifiedCode]
-        .filter(Boolean)
-        .join(' ')
-        .toLocaleLowerCase('es')
-        .includes(normalized),
-    );
-  }, [matrixProducts, query]);
-
-  const totals = useMemo(() => {
-    const assets = matrixProducts.flatMap((product) => assetsByProduct[product.id] ?? []);
-    return {
-      assets: assets.length,
-      productsWithAssets: new Set(assets.map((asset) => asset.productId)).size,
-      missingSlots: matrixProducts.reduce(
-        (total, product) =>
-          total +
-          ASSET_TYPES.filter(
-            (type) =>
-              !(assetsByProduct[product.id] ?? []).some((asset) => asset.type === type.value),
-          ).length,
+  const selectedProduct =
+    products.find((product) => product.id === selectedId) ??
+    (!selectedId ? products[0] : undefined);
+  const selectedAssets = selectedProduct ? (assetsByProduct[selectedProduct.id] ?? []) : [];
+  const selectedCoverage = selectedProduct
+    ? documentCoverage(selectedProduct, selectedAssets)
+    : null;
+  const categoryPath = (product: DocumentProduct) => {
+    const category = categories.find((entry) => entry.id === product.category?.id);
+    return category?.ancestors?.length
+      ? [
+          ...category.ancestors.map((entry) => entry.name),
+          ...(category.ancestors.at(-1)?.name === category.name ? [] : [category.name]),
+        ].join(' › ')
+      : category?.path?.replace(/\s*\/\s*/gu, ' › ') || product.category?.name || '';
+  };
+  const baseValue = (product: DocumentProduct, key: string): string => {
+    if (key === 'category') return categoryPath(product);
+    if (key === 'application') return product.applicationTypes.join(' E ');
+    if (key === 'coverage') {
+      const coverage = documentCoverage(product, assetsByProduct[product.id] ?? []);
+      return coverage ? `${coverage.present}/${coverage.total}` : '—';
+    }
+    if (ASSET_TYPES.some((type) => type.value === key))
+      return documentState(product, key as ProductAssetType, assetsByProduct[product.id] ?? []);
+    return String(product[key as 'sku' | 'name' | 'providerCode' | 'unifiedCode' | 'brand'] ?? '');
+  };
+  // All pages have been loaded before this local filter, so exports and AX filters share the same rows.
+  const filteredProducts = products.filter((product) => {
+    const text = [product.sku, ...BASE_COLUMNS.map((column) => baseValue(product, column.key))]
+      .join(' ')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase('es');
+    const search = query
+      .trim()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase('es');
+    if (search && !text.includes(search)) return false;
+    return Object.entries(filters).every(([key, expression]) => {
+      const value = ASSET_TYPES.some((type) => type.value === key)
+        ? documentFilterValue(
+            product,
+            key as ProductAssetType,
+            assetsByProduct[product.id] ?? [],
+            expression,
+          )
+        : baseValue(product, key) || '(Vacías)';
+      return matchesAxFilterExpression(value, expression);
+    });
+  });
+  const totals = useMemo(
+    () => ({
+      requested: products.reduce(
+        (sum, product) => sum + (product.assetRequirements?.length ?? 0),
         0,
       ),
-    };
-  }, [assetsByProduct, matrixProducts]);
-
-  const reload = () => {
-    productsState.reload();
-    setRevision((value) => value + 1);
-  };
-
-  const submitAsset = async (product: Product, type: ProductAssetType, file: File) => {
+      files: Object.values(assetsByProduct).reduce((sum, assets) => sum + assets.length, 0),
+    }),
+    [products, assetsByProduct],
+  );
+  const reload = () => setRevision((value) => value + 1);
+  const submitAsset = async (product: DocumentProduct, type: ProductAssetType, file: File) => {
+    if (!canWrite || !documentRequirement(product, type)) return;
     if (file.size > PRODUCT_ASSET_MAX_BYTES) {
       setNotice({ tone: 'error', message: `${file.name} supera el máximo de 20 MB.` });
       return;
     }
     const slot = `${product.id}:${type}`;
-    setUploadingSlot(slot);
+    if (pendingUploads.current.has(slot)) return;
+    pendingUploads.current.add(slot);
+    setUploadingSlots(new Set(pendingUploads.current));
     setNotice(null);
     try {
       const uploaded = await uploadProductAsset({ productId: product.id, type, file });
@@ -266,141 +225,197 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
         tone: 'success',
         message: `${uploaded.filename} quedó asociado a ${uploaded.sku}.`,
       });
-      setRevision((value) => value + 1);
-    } catch (error) {
+      reload();
+    } catch (cause) {
       setNotice({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'No fue posible subir el activo.',
+        message: cause instanceof Error ? cause.message : 'No fue posible subir el activo.',
       });
     } finally {
-      setUploadingSlot(null);
+      pendingUploads.current.delete(slot);
+      setUploadingSlots(new Set(pendingUploads.current));
     }
   };
-
   const removeAsset = async (asset: ProductAssetDto) => {
-    if (!window.confirm(`¿Eliminar ${asset.filename} de ${asset.sku}?`)) return;
+    if (!canWrite || !window.confirm(`¿Eliminar ${asset.filename} de ${asset.sku}?`)) return;
     setDeletingId(asset.id);
     setNotice(null);
     try {
       await deleteProductAsset(asset.id);
       setNotice({ tone: 'success', message: `${asset.filename} fue eliminado.` });
-      setRevision((value) => value + 1);
-    } catch (error) {
+      reload();
+    } catch (cause) {
       setNotice({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'No fue posible eliminar el activo.',
+        message: cause instanceof Error ? cause.message : 'No fue posible eliminar el activo.',
       });
     } finally {
       setDeletingId(null);
     }
   };
-
   const processZip = async (mode: 'validate' | 'commit') => {
-    if (!zipFile) return;
+    if (!canWrite || !zipFile || bulkInFlight.current) return;
+    const archive = zipFile;
+    if (mode === 'commit' && validatedZip.current !== archive) {
+      setBulkError('Valida este archivo ZIP antes de confirmar su carga.');
+      return;
+    }
+    validatedZip.current = null;
+    if (mode === 'validate') setBulkResult(null);
+    bulkInFlight.current = true;
     setBulkBusy(true);
     setBulkError(null);
     try {
-      const result = await processProductAssetZip(zipFile, mode);
+      const result = await processProductAssetZip(archive, mode);
+      validatedZip.current = mode === 'validate' ? archive : null;
       setBulkResult(result);
       if (mode === 'commit') {
-        setRevision((value) => value + 1);
+        reload();
         setNotice({
           tone: result.errors ? 'error' : 'success',
-          message: `${result.valid} archivo${result.valid === 1 ? '' : 's'} procesado${
-            result.valid === 1 ? '' : 's'
-          }; ${result.errors} con error.`,
+          message: `${result.valid} archivos procesados; ${result.errors} con error.`,
         });
       }
-    } catch (error) {
-      setBulkError(error instanceof Error ? error.message : 'No fue posible procesar el ZIP.');
+    } catch (cause) {
+      setBulkResult(null);
+      setBulkError(cause instanceof Error ? cause.message : 'No fue posible procesar el ZIP.');
     } finally {
+      bulkInFlight.current = false;
       setBulkBusy(false);
     }
   };
-
-  const exportMatrix = () => {
+  const exportMatrix = () =>
     downloadXlsx(
       {
         sheetName: 'Imagenes y documentos',
         headers: [
-          'SKU',
-          'Descripción',
-          'Código de proveedor',
-          'Código unificador',
-          'Marca',
+          'Código artículo',
+          ...BASE_COLUMNS.map((column) => column.label),
           ...ASSET_TYPES.map((type) => type.label),
+          'Documentos',
         ],
-        rows: filteredProducts.map((product) => {
-          const assets = assetsByProduct[product.id] ?? [];
-          return [
-            product.sku,
-            product.name,
-            product.providerCode ?? '',
-            product.unifiedCode ?? '',
-            product.brand,
-            ...ASSET_TYPES.map((type) =>
-              assets
-                .filter((asset) => asset.type === type.value)
-                .map((asset) => asset.filename)
-                .join(' · '),
-            ),
-          ];
-        }),
+        rows: filteredProducts.map((product) => [
+          product.sku,
+          ...BASE_COLUMNS.map((column) => baseValue(product, column.key)),
+          ...ASSET_TYPES.map((type) =>
+            documentState(product, type.value, assetsByProduct[product.id] ?? []),
+          ),
+          baseValue(product, 'coverage'),
+        ]),
       },
       'imagenes-y-documentos',
     );
+  const slotProps = {
+    canWrite,
+    uploadingSlots,
+    deletingId,
+    onUpload: submitAsset,
+    onDelete: removeAsset,
   };
-
-  const loading =
-    productsState.loading || assetsLoading || baseLoading || !contextInitialized || !contextSettled;
-  const error = productsState.error ?? assetsError;
+  const filterInput = (key: string, label: string) => (
+    <input
+      className={styles.filter}
+      type="text"
+      aria-label={`Filtrar ${label} (sintaxis AX)`}
+      placeholder="Filtrar"
+      value={filters[key] ?? ''}
+      onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.value }))}
+    />
+  );
 
   return (
     <>
       <PageHeader
-        title="Imágenes y documentos"
-        description="Vista matricial de activos persistidos por producto y datos base disponibles en el PIM."
-        actions={
-          <>
-            <Button variant="outline" onClick={exportMatrix} disabled={!filteredProducts.length}>
-              <FileSpreadsheet aria-hidden="true" className="size-4" /> Exportar Excel
-            </Button>
-            {canWrite ? (
-              <Button onClick={() => bulkRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-                <FileArchive aria-hidden="true" className="size-4" /> Carga masiva (ZIP)
-              </Button>
-            ) : null}
-          </>
-        }
+        title="Imágenes y Documentos"
+        description="Activos técnicos y comerciales asociados al SKU."
       />
       <ScreenGuide
-        objective="Consulta y gestiona en una sola tabla la fotografía, el plano, la ficha técnica, la ficha de seguridad y el certificado de cada SKU."
-        actions={
-          canWrite
-            ? [
-                'Busca por SKU, descripción, proveedor, código unificador o marca.',
-                'Carga o reemplaza un archivo desde su celda; también puedes arrastrarlo sobre ella.',
-                'Descarga o elimina cada activo persistido y usa el ZIP para cargas de varios SKU.',
-              ]
-            : [
-                'Busca por los datos base disponibles del producto.',
-                'Descarga los archivos persistidos desde la matriz.',
-                'Solicita permiso de escritura para cargar o eliminar activos.',
-              ]
-        }
-        dataSource="Los productos provienen del catálogo y los archivos activos de product_assets mediante una consulta batch autenticada; los binarios se sirven desde el storage privado."
-        limitation="El contrato actual no persiste si un tipo documental aplica a una plantilla; por eso una celda vacía se muestra como pendiente y no como ‘No aplica’. El servidor valida firma, MIME, extensión, nombre y tamaño."
+        objective="Consulta los archivos y requisitos documentales de la plantilla de cada SKU."
+        actions={[
+          'Alterna entre la tabla de todos los SKU y los archivos del SKU en contexto.',
+          'Filtra cualquier columna con sintaxis AX; usa comillas dobles para encontrar celdas sin archivo.',
+          ...(canWrite
+            ? ['Carga desde la celda o valida un ZIP antes de confirmar su carga.']
+            : ['Descarga los archivos disponibles con acceso de solo lectura.']),
+        ]}
+        dataSource="Catálogo completo autorizado, requisitos activos de las plantillas y archivos persistidos en el servidor."
+        limitation="Los enlaces o textos importados no equivalen a un archivo cargado. La publicación en PrestaShop requiere un conector habilitado."
       />
-
+      <div className={styles.toolbar}>
+        <div className={styles.tabs} role="tablist" aria-label="Vista de imágenes y documentos">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'table'}
+            onClick={() => setView('table')}
+          >
+            Todos los SKU · tabla <span>{products.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'context'}
+            onClick={() => setView('context')}
+          >
+            SKU en contexto{selectedProduct ? ` · ${selectedProduct.sku}` : ''}
+          </button>
+        </div>
+        <div
+          className={styles.actions}
+          role="toolbar"
+          aria-label="Acciones de imágenes y documentos"
+        >
+          {canWrite ? (
+            <Button size="sm" onClick={() => setBulkOpen(true)}>
+              <FileArchive className="size-3.5" aria-hidden="true" /> Carga masiva (ZIP)
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading || !!error || !filteredProducts.length}
+            onClick={exportMatrix}
+          >
+            <FileSpreadsheet className="size-3.5" aria-hidden="true" /> Exportar Excel
+          </Button>
+          <a
+            className={styles.example}
+            href="/templates/documentos_ejemplo.zip"
+            download
+            title="Ejemplo de estructura: sustituye el SKU y adjunta tus archivos reales"
+          >
+            ZIP de ejemplo
+          </a>
+          <label className={styles.search}>
+            <Search className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">Buscar SKU</span>
+            <Input
+              type="search"
+              placeholder="Buscar SKU, descripción, marca…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Actualizar documentos"
+            disabled={loading}
+            onClick={reload}
+          >
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
       {!canWrite ? (
-        <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          Acceso de solo lectura: puedes consultar, exportar y descargar, pero no modificar activos.
+        <p className="mb-3 text-xs text-muted-foreground">
+          Acceso de solo lectura: consulta, exporta y descarga los archivos disponibles.
         </p>
       ) : null}
       {notice ? (
         <p
           className={cn(
-            'mb-4 rounded-lg p-3 text-sm',
+            'mb-3 rounded-lg p-3 text-xs',
             notice.tone === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800',
           )}
           role={notice.tone === 'error' ? 'alert' : 'status'}
@@ -408,51 +423,8 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           {notice.message}
         </p>
       ) : null}
-      {baseError ? (
-        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          La matriz sigue disponible, pero no fue posible completar los códigos de proveedor y
-          unificador: {baseError}
-        </p>
-      ) : null}
-
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <label className="block min-w-0 flex-1 text-xs font-semibold lg:max-w-xl">
-            Buscar en productos y datos base
-            <span className="relative mt-2 block">
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-              />
-              <Input
-                className="pl-9"
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="SKU, descripción, proveedor, unificador o marca"
-              />
-            </span>
-          </label>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <StatusBadge tone="info">{filteredProducts.length} SKU visibles</StatusBadge>
-            <StatusBadge tone="success">{totals.assets} activos</StatusBadge>
-            <StatusBadge tone="neutral">{totals.productsWithAssets} SKU con archivos</StatusBadge>
-            <StatusBadge tone={totals.missingSlots ? 'warning' : 'success'}>
-              {totals.missingSlots} slots pendientes
-            </StatusBadge>
-            <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
-              <RefreshCw
-                aria-hidden="true"
-                className={loading ? 'size-4 animate-spin' : 'size-4'}
-              />
-              Actualizar
-            </Button>
-          </div>
-        </div>
-      </Card>
-
       {loading ? (
-        <Skeleton className="h-[460px] rounded-xl" aria-label="Cargando matriz de documentos" />
+        <Skeleton className="h-[520px] rounded-xl" aria-label="Cargando matriz de documentos" />
       ) : error ? (
         <StatePanel
           variant="error"
@@ -461,190 +433,363 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           actionLabel="Reintentar"
           onAction={reload}
         />
-      ) : filteredProducts.length === 0 ? (
-        <StatePanel
-          variant="empty"
-          title="Sin productos para esta búsqueda"
-          description="Prueba con otro SKU, descripción, proveedor, código unificador o marca."
-          actionLabel="Limpiar búsqueda"
-          onAction={() => setQuery('')}
-        />
-      ) : (
-        <Card className="mb-[18px] min-w-0 max-w-full overflow-hidden p-0">
+      ) : view === 'table' ? (
+        <Card className={styles.card}>
+          <div className={styles.tableHeading}>
+            <h2>
+              Imágenes y Documentos ·{' '}
+              {filteredProducts.length === products.length
+                ? `${products.length} SKU`
+                : `${filteredProducts.length} de ${products.length} SKU`}
+            </h2>
+            <p>
+              Una fila por SKU. Los documentos se asocian al atributo de la plantilla de cada SKU.{' '}
+              {totals.requested} documentos que piden las plantillas · {totals.files} archivos en el
+              servidor
+            </p>
+            <div className={styles.legend}>
+              <span>
+                <i className={styles.loadedSwatch} /> Cargado
+              </span>
+              <span>
+                <i className={styles.requiredSwatch} /> Obligatorio sin archivo o valor no válido
+              </span>
+              <span>
+                <i className={styles.naSwatch} /> No aplica a la plantilla
+              </span>
+            </div>
+          </div>
+          <div className={styles.filterHelp}>
+            <span title={'Filtros AX: *texto*, prefijo*, !valor, A|B y "" para vacías.'}>
+              ⓘ Filtros AX por columna
+            </span>
+            <span role="status">
+              {filteredProducts.length} filas
+              {Object.values(filters).some(Boolean) ? (
+                <button type="button" onClick={() => setFilters({})}>
+                  Limpiar filtros
+                </button>
+              ) : null}
+            </span>
+          </div>
           <div
-            className="max-w-full overflow-x-auto"
+            className={styles.scroll}
             tabIndex={0}
             role="region"
             aria-label="Matriz de documentos desplazable"
           >
-            <table className="w-full min-w-[1420px] border-collapse text-left text-xs">
-              <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_#e5e7eb]">
-                <tr className="bg-orange-50 text-[10px] font-bold uppercase tracking-[.06em] text-orange-700">
-                  <th className="sticky left-0 z-30 border-r bg-orange-50 px-3 py-2" rowSpan={2}>
-                    Código artículo
-                  </th>
-                  <th className="px-3 py-2" colSpan={5}>
-                    Imagen y datos base ERP · solo lectura
-                  </th>
-                  <th className="border-l px-3 py-2" colSpan={5}>
-                    Documentos · cargar o arrastrar a la celda
-                  </th>
-                  <th className="border-l px-3 py-2" rowSpan={2}>
-                    Control
-                  </th>
+            <table className={styles.table}>
+              <colgroup>
+                {[145, 56, 220, 220, 220, 128, 170, 156, 245, 245, 245, 245, 245, 110].map(
+                  (width, index) => (
+                    <col key={index} style={{ width }} />
+                  ),
+                )}
+              </colgroup>
+              <thead>
+                <tr className={styles.groups}>
+                  <th>SKU</th>
+                  <th colSpan={7}>Imagen y Datos Base ERP · Solo Lectura</th>
+                  <th colSpan={5}>Documentos · «Cargar» o arrastra el archivo a la celda</th>
+                  <th>Control</th>
                 </tr>
-                <tr className="text-[10px] uppercase text-slate-500">
-                  <th className="px-3 py-2">Imagen</th>
-                  <th className="px-3 py-2">Descripción</th>
-                  <th className="px-3 py-2">Código de proveedor</th>
-                  <th className="px-3 py-2">Código unificador</th>
-                  <th className="px-3 py-2">Marca</th>
+                <tr>
+                  <th>Código artículo</th>
+                  <th>Imagen</th>
+                  {BASE_COLUMNS.map((column) => (
+                    <th key={column.key}>{column.label}</th>
+                  ))}
                   {ASSET_TYPES.map((type) => (
-                    <th className="border-l px-3 py-2" key={type.value} title={type.formats}>
+                    <th key={type.value} title={type.formats}>
                       {type.label}
                     </th>
                   ))}
+                  <th>Documentos</th>
+                </tr>
+                <tr>
+                  <th>{filterInput('sku', 'Código artículo')}</th>
+                  <th />
+                  {BASE_COLUMNS.map((column) => (
+                    <th key={column.key}>{filterInput(column.key, column.label)}</th>
+                  ))}
+                  {ASSET_TYPES.map((type) => (
+                    <th key={type.value}>{filterInput(type.value, type.label)}</th>
+                  ))}
+                  <th>{filterInput('coverage', 'Documentos')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {filteredProducts.map((product) => {
                   const assets = assetsByProduct[product.id] ?? [];
-                  const photo = assets.find(
-                    (asset) => asset.type === 'FOTO' && asset.mimeType.startsWith('image/'),
-                  );
-                  const completed = ASSET_TYPES.filter((type) =>
-                    assets.some((asset) => asset.type === type.value),
-                  ).length;
-                  const inContext = product.id === contextProductId;
+                  const coverage = documentCoverage(product, assets);
                   return (
-                    <tr
-                      key={product.id}
-                      className={cn('align-top hover:bg-slate-50', inContext && 'bg-orange-50/50')}
-                    >
-                      <th className="sticky left-0 z-10 w-40 border-r bg-white px-3 py-3 shadow-[1px_0_0_#e5e7eb]">
-                        <Link
-                          className="font-mono text-[11px] font-bold text-primary hover:underline"
-                          href={`/products/${encodeURIComponent(product.id)}`}
-                        >
+                    <tr key={product.id}>
+                      <th>
+                        <Link href={`/products/${encodeURIComponent(product.id)}`}>
                           {product.sku}
                         </Link>
-                        {inContext ? (
-                          <span className="mt-1 block text-[9px] font-bold uppercase tracking-wide text-orange-600">
-                            SKU en contexto
-                          </span>
-                        ) : null}
                       </th>
-                      <td className="w-20 px-3 py-2">
-                        <div className="relative grid size-14 place-items-center overflow-hidden rounded-md border bg-slate-50 text-slate-300">
-                          {photo ? (
-                            <Image
-                              src={`${productAssetDownloadUrl(photo.id)}?inline=true`}
-                              alt={`Fotografía de ${product.sku}`}
-                              fill
-                              unoptimized
-                              className="object-contain"
-                            />
-                          ) : (
-                            <ImageIcon aria-hidden="true" className="size-5" />
-                          )}
-                        </div>
+                      <td>
+                        <ProductPhoto product={product} assets={assets} />
                       </td>
-                      <td className="max-w-60 px-3 py-3 font-medium" title={product.name}>
-                        <span className="line-clamp-2">{product.name}</span>
-                      </td>
-                      <ReadOnlyCell value={product.providerCode} />
-                      <ReadOnlyCell value={product.unifiedCode} />
-                      <ReadOnlyCell value={product.brand} />
+                      {BASE_COLUMNS.map((column) => (
+                        <td
+                          key={column.key}
+                          className={styles.erp}
+                          title={baseValue(product, column.key)}
+                        >
+                          <span>{baseValue(product, column.key) || '—'}</span>
+                        </td>
+                      ))}
                       {ASSET_TYPES.map((type) => (
                         <AssetSlotCell
                           key={type.value}
                           product={product}
                           type={type}
                           assets={assets.filter((asset) => asset.type === type.value)}
-                          canWrite={canWrite}
-                          uploading={uploadingSlot === `${product.id}:${type.value}`}
-                          deletingId={deletingId}
-                          onUpload={submitAsset}
-                          onDelete={removeAsset}
+                          {...slotProps}
                         />
                       ))}
-                      <td className="border-l px-3 py-3 text-center">
-                        <span
-                          className={cn(
-                            'inline-flex rounded-full px-2 py-1 font-bold',
-                            completed === ASSET_TYPES.length
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-amber-100 text-amber-700',
-                          )}
-                        >
-                          {completed}/{ASSET_TYPES.length}
+                      <td className={styles.coverage}>
+                        <span data-missing={!!coverage?.requiredMissing}>
+                          {coverage ? `${coverage.present}/${coverage.total}` : '—'}
                         </span>
                       </td>
                     </tr>
                   );
                 })}
+                {!filteredProducts.length ? (
+                  <tr>
+                    <td colSpan={14} className="p-10 text-center text-muted-foreground">
+                      Sin productos para esta búsqueda.{' '}
+                      <button
+                        type="button"
+                        className="text-primary underline"
+                        onClick={() => {
+                          setQuery('');
+                          setFilters({});
+                        }}
+                      >
+                        Limpiar búsqueda y filtros
+                      </button>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
-          <p className="border-t bg-slate-50 px-4 py-3 text-[11px] text-muted-foreground">
-            Fotografía: .jpg .png .webp · plano: .pdf .png .jpg .dwg · fichas: .pdf · certificado:
-            .pdf .jpg .png · máximo 20 MB por archivo. Los guiones indican un dato base no informado
-            por el contrato actual.
+          <p className={styles.footnote}>
+            Formatos: fotografía .jpg .jpeg .png .webp · plano .pdf .png .jpg .dwg · fichas .pdf ·
+            certificado .pdf .jpg .png · máx. 20 MB. Los archivos se guardan en el servidor. Filtro
+            AX: «&quot;&quot;» muestra los SKU sin ese archivo.
           </p>
-          {productsState.totalPages > 1 ? (
-            <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
-              <span className="mr-2 text-xs text-muted-foreground">
-                Página {productsState.page} de {productsState.totalPages} · {productsState.total}{' '}
-                productos
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={productsState.page <= 1}
-                onClick={() => setPage((value) => Math.max(1, value - 1))}
-              >
-                <ChevronLeft aria-hidden="true" className="size-4" /> Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={productsState.page >= productsState.totalPages}
-                onClick={() => setPage((value) => value + 1)}
-              >
-                Siguiente <ChevronRight aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-          ) : null}
         </Card>
+      ) : (
+        <>
+          <div className={styles.skuBar}>
+            <label>
+              SKU en contexto
+              <select
+                value={selectedProduct?.id ?? ''}
+                onChange={(event) => {
+                  setSelectedId(event.target.value);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('productId', event.target.value);
+                  window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+                }}
+              >
+                {!selectedProduct ? <option value="">Selecciona un SKU</option> : null}
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.sku} · {product.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span>
+              {selectedProduct?.brand || '—'} ·{' '}
+              {selectedProduct?.template?.name || 'Sin plantilla activa'}
+            </span>
+            {selectedProduct ? (
+              <Link href={`/products/${encodeURIComponent(selectedProduct.id)}`}>
+                Ver ficha del producto →
+              </Link>
+            ) : null}
+          </div>
+          {selectedProduct ? (
+            <>
+              {canWrite ? (
+                <div className={styles.bulkCallout}>
+                  <FileArchive aria-hidden="true" className="size-5" />
+                  <span>
+                    <strong>¿Varios archivos de varios SKU?</strong> Valida un ZIP y revisa el
+                    resultado antes de confirmar la carga.
+                  </span>
+                  <Button size="sm" onClick={() => setBulkOpen(true)}>
+                    Carga masiva (ZIP)
+                  </Button>
+                </div>
+              ) : null}
+              <div className={styles.metrics}>
+                {[
+                  ['Activos en plantilla', selectedCoverage?.total ?? '—'],
+                  ['Registrados', selectedCoverage?.present ?? '—'],
+                  [
+                    'Pendientes',
+                    selectedCoverage ? selectedCoverage.total - selectedCoverage.present : '—',
+                  ],
+                  ['Imágenes PrestaShop', 'Sin conexión'],
+                ].map(([label, value]) => (
+                  <Card key={label} className="p-4">
+                    <span className="text-xs text-muted-foreground">{label}</span>
+                    <strong className="mt-1 block text-xl">{value}</strong>
+                  </Card>
+                ))}
+              </div>
+              <div className={styles.contextColumns}>
+                <Card className="min-w-0 p-5">
+                  <div className={styles.contextTitle}>
+                    <h2>Imágenes</h2>
+                    <Link href="/publication?view=images">Imágenes PrestaShop →</Link>
+                  </div>
+                  <p className="mb-4 text-xs text-muted-foreground">
+                    Fotografías registradas del SKU y plano técnico.
+                  </p>
+                  <div className={styles.gallery}>
+                    {selectedAssets
+                      .filter((asset) => asset.kind === 'image')
+                      .map((asset) => (
+                        <figure key={asset.id}>
+                          <div className="relative aspect-square">
+                            <Image
+                              src={`${productAssetDownloadUrl(asset.id)}?inline=true`}
+                              alt={asset.filename}
+                              fill
+                              unoptimized
+                              className="object-contain"
+                            />
+                          </div>
+                          <figcaption>{asset.filename}</figcaption>
+                        </figure>
+                      ))}
+                    {!selectedAssets.some((asset) => asset.kind === 'image') ? (
+                      <div className={styles.emptyPhoto}>
+                        <ImageIcon className="size-10" aria-hidden="true" />
+                        <span>Sin imágenes registradas</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <table className={styles.contextAssets}>
+                    <tbody>
+                      {ASSET_TYPES.slice(0, 2).map((type) => (
+                        <tr key={type.value}>
+                          <th>{type.label}</th>
+                          <AssetSlotCell
+                            product={selectedProduct}
+                            type={type}
+                            assets={selectedAssets.filter((asset) => asset.type === type.value)}
+                            {...slotProps}
+                          />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+                <Card className="min-w-0 p-5">
+                  <div className={styles.contextTitle}>
+                    <h2>Documentos</h2>
+                  </div>
+                  <p className="mb-4 text-xs text-muted-foreground">
+                    Requisitos de la plantilla · archivos asociados a {selectedProduct.sku}.
+                  </p>
+                  <table className={styles.contextAssets}>
+                    <tbody>
+                      {ASSET_TYPES.slice(2).map((type) => (
+                        <tr key={type.value}>
+                          <th>
+                            {type.label}
+                            <small>
+                              {documentRequirement(selectedProduct, type.value)?.required
+                                ? 'Obligatorio'
+                                : type.formats}
+                            </small>
+                          </th>
+                          <AssetSlotCell
+                            product={selectedProduct}
+                            type={type}
+                            assets={selectedAssets.filter((asset) => asset.type === type.value)}
+                            {...slotProps}
+                          />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-4 text-xs text-muted-foreground">
+                    Los enlaces y textos de referencia del Excel se conservan en la ficha del
+                    producto. El contador corresponde a archivos guardados.
+                  </p>
+                </Card>
+              </div>
+            </>
+          ) : (
+            <StatePanel
+              variant="empty"
+              title="Selecciona un SKU"
+              description="El producto solicitado no está disponible en el catálogo autorizado."
+            />
+          )}
+        </>
       )}
-
-      {canWrite ? (
-        <BulkUploadPanel
-          ref={bulkRef}
-          zipFile={zipFile}
-          result={bulkResult}
+      {canWrite && bulkOpen ? (
+        <WorkspaceDrawer
+          title="Carga masiva de documentos e imágenes"
+          onClose={() => setBulkOpen(false)}
           busy={bulkBusy}
-          error={bulkError}
-          onFile={(next) => {
-            setZipFile(next);
-            setBulkResult(null);
-            setBulkError(null);
-          }}
-          onProcess={processZip}
-        />
+        >
+          <BulkUploadPanel
+            zipFile={zipFile}
+            result={bulkResult}
+            busy={bulkBusy}
+            error={bulkError}
+            onFile={(next) => {
+              if (bulkInFlight.current) return;
+              validatedZip.current = null;
+              setZipFile(next);
+              setBulkResult(null);
+              setBulkError(null);
+            }}
+            onProcess={processZip}
+          />
+        </WorkspaceDrawer>
       ) : null}
     </>
   );
 }
 
-function ReadOnlyCell({ value }: { value?: string }) {
+function ProductPhoto({
+  product,
+  assets,
+}: {
+  product: DocumentProduct;
+  assets: readonly ProductAssetDto[];
+}) {
+  const photo = assets.find(
+    (asset) => asset.type === 'FOTO' && asset.mimeType.startsWith('image/'),
+  );
   return (
-    <td
-      className="max-w-44 px-3 py-3 text-slate-600"
-      title={value || 'No informado por el contrato actual'}
-    >
-      <span className="line-clamp-2">{value || '—'}</span>
-    </td>
+    <div className={styles.thumbnail} title={photo ? photo.filename : 'Sin fotografía registrada'}>
+      {photo ? (
+        <Image
+          src={`${productAssetDownloadUrl(photo.id)}?inline=true`}
+          alt={`Fotografía de ${product.sku}`}
+          fill
+          unoptimized
+          className="object-contain"
+        />
+      ) : (
+        <ImageIcon aria-hidden="true" className="size-5" />
+      )}
+    </div>
   );
 }
 
@@ -653,37 +798,45 @@ function AssetSlotCell({
   type,
   assets,
   canWrite,
-  uploading,
+  uploadingSlots,
   deletingId,
   onUpload,
   onDelete,
 }: {
-  product: Product;
+  product: DocumentProduct;
   type: (typeof ASSET_TYPES)[number];
   assets: readonly ProductAssetDto[];
   canWrite: boolean;
-  uploading: boolean;
+  uploadingSlots: ReadonlySet<string>;
   deletingId: string | null;
-  onUpload: (product: Product, type: ProductAssetType, file: File) => Promise<void>;
+  onUpload: (product: DocumentProduct, type: ProductAssetType, file: File) => Promise<void>;
   onDelete: (asset: ProductAssetDto) => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const requirement = documentRequirement(product, type.value);
+  const editable = canWrite && !!requirement;
+  const uploading = uploadingSlots.has(`${product.id}:${type.value}`);
   const upload = (file: File | undefined) => {
-    if (!file || !canWrite || uploading) return;
+    if (!file || !editable || uploading) return;
     void onUpload(product, type.value, file);
     if (inputRef.current) inputRef.current.value = '';
   };
-
   return (
     <td
       className={cn(
-        'w-52 border-l px-2 py-2 transition-colors',
-        assets.length ? 'bg-emerald-50/30' : 'bg-amber-50/20',
-        dragging && 'bg-orange-100 ring-2 ring-inset ring-orange-400',
+        styles.slot,
+        assets.length
+          ? styles.loaded
+          : requirement === null
+            ? styles.notApplicable
+            : requirement?.required
+              ? styles.required
+              : styles.pending,
+        dragging && styles.dragging,
       )}
       onDragOver={
-        canWrite
+        editable
           ? (event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = 'copy';
@@ -691,9 +844,9 @@ function AssetSlotCell({
             }
           : undefined
       }
-      onDragLeave={canWrite ? () => setDragging(false) : undefined}
+      onDragLeave={editable ? () => setDragging(false) : undefined}
       onDrop={
-        canWrite
+        editable
           ? (event) => {
               event.preventDefault();
               setDragging(false);
@@ -701,50 +854,39 @@ function AssetSlotCell({
             }
           : undefined
       }
-      title={canWrite ? `Arrastra aquí ${type.formats}` : undefined}
+      title={editable ? `Arrastra aquí ${type.formats}` : undefined}
     >
-      <div className="space-y-1.5">
-        {assets.length ? (
-          <div className="max-h-24 space-y-1 overflow-y-auto">
-            {assets.map((asset) => (
-              <div
-                key={asset.id}
-                className="flex min-w-0 items-center gap-1 rounded border bg-white px-1.5 py-1"
-              >
-                {asset.kind === 'image' ? (
-                  <ImageIcon aria-hidden="true" className="size-3 shrink-0 text-emerald-600" />
-                ) : (
-                  <FileText aria-hidden="true" className="size-3 shrink-0 text-emerald-600" />
-                )}
-                <span className="min-w-0 flex-1 truncate text-[10px]" title={asset.filename}>
-                  {asset.filename}
-                </span>
+      <div className={styles.slotContents}>
+        <div className="min-w-0 flex-1">
+          {assets.length ? (
+            assets.map((asset) => (
+              <div key={asset.id} className={styles.file}>
+                <FileText aria-hidden="true" className="size-3 shrink-0" />
                 <a
-                  className="grid size-6 shrink-0 place-items-center rounded hover:bg-slate-100"
                   href={productAssetDownloadUrl(asset.id)}
+                  title={asset.filename}
                   aria-label={`Descargar ${asset.filename}`}
                 >
-                  <Download aria-hidden="true" className="size-3" />
+                  {asset.filename}
                 </a>
                 {canWrite ? (
                   <button
                     type="button"
-                    className="grid size-6 shrink-0 place-items-center rounded hover:bg-red-50"
                     disabled={deletingId === asset.id}
                     onClick={() => void onDelete(asset)}
                     aria-label={`Eliminar ${asset.filename}`}
                   >
-                    <Trash2 aria-hidden="true" className="size-3 text-red-600" />
+                    <Trash2 aria-hidden="true" className="size-3" />
                   </button>
                 ) : null}
               </div>
-            ))}
-          </div>
-        ) : (
-          <span className="block text-[10px] text-amber-700">Pendiente</span>
-        )}
-        {canWrite ? (
-          <label className="relative inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-1 text-[10px] font-semibold text-primary hover:bg-orange-50">
+            ))
+          ) : (
+            <span className={styles.slotState}>{documentState(product, type.value, assets)}</span>
+          )}
+        </div>
+        {editable ? (
+          <label className={styles.upload}>
             <UploadCloud aria-hidden="true" className="size-3" />
             {uploading
               ? 'Subiendo…'
@@ -789,7 +931,7 @@ const BulkUploadPanel = forwardRef<
         </div>
         <StatusBadge tone="info">Por SKU · carga parcial</StatusBadge>
       </div>
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(300px,.7fr)_minmax(0,1.3fr)]">
+      <div className="mt-5 grid gap-5 ">
         <div className="space-y-4">
           <div className="rounded-lg border border-dashed bg-slate-50 p-4 text-xs leading-5 text-slate-700">
             <strong className="block text-sm">Convención</strong>
@@ -803,6 +945,7 @@ const BulkUploadPanel = forwardRef<
               className="mt-2 block w-full rounded-md border bg-white p-2 text-xs file:mr-3 file:rounded file:border-0 file:bg-orange-50 file:px-3 file:py-2 file:font-semibold file:text-primary"
               type="file"
               accept=".zip,application/zip,application/x-zip-compressed"
+              disabled={busy}
               onChange={(event) => onFile(event.target.files?.[0] ?? null)}
             />
           </label>

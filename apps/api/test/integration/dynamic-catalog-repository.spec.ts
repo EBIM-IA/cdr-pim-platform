@@ -1,4 +1,5 @@
 import { assertUuid, newUuid } from '@cdr/shared';
+import { catalogWorkbookResultSchema } from '@cdr/contracts';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -21,6 +22,7 @@ import { PostgresAuditAdapter } from '../../src/modules/audit/infrastructure/per
 import { AttributeValueSource } from '../../src/modules/catalog-schema/domain/entities/catalog-schema';
 import { DrizzleDynamicCatalogRepository } from '../../src/modules/catalog-schema/infrastructure/persistence/drizzle-dynamic-catalog.repository';
 import { productTemplateAssignments } from '../../src/modules/catalog-schema/infrastructure/persistence/catalog-schema.tables';
+import { toWorkbookResultDto } from '../../src/modules/catalog-schema/presentation/dynamic-catalog.presenter';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
 const BRAKE_PAD_CATEGORY_SLUG =
@@ -108,6 +110,64 @@ describe('DrizzleDynamicCatalogRepository', () => {
     });
     expect(result).toMatchObject({ total: 1, items: [{ sku: 'D1672' }] });
     expect(result.items[0]?.attributes.codigo_proveedor?.value).toContain('CARBON');
+  });
+
+  it('returns only the assigned active document policies in the workbook and no policies for unclassified or retired-template SKU', async () => {
+    const [fixture] = await database.db
+      .select({ id: products.id, templateId: productTemplateAssignments.templateId })
+      .from(products)
+      .innerJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
+      .where(eq(products.sku, 'D1672'));
+    expect(fixture).toBeTruthy();
+    await database.db
+      .delete(templateAssetRequirements)
+      .where(eq(templateAssetRequirements.templateId, fixture!.templateId));
+    await database.db.insert(templateAssetRequirements).values([
+      { templateId: fixture!.templateId, typeCode: 'FT', required: true, active: true },
+      { templateId: fixture!.templateId, typeCode: 'FOTO', required: false, active: true },
+      { templateId: fixture!.templateId, typeCode: 'CERT', required: true, active: false },
+    ]);
+    const options = { roles: ['COMPRAS'], page: 1, pageSize: 1, filters: [] };
+    const result = await repository.listWorkbook({ ...options, q: 'D1672' });
+    expect(result.items[0]?.assetRequirements).toEqual([
+      { type: 'FOTO', required: false },
+      { type: 'FT', required: true },
+    ]);
+    const dto = catalogWorkbookResultSchema.parse(toWorkbookResultDto(result, 1, 1));
+    expect(dto.items[0]?.assetRequirements).toEqual(result.items[0]!.assetRequirements);
+    const actualAssets = await database.db
+      .select({ id: productAssets.id })
+      .from(productAssets)
+      .where(eq(productAssets.productId, fixture!.id));
+    expect(actualAssets).toEqual([]);
+    const pendingId = newUuid();
+    await database.db.insert(products).values({
+      id: pendingId,
+      sku: 'NO-TEMPLATE-ASSET-POLICY',
+      name: 'Unclassified asset-policy fixture',
+      status: 'in_review',
+    });
+    const pending = await repository.listWorkbook({ ...options, q: 'NO-TEMPLATE-ASSET-POLICY' });
+    expect(pending.items[0]).toMatchObject({
+      id: pendingId,
+      template: null,
+      completeness: null,
+      assetRequirements: [],
+    });
+    expect(Object.values(pending.items[0]!.attributes).every((cell) => !cell.applicable)).toBe(
+      true,
+    );
+    await database.db
+      .update(attributeTemplates)
+      .set({ status: 'retired' })
+      .where(eq(attributeTemplates.id, fixture!.templateId));
+    const retired = await repository.listWorkbook({ ...options, q: 'D1672' });
+    expect(retired.items[0]).toMatchObject({
+      id: fixture!.id,
+      template: null,
+      completeness: null,
+      assetRequirements: [],
+    });
   });
 
   it('filters a parent category across its real descendants and all template variants', async () => {
@@ -199,11 +259,16 @@ describe('DrizzleDynamicCatalogRepository', () => {
     const all = await repository.listWorkbook(options);
     expect(all.total).toBe(98);
     const pending = all.items.find((item) => item.id === unclassifiedId);
-    expect(pending).toMatchObject({ category: null, template: null, completeness: null });
+    expect(pending).toMatchObject({
+      category: null,
+      template: null,
+      completeness: null,
+      assetRequirements: [],
+    });
     expect(Object.values(pending!.attributes).every((cell) => !cell.applicable)).toBe(true);
     const inactive = all.items.find((item) => item.id === inactiveProduct!.id);
     expect(inactive?.category).not.toBeNull();
-    expect(inactive).toMatchObject({ template: null, completeness: null });
+    expect(inactive).toMatchObject({ template: null, completeness: null, assetRequirements: [] });
     expect(Object.values(inactive!.attributes).every((cell) => !cell.applicable)).toBe(true);
     expect(all.facets.brands).toContain('QA BRAND');
     const search = await repository.listWorkbook({ ...options, q: 'UNCLASSIFIED-QA', pageSize: 1 });
@@ -236,7 +301,11 @@ describe('DrizzleDynamicCatalogRepository', () => {
     const inactiveCategoryProduct = inactiveCategory.items.find(
       (item) => item.id === inactiveProduct!.id,
     );
-    expect(inactiveCategoryProduct).toMatchObject({ template: null, completeness: null });
+    expect(inactiveCategoryProduct).toMatchObject({
+      template: null,
+      completeness: null,
+      assetRequirements: [],
+    });
     expect(
       Object.values(inactiveCategoryProduct!.attributes).every((cell) => !cell.applicable),
     ).toBe(true);

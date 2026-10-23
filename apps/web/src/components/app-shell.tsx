@@ -7,20 +7,19 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthCapability } from '@cdr/contracts';
 import {
   BarChart3,
-  BookOpen,
-  Boxes,
+  BookText,
   FileText,
   FileUp,
   FolderTree,
   Gauge,
   Home,
-  Link2,
+  ArrowRightLeft,
   LayoutGrid,
   LogOut,
   Menu,
   PanelLeftClose,
   ChevronUp,
-  PackageCheck,
+  UsersRound,
   PackageSearch,
   Search,
   ShieldCheck,
@@ -84,7 +83,7 @@ const pageSequence = [
   },
   {
     reference: 12,
-    href: '/equivalences?view=homologs',
+    href: '/equivalences?view=identifiers',
     label: 'Identificadores y Homólogos',
     capability: 'menu:equivalences:view',
   },
@@ -257,17 +256,17 @@ const navigation: NavigationItem[] = [
     icon: FolderTree,
     capability: 'menu:categories:view',
   },
-  { label: 'Plantillas', href: '/templates', icon: Boxes, capability: 'menu:templates:view' },
+  { label: 'Plantillas', href: '/templates', icon: BookText, capability: 'menu:templates:view' },
   {
     label: 'Aplicaciones',
     href: '/applications',
-    icon: PackageCheck,
+    icon: UsersRound,
     capability: 'menu:applications:view',
   },
   {
     label: 'Código Unificador y Homólogos',
     href: '/equivalences',
-    icon: Link2,
+    icon: ArrowRightLeft,
     capability: 'menu:equivalences:view',
   },
   {
@@ -279,7 +278,7 @@ const navigation: NavigationItem[] = [
   {
     label: 'Catálogos',
     href: '/catalogs',
-    icon: BookOpen,
+    icon: BookText,
     capability: 'menu:catalogs:view',
   },
   {
@@ -327,7 +326,7 @@ const screenIndex = [
       ['Plantilla Dinámica', '/templates', 'menu:templates:view'],
       ['Aplicaciones', '/applications', 'menu:applications:view'],
       ['Código Unificador y Homólogos', '/equivalences', 'menu:equivalences:view'],
-      ['Identificadores y Homólogos', '/equivalences?view=homologs', 'menu:equivalences:view'],
+      ['Identificadores y Homólogos', '/equivalences?view=identifiers', 'menu:equivalences:view'],
       ['Imágenes y Documentos', '/documents', 'menu:documents:view'],
       ['Catálogos de productos', '/catalogs', 'menu:catalogs:view'],
     ],
@@ -719,7 +718,7 @@ function referencePage(pathname: string, view: string | null): number {
   if (pathname.startsWith('/categories')) return 8;
   if (pathname.startsWith('/templates')) return 9;
   if (pathname.startsWith('/applications')) return 10;
-  if (pathname.startsWith('/equivalences')) return view === 'homologs' ? 12 : 11;
+  if (pathname.startsWith('/equivalences')) return view === 'identifiers' ? 12 : 11;
   if (pathname.startsWith('/documents')) return 13;
   if (pathname.startsWith('/catalogs')) return 37;
   if (pathname.startsWith('/imports')) return view === 'new' ? 15 : view === 'result' ? 16 : 14;

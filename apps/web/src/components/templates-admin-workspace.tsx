@@ -2,11 +2,13 @@
 
 import type {
   AdminAttributeRoleAccessDto,
+  AdminCatalogCategoryDto,
   AdminTemplateAttributeDto,
   AdminTemplateDto,
   UpdateTemplateAttributeInput,
 } from '@cdr/contracts';
 import { Pencil, RefreshCw, Search, Settings2 } from 'lucide-react';
+import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -17,7 +19,6 @@ import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   CatalogAdminApiError,
@@ -140,14 +141,14 @@ function AttributeSwitch({
       onClick={onChange}
       className={cn(
         'inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? 'text-emerald-800' : 'text-slate-500',
+        checked ? 'text-primary' : 'text-slate-500',
       )}
     >
       <span
         aria-hidden="true"
         className={cn(
           'inline-flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
-          checked ? 'bg-emerald-600' : 'bg-slate-300',
+          checked ? 'bg-primary' : 'bg-slate-300',
         )}
       >
         <span
@@ -163,8 +164,8 @@ function AttributeSwitch({
 }
 
 export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTemplate: boolean }) {
-  const [categories, setCategories] = useState<{ id: string; name: string; active: boolean }[]>([]);
-  const [categoryId, setCategoryId] = useState('');
+  const [categories, setCategories] = useState<AdminCatalogCategoryDto[]>([]);
+  const [pendingCategoryId, setPendingCategoryId] = useState('');
   const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [template, setTemplate] = useState<AdminTemplateDto | null>(null);
@@ -174,7 +175,13 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [templateQuery, setTemplateQuery] = useState('');
-  const [showInactive, setShowInactive] = useState(true);
+  const [sectionFilter, setSectionFilter] = useState('');
+  const [kindFilter, setKindFilter] = useState('');
+  const [requiredFilter, setRequiredFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState('');
+  const [replicableFilter, setReplicableFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [exportFilter, setExportFilter] = useState('');
   const [editing, setEditing] = useState<AdminTemplateAttributeDto | null>(null);
   const [draft, setDraft] = useState<AttributeDraft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -187,15 +194,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
 
   useEffect(() => {
     void listAdminCategories(true)
-      .then((result) =>
-        setCategories(
-          result.map((category) => ({
-            id: category.id,
-            name: category.name,
-            active: category.active,
-          })),
-        ),
-      )
+      .then(setCategories)
       .catch(() => undefined);
   }, []);
 
@@ -203,7 +202,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
     setLoadingList(true);
     setError(null);
     try {
-      const result = await listAdminTemplates(categoryId || undefined);
+      const result = await listAdminTemplates();
       setTemplates(result);
       setTemplateId((current) =>
         result.some((item) => item.id === current) ? current : (result[0]?.id ?? ''),
@@ -220,7 +219,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
     } finally {
       setLoadingList(false);
     }
-  }, [categoryId]);
+  }, []);
 
   useEffect(() => void loadTemplates(), [loadTemplates]);
 
@@ -254,7 +253,26 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
   const attributes = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('es');
     return (template?.attributes ?? [])
-      .filter((attribute) => showInactive || attribute.active)
+      .filter((attribute) => !activeFilter || String(attribute.active) === activeFilter)
+      .filter(
+        (attribute) =>
+          !sectionFilter ||
+          sectionFilter === (attribute.sourceAuthority === 'erp' ? 'erp' : 'enrichment'),
+      )
+      .filter((attribute) => !kindFilter || attribute.dataType === kindFilter)
+      .filter((attribute) => !requiredFilter || String(attribute.required) === requiredFilter)
+      .filter((attribute) => !replicableFilter || String(attribute.replicable) === replicableFilter)
+      .filter(
+        (attribute) => !exportFilter || String(attribute.includeInTechnicalSheet) === exportFilter,
+      )
+      .filter((attribute) => {
+        if (!roleFilter) return true;
+        const [role, visible] = roleFilter.split(':');
+        return (
+          String(attribute.roleAccess.find((access) => access.role === role)?.canView ?? false) ===
+          visible
+        );
+      })
       .filter(
         (attribute) =>
           !normalized ||
@@ -263,7 +281,17 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
           ),
       )
       .sort((left, right) => left.position - right.position || left.key.localeCompare(right.key));
-  }, [query, showInactive, template?.attributes]);
+  }, [
+    query,
+    activeFilter,
+    sectionFilter,
+    kindFilter,
+    requiredFilter,
+    replicableFilter,
+    exportFilter,
+    roleFilter,
+    template?.attributes,
+  ]);
   const visibleTemplates = useMemo(() => {
     const normalized = templateQuery.trim().toLocaleLowerCase('es');
     if (!normalized) return templates;
@@ -273,6 +301,67 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
       ),
     );
   }, [templateQuery, templates]);
+
+  const parentIds = new Set(categories.map((category) => category.parentId).filter(Boolean));
+  const pendingCategories = categories.filter(
+    (category) =>
+      !parentIds.has(category.id) &&
+      !templates.some((item) => item.categoryId === category.id && item.status === 'active'),
+  );
+  const visiblePendingCategories = pendingCategories.filter(
+    (category) =>
+      !templateQuery.trim() ||
+      `${category.name} ${category.path}`
+        .toLocaleLowerCase('es')
+        .includes(templateQuery.trim().toLocaleLowerCase('es')),
+  );
+  const pendingCategory = categories.find((category) => category.id === pendingCategoryId);
+  const selectedCategory = categories.find((category) => category.id === template?.categoryId);
+  const sourcePriority = Object.entries(selectedCategory?.sourcePriority ?? {}).sort(
+    (left, right) => Number(left[1]) - Number(right[1]),
+  );
+  const policyLabels = {
+    FT: 'Ficha técnica',
+    MSDS: 'Ficha de seguridad MSDS',
+    CERT: 'Certificado de conformidad',
+    PLANO: 'Plano técnico',
+    FOTO: 'Fotografía del producto',
+  };
+  const assetPolicies = template?.assetRequirements ?? [];
+  const visibleAssetPolicies = assetPolicies.filter(
+    (policy) =>
+      (!sectionFilter || sectionFilter === 'asset') &&
+      (!kindFilter || kindFilter === (policy.type === 'FOTO' ? 'image' : 'file')) &&
+      (!requiredFilter || String(policy.required) === requiredFilter) &&
+      (!activeFilter || activeFilter === 'true') &&
+      !replicableFilter &&
+      !roleFilter &&
+      !exportFilter &&
+      (!query.trim() ||
+        `${policyLabels[policy.type]} ${policy.type}`
+          .toLocaleLowerCase('es')
+          .includes(query.trim().toLocaleLowerCase('es'))),
+  );
+  const typeLabels = {
+    text: 'Alfanumérico',
+    number: 'Numérico',
+    measurement: 'Medida',
+    boolean: 'Sí / No',
+    date: 'Fecha',
+    enum: 'Lista',
+  };
+  const sourceLabels = {
+    erp: 'ERP · Sismetic / AX',
+    pim: 'Enriquecimiento PIM',
+    supplier: 'Proveedor',
+    calculated: 'Calculado',
+  };
+  const priorityLabels: Record<string, string> = {
+    fabricante: 'Fabricante',
+    archivo: 'Archivo',
+    manual: 'Manual',
+    tecdoc: 'TecDoc',
+  };
 
   const beginEdit = (attribute: AdminTemplateAttributeDto) => {
     setEditing(attribute);
@@ -397,7 +486,14 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
         description="Configuración de atributos por categoría."
         actions={
           <>
-            <Button variant="outline" disabled title="Contrato de alta de atributos pendiente">
+            <Button asChild variant="outline">
+              <Link href="/administration?view=settings">Catálogos</Link>
+            </Button>
+            <Button
+              variant="outline"
+              disabled
+              title="La creación de atributos aún no está disponible"
+            >
               Añadir atributo
             </Button>
             <Button
@@ -446,27 +542,12 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
         </div>
       ) : null}
 
-      <div className="mb-[18px] grid items-start gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
-        <Card className="p-4 xl:sticky xl:top-4">
-          <Select
-            label="Categoría"
-            value={categoryId}
-            disabled={saving}
-            onChange={(event) => {
-              setCategoryId(event.target.value);
-              setTemplateId('');
-              setEditing(null);
-            }}
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-                {category.active ? '' : ' · inactiva'}
-              </option>
-            ))}
-          </Select>
-          <label className="mt-4 grid gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-primary">
+      <div className="mb-[18px] grid items-start gap-5 min-[901px]:grid-cols-[280px_minmax(0,1fr)]">
+        <Card
+          className="max-h-80 overflow-auto p-4 min-[901px]:sticky min-[901px]:top-3 min-[901px]:max-h-[calc(100dvh-24px)]"
+          aria-label="Selector de plantilla"
+        >
+          <label className="grid gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-primary">
             Buscar plantilla
             <span className="relative block">
               <Search
@@ -477,11 +558,11 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                 className="pl-9 normal-case tracking-normal"
                 value={templateQuery}
                 onChange={(event) => setTemplateQuery(event.target.value)}
-                placeholder="Nombre, categoría, variante o estado"
+                placeholder="Nombre, línea u hoja…"
               />
             </span>
           </label>
-          <div className="mt-4 max-h-[430px] space-y-1 overflow-y-auto">
+          <div className="mt-2 space-y-0.5">
             {visibleTemplates.map((item, index) => (
               <button
                 key={item.id}
@@ -489,28 +570,63 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                 disabled={saving}
                 aria-pressed={item.id === templateId}
                 onClick={() => {
+                  setPendingCategoryId('');
                   setTemplateId(item.id);
                   setEditing(null);
                 }}
                 className={cn(
-                  'flex w-full items-start gap-3 rounded-lg p-2.5 text-left transition',
+                  'flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2 py-2 text-left transition',
                   item.id === templateId
-                    ? 'bg-orange-50 text-orange-800 ring-1 ring-orange-200'
+                    ? 'border-orange-200 bg-orange-50 text-orange-800'
                     : 'hover:bg-slate-50',
                 )}
               >
-                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-slate-100 text-[10px] font-bold">
+                <span
+                  className={`grid h-6 w-7 shrink-0 place-items-center rounded-md text-[10px] font-bold ${item.id === templateId ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
                   {String(index + 1).padStart(2, '0')}
                 </span>
                 <span className="min-w-0">
-                  <strong className="block truncate text-xs">{item.name}</strong>
+                  <strong className="block text-xs leading-tight">{item.name}</strong>
                   <small className="block truncate text-[10px] text-muted-foreground">
-                    {item.categoryName} · variante {item.variantKey} · v{item.version} ·{' '}
-                    {item.status}
+                    {item.id === template?.id
+                      ? `${template.attributes?.length ?? 0} atributos · ${template.attributes?.filter((attribute) => attribute.active && attribute.required).length ?? 0} obligatorios`
+                      : `Variante ${item.variantKey} · versión ${item.version}`}
                   </small>
                 </span>
               </button>
             ))}
+            {visiblePendingCategories.length ? (
+              <>
+                <h3 className="px-2 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Pendientes de definición
+                </h3>
+                {visiblePendingCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    disabled={saving}
+                    aria-pressed={pendingCategoryId === category.id}
+                    onClick={() => {
+                      setPendingCategoryId(category.id);
+                      setTemplateId('');
+                      setEditing(null);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-lg border px-2 py-2 text-left ${pendingCategoryId === category.id ? 'border-orange-200 bg-orange-50' : 'border-transparent hover:bg-slate-50'}`}
+                  >
+                    <span className="grid h-6 w-7 shrink-0 place-items-center rounded-md bg-amber-50 text-xs text-amber-800">
+                      —
+                    </span>
+                    <span>
+                      <strong className="block text-xs leading-tight">{category.name}</strong>
+                      <small className="text-[10px] text-muted-foreground">
+                        Sin plantilla activa
+                      </small>
+                    </span>
+                  </button>
+                ))}
+              </>
+            ) : null}
             {visibleTemplates.length === 0 ? (
               <p className="rounded-lg bg-slate-50 p-3 text-xs text-muted-foreground">
                 Sin plantillas que coincidan.
@@ -518,137 +634,229 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             ) : null}
           </div>
         </Card>
-        <div className="min-w-0 space-y-4">
-          {template ? (
-            <Card className="p-4 sm:p-5">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px]">
+        <div className="min-w-0 space-y-3">
+          {pendingCategory ? (
+            <Card className="grid min-h-80 place-items-center p-8 text-center">
+              <div>
+                <StatusBadge tone="warning">Pendiente de definición</StatusBadge>
+                <h2 className="mt-3 text-lg font-semibold">{pendingCategory.name}</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Esta categoría no tiene una plantilla activa. Sus atributos y reglas se mostrarán
+                  cuando exista una definición aprobada.
+                </p>
+              </div>
+            </Card>
+          ) : template ? (
+            <>
+              <Card className="grid gap-6 px-5 py-[18px] min-[1281px]:grid-cols-[minmax(0,1fr)_240px]">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-primary">
-                    Plantilla PIM · versión {template.version}
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                    Plantilla PIM · variante {template.variantKey} · versión {template.version}
                   </p>
-                  <h2 className="mt-2 text-2xl font-semibold tracking-tight">{template.name}</h2>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-                    <span className="rounded bg-slate-100 px-2 py-1">
-                      Categoría: {template.categoryName}
+                  <h2 className="text-base font-semibold">{template.name}</h2>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
+                      Aplicación: {selectedCategory?.application ?? 'Pendiente'}
                     </span>
-                    <span className="rounded bg-orange-50 px-2 py-1 text-orange-800">
-                      Variante: {template.variantKey}
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
+                      Categoría final: {selectedCategory?.path ?? template.categoryName}
                     </span>
-                    <span className="rounded bg-slate-100 px-2 py-1">
-                      Estado: {template.status}
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">
+                      {template.status === 'active'
+                        ? 'Activa'
+                        : template.status === 'draft'
+                          ? 'Borrador'
+                          : 'Retirada'}
                     </span>
                   </div>
-                  <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <dl className="mt-3 flex flex-wrap gap-1.5">
                     {[
                       ['Atributos', template.attributes?.length ?? 0],
                       [
                         'Inactivos',
-                        (template.attributes ?? []).filter((item) => !item.active).length,
+                        template.attributes?.filter((item) => !item.active).length ?? 0,
                       ],
                       [
                         'Obligatorios activos',
-                        (template.attributes ?? []).filter((item) => item.active && item.required)
-                          .length,
+                        template.attributes?.filter((item) => item.active && item.required)
+                          .length ?? 0,
                       ],
                       [
                         'Opcionales',
-                        (template.attributes ?? []).filter((item) => item.active && !item.required)
-                          .length,
+                        template.attributes?.filter((item) => item.active && !item.required)
+                          .length ?? 0,
+                      ],
+                      [
+                        'Base ERP',
+                        template.attributes?.filter((item) => item.sourceAuthority === 'erp')
+                          .length ?? 0,
+                      ],
+                      ...(template.assetRequirements
+                        ? [['Archivo / imagen', assetPolicies.length]]
+                        : []),
+                      [
+                        'Con unidad',
+                        template.attributes?.filter((item) => Boolean(item.unit)).length ?? 0,
                       ],
                       [
                         'Replicables',
-                        (template.attributes ?? []).filter((item) => item.active && item.replicable)
-                          .length,
+                        template.attributes?.filter((item) => item.active && item.replicable)
+                          .length ?? 0,
+                      ],
+                      [
+                        'Visibles COMPRAS',
+                        template.attributes?.filter(
+                          (item) =>
+                            item.active &&
+                            item.roleAccess.some(
+                              (access) => access.role === 'COMPRAS' && access.canView,
+                            ),
+                        ).length ?? 0,
+                      ],
+                      [
+                        'Visibles VENTAS',
+                        template.attributes?.filter(
+                          (item) =>
+                            item.active &&
+                            item.roleAccess.some(
+                              (access) => access.role === 'VENTAS' && access.canView,
+                            ),
+                        ).length ?? 0,
+                      ],
+                      [
+                        'Exportables',
+                        template.attributes?.filter(
+                          (item) => item.active && item.includeInTechnicalSheet,
+                        ).length ?? 0,
                       ],
                     ].map(([label, value]) => (
-                      <div key={label} className="rounded-lg border p-3">
-                        <dt className="text-[10px] uppercase leading-tight text-muted-foreground">
-                          {label}
-                        </dt>
-                        <dd className="mt-1 text-2xl font-bold">{value}</dd>
+                      <div
+                        key={label}
+                        className="flex items-baseline gap-1.5 rounded-full border px-2 py-0.5"
+                      >
+                        <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                        <dd className="text-xs font-semibold">{value}</dd>
                       </div>
                     ))}
                   </dl>
                 </div>
-                <aside className="border-t pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-                  <h3 className="text-sm font-semibold">Autoridades de fuente</h3>
-                  <ol className="mt-4 space-y-3 text-xs">
-                    {[
-                      ...new Set(
-                        (template.attributes ?? [])
-                          .filter((attribute) => attribute.active)
-                          .map((attribute) => attribute.sourceAuthority),
-                      ),
-                    ].map((source, index) => (
-                      <li key={source} className="flex items-center gap-3">
-                        <span className="grid size-6 place-items-center rounded-full bg-orange-50 font-bold text-primary">
-                          {index + 1}
-                        </span>
-                        {source}
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
-                    Fuentes declaradas por los atributos persistidos. El contrato actual no publica
-                    un orden global de prioridad, por lo que no se infiere uno.
+                <aside className="border-t pt-4 min-[1281px]:border-l min-[1281px]:border-t-0 min-[1281px]:pl-6 min-[1281px]:pt-0">
+                  <h3 className="text-sm font-semibold">Prioridad de fuentes</h3>
+                  {sourcePriority.length ? (
+                    <ol className="mt-3 space-y-2">
+                      {sourcePriority.map(([source, rank]) => (
+                        <li key={source} className="flex items-center gap-2.5 text-xs">
+                          <span className="grid size-[22px] shrink-0 place-items-center rounded-full bg-orange-50 text-[11px] font-semibold text-primary">
+                            {rank}
+                          </span>
+                          {priorityLabels[source] ?? source}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Sin prioridad de fuentes configurada para esta categoría.
+                    </p>
+                  )}
+                  <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+                    Matriz BUSQUEDA de la categoría. El dato base ERP no compite: llega por PUSH y
+                    es de solo lectura.
                   </p>
                 </aside>
-              </div>
-            </Card>
-          ) : (
-            <Card className="grid min-h-64 place-items-center p-6 text-center text-sm text-muted-foreground">
+              </Card>
+              <Card className="px-5 py-[18px]">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  Alta desde AX · atributos replicables
+                </p>
+                <h2 className="mt-2 text-base font-semibold">¿Qué hereda un SKU nuevo?</h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  Los atributos marcados como replicables se comparten entre los SKU de un mismo
+                  código unificador. Los demás se completan en cada producto; los datos base ERP
+                  llegan desde AX.
+                </p>
+                <div className="my-4 grid items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
+                  <div className="rounded-lg border bg-slate-50 px-3 py-2">
+                    <small className="block text-[10px] text-muted-foreground">
+                      MISMO CÓDIGO UNIFICADOR
+                    </small>
+                    <strong className="text-sm">Atributos replicables de la plantilla</strong>
+                  </div>
+                  <span aria-hidden="true" className="text-center text-lg text-primary">
+                    ›
+                  </span>
+                  <div className="rounded-lg border bg-slate-50 px-3 py-2">
+                    <small className="block text-[10px] text-muted-foreground">
+                      IDENTIDAD PROPIA
+                    </small>
+                    <strong className="text-sm">Cada SKU conserva su código de artículo</strong>
+                  </div>
+                </div>
+                <dl className="grid gap-3 sm:grid-cols-4">
+                  {[
+                    [
+                      'Replicables',
+                      template.attributes?.filter(
+                        (item) => item.active && item.replicable && item.sourceAuthority === 'pim',
+                      ).length ?? 0,
+                    ],
+                    [
+                      'Obligatorios no replicables',
+                      template.attributes?.filter(
+                        (item) =>
+                          item.active &&
+                          item.required &&
+                          !item.replicable &&
+                          item.sourceAuthority === 'pim',
+                      ).length ?? 0,
+                    ],
+                    [
+                      'Opcionales no replicables',
+                      template.attributes?.filter(
+                        (item) =>
+                          item.active &&
+                          !item.required &&
+                          !item.replicable &&
+                          item.sourceAuthority === 'pim',
+                      ).length ?? 0,
+                    ],
+                    [
+                      'Base ERP (llega de AX)',
+                      template.attributes?.filter(
+                        (item) => item.active && item.sourceAuthority === 'erp',
+                      ).length ?? 0,
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border px-3 py-2">
+                      <dt className="text-[10px] text-muted-foreground">{label}</dt>
+                      <dd className="mt-1 text-base font-semibold">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-[10px] text-muted-foreground">
+                    Vista consultiva de la configuración vigente; no recibe ni crea productos en AX.
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setReplicableFilter('true');
+                      setSectionFilter('enrichment');
+                      document
+                        .getElementById('template-attributes')
+                        ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+                    }}
+                  >
+                    Ver atributos replicables
+                  </Button>
+                </div>
+              </Card>
+            </>
+          ) : loadingList || loadingTemplate ? null : (
+            <Card className="p-6 text-center text-sm text-muted-foreground">
               Selecciona una plantilla para consultar su definición.
             </Card>
           )}
-          <Card className="mb-5 p-4 sm:p-5">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-                Buscar atributos
-                <span className="relative block">
-                  <Search
-                    aria-hidden="true"
-                    className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
-                  />
-                  <Input
-                    className="pl-9"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Nombre, clave, tipo o fuente"
-                  />
-                </span>
-              </label>
-              <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={showInactive}
-                  onChange={(event) => setShowInactive(event.target.checked)}
-                />
-                Mostrar inactivos
-              </label>
-            </div>
-            {template ? (
-              <div className="mt-4 flex flex-wrap gap-2 border-t pt-4 text-xs text-muted-foreground">
-                <StatusBadge
-                  tone={
-                    template.status === 'active'
-                      ? 'success'
-                      : template.status === 'draft'
-                        ? 'warning'
-                        : 'neutral'
-                  }
-                >
-                  {template.status === 'active'
-                    ? 'Activa'
-                    : template.status === 'draft'
-                      ? 'Borrador'
-                      : 'Retirada'}
-                </StatusBadge>
-                <span>{template.attributes?.length ?? 0} atributos asignados</span>
-                <span>Actualizada {new Date(template.updatedAt).toLocaleString('es-PE')}</span>
-              </div>
-            ) : null}
-          </Card>
-
           {canManageTemplate && editing && draft ? (
             <WorkspaceDrawer
               title="Configurar atributo"
@@ -785,8 +993,8 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             </WorkspaceDrawer>
           ) : null}
 
-          {loadingList || loadingTemplate ? (
-            <Skeleton className="h-96 rounded-xl" />
+          {pendingCategory ? null : loadingList || loadingTemplate ? (
+            <Skeleton className="h-80 rounded-xl" />
           ) : error && !template ? (
             <StatePanel
               variant="error"
@@ -801,155 +1009,273 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
               title="Sin plantillas"
               description="No hay versiones de plantilla para la categoría seleccionada."
             />
-          ) : attributes.length === 0 ? (
-            <StatePanel
-              variant="empty"
-              title="Sin atributos"
-              description="No hay atributos que coincidan con la búsqueda y el estado seleccionados."
-            />
           ) : (
-            <Card className="overflow-hidden">
-              <div className="border-b px-4 py-3">
-                <h2 className="font-semibold">
-                  Atributos · {attributes.length} de {template.attributes?.length ?? 0}
+            <Card id="template-attributes" className="scroll-mt-3 overflow-hidden">
+              <div className="px-5 pb-3 pt-4">
+                <h2 className="text-base font-semibold">
+                  Atributos · {attributes.length + visibleAssetPolicies.length} de{' '}
+                  {(template.attributes?.length ?? 0) + assetPolicies.length}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Los interruptores guardan cada cambio con auditoría. Un atributo inactivo conserva
-                  sus valores y deja de contar en la completitud. Los permisos detallados se ajustan
-                  en Configurar.
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  Orden de la plantilla. Los datos base ERP son de solo lectura en la ficha. COMPRAS
+                  y VENTAS indican la visibilidad por rol; Exportable controla la ficha técnica
+                  descargable. Al desactivar un atributo conserva sus valores y deja de contar en la
+                  completitud.
                 </p>
               </div>
+              <div className="grid gap-2.5 px-5 pb-4 sm:grid-cols-2 lg:grid-cols-[minmax(200px,1.6fr)_repeat(3,minmax(0,1fr))] [&_select]:h-9 [&_select]:min-w-0 [&_select]:rounded-md [&_select]:border [&_select]:bg-white [&_select]:px-2 [&_select]:text-xs">
+                <label>
+                  <span className="sr-only">Buscar atributos</span>
+                  <Input
+                    className="h-9 text-xs"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Buscar atributo o clave…"
+                  />
+                </label>
+                <select
+                  aria-label="Sección"
+                  value={sectionFilter}
+                  onChange={(event) => setSectionFilter(event.target.value)}
+                >
+                  <option value="">Todas las secciones</option>
+                  <option value="erp">Base ERP</option>
+                  <option value="enrichment">Enriquecimiento</option>
+                  <option value="asset">Archivo / imagen</option>
+                </select>
+                <select
+                  aria-label="Tipo de atributo"
+                  value={kindFilter}
+                  onChange={(event) => setKindFilter(event.target.value)}
+                >
+                  <option value="">Todos los tipos</option>
+                  {Object.entries(typeLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value="file">Archivo</option>
+                  <option value="image">Imagen</option>
+                </select>
+                <select
+                  aria-label="Obligatoriedad"
+                  value={requiredFilter}
+                  onChange={(event) => setRequiredFilter(event.target.value)}
+                >
+                  <option value="">Obligatorio y opcional</option>
+                  <option value="true">Obligatorio</option>
+                  <option value="false">Opcional</option>
+                </select>
+                <select
+                  aria-label="Estado del atributo"
+                  value={activeFilter}
+                  onChange={(event) => setActiveFilter(event.target.value)}
+                >
+                  <option value="">Activos e inactivos</option>
+                  <option value="true">Solo activos</option>
+                  <option value="false">Solo inactivos</option>
+                </select>
+                <select
+                  aria-label="Replicable"
+                  value={replicableFilter}
+                  onChange={(event) => setReplicableFilter(event.target.value)}
+                >
+                  <option value="">Replicable y no replicable</option>
+                  <option value="true">Solo replicables</option>
+                  <option value="false">Solo no replicables</option>
+                </select>
+                <select
+                  aria-label="Visibilidad por rol"
+                  value={roleFilter}
+                  onChange={(event) => setRoleFilter(event.target.value)}
+                >
+                  <option value="">Todos los roles</option>
+                  <option value="COMPRAS:true">Visibles para COMPRAS</option>
+                  <option value="COMPRAS:false">Ocultos para COMPRAS</option>
+                  <option value="VENTAS:true">Visibles para VENTAS</option>
+                  <option value="VENTAS:false">Ocultos para VENTAS</option>
+                </select>
+                <select
+                  aria-label="Exportable en la ficha técnica"
+                  value={exportFilter}
+                  onChange={(event) => setExportFilter(event.target.value)}
+                >
+                  <option value="">Exportables y no exportables</option>
+                  <option value="true">Solo exportables</option>
+                  <option value="false">Solo no exportables</option>
+                </select>
+              </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1400px] text-left text-sm">
+                <table className="w-full min-w-[1250px] text-left text-sm">
                   <caption className="sr-only">Atributos y permisos de {template.name}</caption>
-                  <thead className="border-b bg-slate-50 text-xs tracking-wide text-muted-foreground">
+                  <thead>
                     <tr>
-                      <th scope="col" className="px-4 py-3">
-                        Atributo
-                      </th>
-                      <th scope="col" className="px-4 py-3">
-                        Tipo / fuente
-                      </th>
-                      <th scope="col" className="px-4 py-3">
-                        Posición
-                      </th>
-                      {['Activo', 'Obligatorio', 'Replicable', 'Buscable', 'Ficha técnica'].map(
-                        (label) => (
-                          <th key={label} scope="col" className="px-4 py-3">
-                            {label}
-                          </th>
-                        ),
-                      )}
-                      {roles.map((role) => (
-                        <th key={role} scope="col" className="px-4 py-3">
-                          {roleLabels[role]}
+                      {[
+                        'Orden',
+                        'Atributo',
+                        'Activo',
+                        'Tipo',
+                        'Unidad',
+                        'Fuente',
+                        'Obligatorio',
+                        'Replicable',
+                        'COMPRAS',
+                        'VENTAS',
+                        'Exportable',
+                        'Muestra',
+                        'Acción',
+                      ].map((label) => (
+                        <th key={label} scope="col" className="px-2 py-1">
+                          {label}
                         </th>
                       ))}
-                      <th scope="col" className="px-4 py-3 text-right">
-                        Acción
-                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
-                    {attributes.map((attribute) => {
-                      const matrix = completeRoleAccess(attribute.roleAccess);
-                      return (
-                        <tr
-                          key={attribute.id}
-                          className={cn(
-                            'align-top hover:bg-orange-50/40',
-                            !attribute.active && 'bg-slate-50 text-slate-500',
-                          )}
-                        >
-                          <td className="px-4 py-3">
-                            <strong className="block">{attribute.label}</strong>
-                            <span className="text-xs text-muted-foreground">{attribute.key}</span>
-                            <span className="mt-1 block">
-                              <StatusBadge tone={attribute.active ? 'success' : 'neutral'}>
-                                {attribute.active ? 'Activo' : 'Inactivo'}
-                              </StatusBadge>
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="block">{attribute.dataType}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {attribute.sourceAuthority}
-                              {attribute.unit ? ` · ${attribute.unit}` : ''}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 tabular-nums">{attribute.position}</td>
-                          {(
-                            [
-                              ['active', 'Activo'],
-                              ['required', 'Obligatorio'],
-                              ['replicable', 'Replicable'],
-                              ['searchable', 'Buscable'],
-                              ['includeInTechnicalSheet', 'Ficha técnica'],
-                            ] as const
-                          ).map(([field, label]) => (
-                            <td key={field} className="px-4 py-3">
-                              <AttributeSwitch
-                                checked={attribute[field]}
-                                disabled={!canManageTemplate || saving}
-                                label={`${label}: ${attribute.label}`}
-                                onChange={() =>
-                                  void updateFromTable(attribute, { [field]: !attribute[field] })
-                                }
-                              />
-                            </td>
-                          ))}
-                          {matrix.map((access) => (
-                            <td key={access.role} className="px-4 py-3 text-xs leading-6">
+                  <tbody>
+                    {attributes.map((attribute) => (
+                      <tr
+                        key={attribute.id}
+                        className={cn(
+                          'border-t align-top',
+                          !attribute.active && 'bg-slate-50 text-slate-500',
+                        )}
+                      >
+                        <td className="px-2 py-1 text-center">{attribute.position}</td>
+                        <td className="min-w-44 px-2 py-1">
+                          <span className="block">{attribute.label}</span>
+                          <code className="text-[10px] text-muted-foreground">{attribute.key}</code>
+                        </td>
+                        <td className="px-2 py-1">
+                          <AttributeSwitch
+                            checked={attribute.active}
+                            disabled={!canManageTemplate || saving}
+                            label={`Activo: ${attribute.label}`}
+                            onChange={() =>
+                              void updateFromTable(attribute, { active: !attribute.active })
+                            }
+                          />
+                        </td>
+                        <td className="px-2 py-1">{typeLabels[attribute.dataType]}</td>
+                        <td className="px-2 py-1">{attribute.unit ?? '—'}</td>
+                        <td className="px-2 py-1 text-xs">
+                          {sourceLabels[attribute.sourceAuthority]}
+                        </td>
+                        <td className="px-2 py-1">
+                          <AttributeSwitch
+                            checked={attribute.required}
+                            disabled={!canManageTemplate || saving}
+                            label={`Obligatorio: ${attribute.label}`}
+                            onChange={() =>
+                              void updateFromTable(attribute, { required: !attribute.required })
+                            }
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <AttributeSwitch
+                            checked={attribute.replicable}
+                            disabled={!canManageTemplate || saving}
+                            label={`Replicable: ${attribute.label}`}
+                            onChange={() =>
+                              void updateFromTable(attribute, { replicable: !attribute.replicable })
+                            }
+                          />
+                        </td>
+                        {(['COMPRAS', 'VENTAS'] as const).map((role) => {
+                          const access = completeRoleAccess(attribute.roleAccess).find(
+                            (item) => item.role === role,
+                          )!;
+                          return (
+                            <td key={role} className="px-2 py-1">
                               <AttributeSwitch
                                 checked={access.canView}
                                 disabled={!canManageTemplate || saving}
-                                label={`Visible para ${roleLabels[access.role]}: ${attribute.label}`}
+                                label={`Visible para ${roleLabels[role]}: ${attribute.label}`}
                                 onChange={() =>
                                   void updateFromTable(attribute, {
                                     roleAccess: updateRolePermission(
                                       attribute.roleAccess,
-                                      access.role,
+                                      role,
                                       'canView',
                                       !access.canView,
                                     ),
                                   })
                                 }
                               />
-                              {!access.canView ? (
-                                <span className="block text-muted-foreground">Sin acceso</span>
-                              ) : (
-                                <>
-                                  <span className="block text-muted-foreground">
-                                    {[
-                                      access.canEdit && 'Editar',
-                                      access.canImport && 'Importar',
-                                      access.canExport && 'Exportar',
-                                    ]
-                                      .filter(Boolean)
-                                      .join(' · ') || 'Solo lectura'}
-                                  </span>
-                                </>
-                              )}
                             </td>
-                          ))}
-                          <td className="px-4 py-3 text-right">
-                            {canManageTemplate ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={saving}
-                                onClick={() => beginEdit(attribute)}
-                              >
-                                <Pencil className="size-4" aria-hidden="true" />
-                                Configurar
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Solo lectura</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          );
+                        })}
+                        <td className="px-2 py-1">
+                          <AttributeSwitch
+                            checked={attribute.includeInTechnicalSheet}
+                            disabled={!canManageTemplate || saving}
+                            label={`Ficha técnica: ${attribute.label}`}
+                            onChange={() =>
+                              void updateFromTable(attribute, {
+                                includeInTechnicalSheet: !attribute.includeInTechnicalSheet,
+                              })
+                            }
+                          />
+                        </td>
+                        <td
+                          className="px-2 py-1 text-muted-foreground"
+                          title="La muestra original no está disponible para consulta"
+                        >
+                          —
+                        </td>
+                        <td className="px-2 py-1">
+                          {canManageTemplate ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={saving}
+                              onClick={() => beginEdit(attribute)}
+                            >
+                              <Pencil className="size-3" aria-hidden="true" />
+                              Configurar
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Solo lectura</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {visibleAssetPolicies.map((policy) => (
+                      <tr key={`asset-${policy.type}`} className="border-t align-top">
+                        <td className="px-2 py-1">—</td>
+                        <td className="px-2 py-1">
+                          {policyLabels[policy.type]}
+                          <code className="block text-[10px] text-muted-foreground">
+                            {policy.type}
+                          </code>
+                        </td>
+                        <td className="px-2 py-1">Sí</td>
+                        <td className="px-2 py-1">
+                          {policy.type === 'FOTO' ? 'Imagen' : 'Archivo'}
+                        </td>
+                        <td className="px-2 py-1">—</td>
+                        <td className="px-2 py-1">Activo del producto</td>
+                        <td className="px-2 py-1">
+                          <StatusBadge tone={policy.required ? 'warning' : 'neutral'}>
+                            {policy.required ? 'Obligatorio' : 'Opcional'}
+                          </StatusBadge>
+                        </td>
+                        <td colSpan={5} className="px-2 py-1 text-xs text-muted-foreground">
+                          Requisito documental de la plantilla · consulta
+                        </td>
+                        <td className="px-2 py-1">
+                          <Link href="/documents" className="text-xs underline">
+                            Ver activos
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                    {!attributes.length && !visibleAssetPolicies.length ? (
+                      <tr>
+                        <td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">
+                          Ningún atributo coincide con los filtros.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

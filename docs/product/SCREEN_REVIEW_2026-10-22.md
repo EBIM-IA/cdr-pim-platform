@@ -36,6 +36,9 @@ del prototipo no equivalen a 66 rutas de la aplicación.
   candidato y confirmación antes de aplicar. Edición y comparación de borradores comerciales
   locales; no se simula aprobación o guardado comercial durable.
 
+La revisión adicional del 23 de octubre de las cinco pantallas del menú se detalla
+en [FIVE_SCREEN_REVIEW_2026-10-23.md](FIVE_SCREEN_REVIEW_2026-10-23.md).
+
 ## Cobertura por pantalla
 
 | Referencia | Pantalla                 | Resultado de revisión                                                                |
@@ -46,11 +49,11 @@ del prototipo no equivalen a 66 rutas de la aplicación.
 | 6          | Ficha                    | Identidad, datos base y edición inline conservadas; resumen de conflictos pendiente. |
 | 7          | Enriquecimiento          | Edición operativa; motivo y envío a aprobación necesitan flujo durable.              |
 | 8          | Categorías               | Árbol y administración existentes; alta/reorganización no habilitadas.               |
-| 9          | Plantillas               | Administración y permisos existentes; prioridad BUSQUEDA consultable en Fuentes.     |
-| 10         | Aplicaciones             | Tabla, filtros, edición, importación y exportación existentes.                       |
-| 11         | Código unificador        | Agrupación e identidad ERP conservadas.                                              |
-| 12         | Homólogos                | Listado y ficha contextual existentes; presentación global difiere del prototipo.    |
-| 13         | Documentos               | Matriz, carga ZIP y activos reales; requisitos detallados también en Calidad.        |
+| 9          | Plantillas               | Selector, BUSQUEDA, herencia consultiva, ocho filtros y matriz específica (#9).      |
+| 10         | Aplicaciones             | Barra compacta y tabla del diseño con edición, filtros, importación y exportación.   |
+| 11         | Código unificador        | Tabla por SKU, pestañas Homólogos/OEM y detalle del grupo.                           |
+| 12         | Identificadores por SKU  | Contexto, identificadores, atributos de identificación y relaciones reales.          |
+| 13         | Documentos               | Tabla/contexto, leyenda, requisitos reales por plantilla y carga ZIP lateral.        |
 | 14         | Importaciones            | Historial y resultados existentes.                                                   |
 | 15         | Nueva importación        | Mapeo y arrastre funcionales, sin campos técnicos en el flujo principal.             |
 | 16         | Resultado de importación | Detalle por fila y descarga de errores incorporados.                                 |
@@ -74,7 +77,7 @@ del prototipo no equivalen a 66 rutas de la aplicación.
 | 34         | Reportes                 | Estructura 3 + 4 + 8 y reportes consultables/exportables.                            |
 | 35         | Búsquedas                | Telemetría no disponible, sin cifras ilustrativas.                                   |
 | 36         | Parámetros               | Catálogos específicos y valores actuales; mantenimiento adicional pendiente.         |
-| 37         | Catálogos PDF            | Estructura de tabla y vigencias; registro/compartición no disponibles.               |
+| 37         | Catálogos PDF            | Barra, estado vacío y formulario del diseño; persistencia/compartición pendientes.   |
 
 ## Datos y límites funcionales
 

@@ -1,11 +1,17 @@
 import { assertUuid, newUuid, ValidationError } from '@cdr/shared';
+import { adminTemplateSchema } from '@cdr/contracts';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { seedDemoCatalog } from '../../src/database/demo-seed';
-import { auditEntries, productAttributeValues } from '../../src/database/schema';
+import {
+  auditEntries,
+  productAttributeValues,
+  templateAssetRequirements,
+} from '../../src/database/schema';
 import { DrizzleCatalogAdministrationRepository } from '../../src/modules/catalog-schema/infrastructure/persistence/drizzle-catalog-administration.repository';
 import { DrizzleDynamicCatalogRepository } from '../../src/modules/catalog-schema/infrastructure/persistence/drizzle-dynamic-catalog.repository';
+import { toAdminTemplateDto } from '../../src/modules/catalog-schema/presentation/catalog-administration.presenter';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
 describe('DrizzleCatalogAdministrationRepository', () => {
@@ -21,6 +27,40 @@ describe('DrizzleCatalogAdministrationRepository', () => {
     await seedDemoCatalog(database.db);
   });
   afterAll(() => database.close());
+
+  it('exposes required and optional active asset policies on one admin template without inactive or other-template policies', async () => {
+    const [selected, other] = await repository.listTemplates();
+    expect(selected).toBeTruthy();
+    expect(other).toBeTruthy();
+    await database.db
+      .delete(templateAssetRequirements)
+      .where(eq(templateAssetRequirements.templateId, selected!.id));
+    await database.db.insert(templateAssetRequirements).values([
+      { templateId: selected!.id, typeCode: 'FT', required: true, active: true },
+      { templateId: selected!.id, typeCode: 'PLANO', required: false, active: true },
+      { templateId: selected!.id, typeCode: 'CERT', required: true, active: false },
+    ]);
+    await database.db
+      .insert(templateAssetRequirements)
+      .values({ templateId: other!.id, typeCode: 'CERT', required: true, active: true })
+      .onConflictDoUpdate({
+        target: [templateAssetRequirements.templateId, templateAssetRequirements.typeCode],
+        set: { required: true, active: true },
+      });
+    const detail = await repository.getTemplate(selected!.id);
+    expect(detail?.assetRequirements).toEqual([
+      { type: 'FT', required: true },
+      { type: 'PLANO', required: false },
+    ]);
+    const dto = adminTemplateSchema.parse(toAdminTemplateDto(detail!));
+    expect(dto.assetRequirements).toEqual(detail!.assetRequirements);
+    expect(await repository.getTemplate(newUuid())).toBeNull();
+    await database.db
+      .update(templateAssetRequirements)
+      .set({ active: false })
+      .where(eq(templateAssetRequirements.templateId, selected!.id));
+    expect((await repository.getTemplate(selected!.id))?.assetRequirements).toEqual([]);
+  });
 
   it('keeps the SKU identity in publication while allowing other ERP fields to be deselected', async () => {
     const templates = await repository.listTemplates();
