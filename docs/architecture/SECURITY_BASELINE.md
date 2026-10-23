@@ -26,7 +26,10 @@
 
 `JwtAuthGuard` and `RolesGuard` are registered globally. Every human API controller is
 protected unless it opts out with `@Public()`; only `POST /api/v1/auth/login` and the health
-probes are anonymous. The local AX mock bypasses human JWT only through
+probes are anonymous. Two PDF share POSTs use `CatalogShareAuthGuard` instead of human
+JWT: an unguessable token, stored only as a digest, must resolve to a non-revoked,
+unexpired grant and a current catalog. This narrow exception is recorded in ADR-015
+and enforced by architecture tests; every other catalog route remains private. The local AX mock bypasses human JWT only through
 `@AxMockAuthenticated()`, which couples that bypass to a dedicated machine-secret guard;
 using `@Public()` by itself there would be unsafe. Missing or invalid bearer credentials
 return `401 UNAUTHORIZED`, while an authenticated actor without a required role returns

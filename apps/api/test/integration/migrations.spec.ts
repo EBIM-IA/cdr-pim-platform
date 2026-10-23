@@ -69,6 +69,8 @@ describe('migration runner', () => {
         'import_rows',
         'product_assets',
         'product_attribute_values',
+        'product_catalog_shares',
+        'product_catalogs',
         'product_embeddings',
         'product_identifiers',
         'product_template_assignments',

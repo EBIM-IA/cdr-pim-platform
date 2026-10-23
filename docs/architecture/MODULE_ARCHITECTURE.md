@@ -36,32 +36,35 @@ graph LR
 
 ## Estado de cada contexto
 
-| Contexto           | Estado                     | Implementado                                                                                                                                                           | Pendiente real                                                                                                                 |
-| ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **health**         | Operativo                  | Liveness, readiness y verificación de PostgreSQL                                                                                                                       | —                                                                                                                              |
-| **identity**       | Operativo para local/test  | Login local, JWT, roles `ADMINISTRADOR`/`COMPRAS`/`VENTAS`, capacidades explícitas, guardas globales y aliases temporales                                              | Proveedor empresarial, refresco y revocación; dependen de la decisión de identidad de CDR                                      |
-| **catalog**        | Operativo, alcance base    | Producto, identificadores, listado, detalle, creación, repositorio PostgreSQL y auditoría de creación                                                                  | Reglas finales de calidad                                                                                                      |
-| **catalog-schema** | Operativo                  | Categorías; plantillas versionadas; valores tipados; tabla dinámica; filtros; ficha técnica; edición optimista; herencia replicable; administración y permisos por rol | Crear versiones desde HTTP, diccionario definitivo y diseño comercial final de la ficha                                        |
-| **applications**   | Operativo                  | Aplicaciones por código unificador; CRUD manual, tabla Excel, validación y carga masiva parcial con auditoría                                                          | Nombres y catálogos definitivos de los campos de aplicación                                                                    |
-| **equivalences**   | Operativo                  | Grupos, membresías, homólogos y OEM; CRUD/carga masiva; búsqueda limitada a relaciones activas y aprobadas                                                             | Flujo de creación/curación de grupos desde la interfaz y reglas finales de aprobación                                          |
-| **imports**        | Operativo                  | CSV/XLSX/JSON desde la web; validación por fila, idempotencia, claim/lease y confirmación parcial transaccional para categorías, aplicaciones, homólogos y OEM         | Ejecución asíncrona para archivos que excedan los límites síncronos acordados                                                  |
-| **audit**          | Operativo y consultable    | Eventos append-only, detalle por campo, filtros por SKU/campo/actor/origen/fecha y vigencia anterior; unidad de trabajo atómica para atributos dinámicos               | Política de retención/archivo y migrar escrituras antiguas que aún auditan en una transacción separada                         |
-| **search**         | Operativo                  | Búsqueda directa, atributos, pgvector, homólogos/OEM elegibles e interpretación de afijos, combinados y deduplicados en la experiencia web                             | Worker de reindexación completa y ranking híbrido único en backend                                                             |
-| **ai**             | Fundación implementada     | Puertos, adaptadores OpenAI, fakes deterministas y selección por configuración                                                                                         | Presupuestos, cuotas distribuidas y flujos de revisión humana completos                                                        |
-| **integrations**   | Puertos y stubs explícitos | Contratos para ERP, comercio y pedidos; fuente ERP en memoria; simulador PUSH AX `draft-0` local, volátil, autenticado e idempotente, sin mutar catálogo               | AX, PrestaShop y pedidos reales: VPN, credenciales y mapeos siguen pendientes                                                  |
-| **ax-integration** | Recepción persistente      | `POST /productos/sincronizar`, estado GET, Bearer M2M temporal, PostgreSQL e idempotencia por lote; dirección AX → PIM confirmada                                      | Aplicación al catálogo, M2M definitivo, VPN y reglas de precedencia                                                            |
-| **product-assets** | Operativo                  | Metadatos por SKU, binarios privados en memoria/S3, carga individual y ZIP parcial, descarga, reemplazo/borrado lógico y auditoría atómica                             | Antimalware, lifecycle/reconciliación de objetos huérfanos y configuración S3 de cada ambiente                                 |
-| **workspaces**     | Read model operativo       | Proyecciones protegidas para las pantallas no especializadas; Catálogos #37 es visible pero devuelve un estado bloqueado, sin filas ni operaciones ficticias           | Debe ceder comandos a los contextos propietarios; Catálogos requiere modelo persistente y contrato de seguridad y compartición |
+| Contexto           | Estado                     | Implementado                                                                                                                                                           | Pendiente real                                                                                         |
+| ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **health**         | Operativo                  | Liveness, readiness y verificación de PostgreSQL                                                                                                                       | —                                                                                                      |
+| **identity**       | Operativo para local/test  | Login local, JWT, roles `ADMINISTRADOR`/`COMPRAS`/`VENTAS`, capacidades explícitas, guardas globales y aliases temporales                                              | Proveedor empresarial, refresco y revocación; dependen de la decisión de identidad de CDR              |
+| **catalog**        | Operativo, alcance base    | Producto, identificadores, listado, detalle, creación, repositorio PostgreSQL y auditoría de creación                                                                  | Reglas finales de calidad                                                                              |
+| **catalog-schema** | Operativo                  | Categorías; plantillas versionadas; valores tipados; tabla dinámica; filtros; ficha técnica; edición optimista; herencia replicable; administración y permisos por rol | Crear versiones desde HTTP, diccionario definitivo y diseño comercial final de la ficha                |
+| **applications**   | Operativo                  | Aplicaciones por código unificador; CRUD manual, tabla Excel, validación y carga masiva parcial con auditoría                                                          | Nombres y catálogos definitivos de los campos de aplicación                                            |
+| **equivalences**   | Operativo                  | Grupos, membresías, homólogos y OEM; CRUD/carga masiva; búsqueda limitada a relaciones activas y aprobadas                                                             | Flujo de creación/curación de grupos desde la interfaz y reglas finales de aprobación                  |
+| **imports**        | Operativo                  | CSV/XLSX/JSON desde la web; validación por fila, idempotencia, claim/lease y confirmación parcial transaccional para categorías, aplicaciones, homólogos y OEM         | Ejecución asíncrona para archivos que excedan los límites síncronos acordados                          |
+| **audit**          | Operativo y consultable    | Eventos append-only, detalle por campo, filtros por SKU/campo/actor/origen/fecha y vigencia anterior; unidad de trabajo atómica para atributos dinámicos               | Política de retención/archivo y migrar escrituras antiguas que aún auditan en una transacción separada |
+| **search**         | Operativo                  | Búsqueda directa, atributos, pgvector, homólogos/OEM elegibles e interpretación de afijos, combinados y deduplicados en la experiencia web                             | Worker de reindexación completa y ranking híbrido único en backend                                     |
+| **ai**             | Fundación implementada     | Puertos, adaptadores OpenAI, fakes deterministas y selección por configuración                                                                                         | Presupuestos, cuotas distribuidas y flujos de revisión humana completos                                |
+| **integrations**   | Puertos y stubs explícitos | Contratos para ERP, comercio y pedidos; fuente ERP en memoria; simulador PUSH AX `draft-0` local, volátil, autenticado e idempotente, sin mutar catálogo               | AX, PrestaShop y pedidos reales: VPN, credenciales y mapeos siguen pendientes                          |
+| **ax-integration** | Recepción persistente      | `POST /productos/sincronizar`, estado GET, Bearer M2M temporal, PostgreSQL e idempotencia por lote; dirección AX → PIM confirmada                                      | Aplicación al catálogo, M2M definitivo, VPN y reglas de precedencia                                    |
+| **product-assets** | Operativo                  | Metadatos por SKU, binarios privados en memoria/S3, carga individual y ZIP parcial, descarga, reemplazo/borrado lógico y auditoría atómica                             | Antimalware, lifecycle/reconciliación de objetos huérfanos y configuración S3 de cada ambiente         |
+| **workspaces**     | Read model operativo       | Proyecciones protegidas; Catálogos #37 consulta el puerto publicado de product-catalogs                                                                                | Debe ceder comandos a los contextos propietarios                                                       |
 
 `categories` y `attributes` conservan algunos tipos históricos, pero la implementación
 persistida y expuesta por HTTP vive en `catalog-schema`. No deben tratarse como módulos
 activos separados.
 
-El workspace `catalogs` (#37) es deliberadamente visible y autenticado, pero su proyección
-permanece bloqueada. Solo permite refrescar la lectura: carga, publicación y compartición no se
-exponen hasta aprobar la matriz de roles, validación y antimalware de PDF, almacenamiento privado,
-retención, y enlaces expirables, revocables y auditables. Tampoco devuelve registros, enlaces ni
-contadores de visita de demostración.
+`product-catalogs` es operativo: metadatos PostgreSQL, binarios privados por el puerto
+compartido de almacenamiento, auditoría atómica, concurrencia optimista y baja/restauración.
+Admin/Compras mantienen; todos los roles del módulo consultan y comparten catálogos vigentes.
+Los enlaces aleatorios guardan solo su digest; cada acceso verifica vigencia, vencimiento y
+revocación. La página pública recibe el token en el fragmento y lo envía por dos POST
+específicos sin cookies. El workspace `catalogs` consume el puerto de consulta del contexto.
+El antimalware y la reconciliación de objetos huérfanos siguen el límite operativo de
+product-assets; la validación de PDF verifica tamaño, extensión, MIME y firma.
 
 ## Catálogo dinámico y permisos
 
@@ -80,8 +83,8 @@ replicables se propagan a los productos elegibles del mismo código unificador.
 
 ## Autenticación privada por defecto
 
-`JwtAuthGuard` y `RolesGuard` son guardas globales. Login local y health son las únicas
-rutas anónimas. Tanto el mock AX local como el receptor AX persistente omiten JWT humano
+`JwtAuthGuard` y `RolesGuard` son guardas globales. Login local, health y los dos POST de lectura de enlaces PDF son las únicas
+rutas sin JWT humano. Los POST PDF exigen un token aleatorio vigente y no exponen almacenamiento. Tanto el mock AX local como el receptor AX persistente omiten JWT humano
 únicamente mediante decoradores que instalan su guarda de sistema dedicada en el mismo paso;
 nunca quedan sin autenticación. El
 adaptador local toma una cuenta de variables validadas;

@@ -9,7 +9,15 @@ import {
 } from '@/lib/http-security';
 
 // `/healthz` is the anonymous load-balancer probe: it must answer 200, never redirect.
-const PUBLIC_PATHS = new Set(['/healthz', '/login', '/api/auth/login', '/api/auth/logout']);
+const PUBLIC_PATHS = new Set([
+  '/healthz',
+  '/login',
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/shared/catalogs',
+  '/api/shared/catalogs/resolve',
+  '/api/shared/catalogs/file',
+]);
 
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

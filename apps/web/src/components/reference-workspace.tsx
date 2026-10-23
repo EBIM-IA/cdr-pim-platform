@@ -632,7 +632,12 @@ export function ReferenceWorkspace({
         ) : definition.slug === 'administration' && active.id === 'audit' ? (
           <AuditWorkspace embedded />
         ) : definition.slug === 'catalogs' ? (
-          <ProductCatalogsWorkspace workspace={workspace} onReload={reload} />
+          <ProductCatalogsWorkspace
+            workspace={workspace}
+            canManage={actor?.capabilities.includes('product-catalogs:write') ?? false}
+            canShare={actor?.capabilities.includes('product-catalogs:share') ?? false}
+            canViewAudit={actor?.capabilities.includes('audit:read') ?? false}
+          />
         ) : definition.slug === 'quality' && active.id === 'search' ? (
           <SmartSearchWorkspace />
         ) : definition.slug === 'quality' && isQualitySecondaryView(active.id) ? (

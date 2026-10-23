@@ -22,3 +22,4 @@ and update the status of the old one — never edit history.
 | [012](./ADR-012-template-driven-product-data.md)                | Template-driven dynamic product data                    | Accepted |
 | [013](./ADR-013-capability-and-attribute-authorization.md)      | Capability and attribute-level authorization            | Accepted |
 | [014](./ADR-014-executable-unified-code-propagation.md)         | Executable unified-code propagation                     | Accepted |
+| [015](./ADR-015-token-authenticated-pdf-catalog-sharing.md)     | Token-authenticated private PDF catalog sharing         | Accepted |

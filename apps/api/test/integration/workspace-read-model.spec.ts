@@ -1,8 +1,12 @@
 import { loadApiEnv } from '@cdr/config';
+import { FixedClock } from '@cdr/shared';
 import { workspaceSchema, workspaceSlugSchema } from '@cdr/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PostgresWorkspaceReadModel } from '../../src/modules/workspaces/infrastructure/postgres-workspace-read-model';
+import { ListProductCatalogsUseCase } from '../../src/modules/product-catalogs/application/manage-product-catalogs.use-cases';
+import { DrizzleProductCatalogRepository } from '../../src/modules/product-catalogs/infrastructure/persistence/drizzle-product-catalog.repository';
+import type { ProductCatalogQueryPort } from '../../src/modules/product-catalogs/domain/ports/product-catalog-query.port';
 import {
   Role,
   capabilitiesForRole,
@@ -33,6 +37,7 @@ const actor: AuthenticatedActor = {
 describe('PostgresWorkspaceReadModel', () => {
   let database: TestDatabase;
   let readModel: PostgresWorkspaceReadModel;
+  let catalogQuery: ProductCatalogQueryPort;
 
   beforeAll(async () => {
     database = await createTestDatabase();
@@ -50,7 +55,11 @@ describe('PostgresWorkspaceReadModel', () => {
       STORAGE_DRIVER: 'memory',
       AI_PROVIDER: 'fake',
     });
-    readModel = new PostgresWorkspaceReadModel(database.sql, env);
+    catalogQuery = new ListProductCatalogsUseCase(
+      new DrizzleProductCatalogRepository(database.db),
+      new FixedClock(new Date('2026-10-23T12:00:00.000Z')),
+    );
+    readModel = new PostgresWorkspaceReadModel(database.sql, env, catalogQuery);
   });
 
   beforeEach(async () => {
@@ -195,30 +204,41 @@ describe('PostgresWorkspaceReadModel', () => {
     expect(() => workspaceSchema.parse(reports)).not.toThrow();
   });
 
-  it('exposes product catalogs as blocked without records or simulated write endpoints', async () => {
+  it('reads live PDF catalogs through the published query port and exposes only allowed actions', async () => {
+    await database.sql`
+      INSERT INTO product_catalogs (id,title,description,valid_from,file_name,file_size,object_key,created_by,created_at,updated_by,updated_at)
+      VALUES ('51000000-0000-4000-8000-000000000001','Catálogo real de prueba','Metadatos persistidos','2026-01-01','catalogo.pdf',100,'product-catalogs/workspace-test.pdf',${JSON.stringify({ id: actor.id, email: actor.email })}::jsonb,now(),${JSON.stringify({ id: actor.id, email: actor.email })}::jsonb,now())
+    `;
     const catalogs = await readModel.read('catalogs', actor);
 
     expect(() => workspaceSchema.parse(catalogs)).not.toThrow();
-    expect(catalogs.operationalStatus).toBe('blocked');
-    expect(catalogs.rows).toEqual([]);
-    expect(catalogs.totalRows).toBe(0);
+    expect(catalogs.operationalStatus).toBe('operational');
+    expect(catalogs.rows).toEqual([
+      expect.objectContaining({
+        values: expect.objectContaining({
+          title: 'Catálogo real de prueba',
+          fileName: 'catalogo.pdf',
+          status: 'Vigente',
+        }),
+      }),
+    ]);
+    expect(catalogs.totalRows).toBe(1);
     expect(catalogs.metrics).toContainEqual({
       key: 'catalogs',
       label: 'Catálogos registrados',
-      value: 0,
+      value: 1,
       format: 'integer',
     });
     expect(catalogs.actions).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'upload-catalog', availability: 'blocked' }),
-        expect.objectContaining({ id: 'share-catalog', availability: 'blocked' }),
+        expect.objectContaining({ id: 'share-catalog', availability: 'supported' }),
       ]),
     );
-    expect(
-      catalogs.actions
-        .filter((action) => action.id !== 'refresh')
-        .every((action) => action.availability === 'blocked'),
-    ).toBe(true);
+    expect(catalogs.actions.some((action) => action.id === 'upload-catalog')).toBe(false);
+    const editable = await readModel.read('catalogs', { ...actor, roles: [Role.Purchasing] });
+    expect(editable.actions).toContainEqual(
+      expect.objectContaining({ id: 'upload-catalog', availability: 'supported' }),
+    );
   });
 
   it('reports the local AX mock honestly without treating it as the production adapter', async () => {
@@ -269,6 +289,7 @@ describe('PostgresWorkspaceReadModel', () => {
         STORAGE_DRIVER: 'memory',
         AI_PROVIDER: 'fake',
       }),
+      catalogQuery,
     );
 
     const integrations = await localMock.read('integrations', actor);

@@ -53,11 +53,10 @@ como `SKU_EJEMPLO`; debe reemplazarse con un SKU y archivo reales antes de impor
 
 ## Límites conservados
 
-Catálogos PDF todavía no dispone de un modelo de persistencia y compartición
-aprobado: el formulario permite revisar los campos, pero su envío y las acciones
-de mantenimiento/compartición permanecen deshabilitados y explicados. No se crean
-PDF públicos, tokens ni permisos nuevos. Tampoco se presentan altas de AX,
-aprobaciones, historial o conexiones de PrestaShop como operaciones realizadas.
+El pendiente de Catálogos PDF se completa por solicitud posterior del cliente.
+La implementación y sus reglas quedan documentadas en
+[PDF_CATALOGS_2026-10-23.md](PDF_CATALOGS_2026-10-23.md). Las limitaciones de AX,
+aprobaciones y conexiones de PrestaShop permanecen independientes de este cambio.
 
 Los metadatos del Excel que no existen en el contrato, como la muestra original
 de cada columna, se muestran sin valor; no se rellenan con datos ilustrativos.

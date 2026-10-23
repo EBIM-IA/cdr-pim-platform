@@ -233,46 +233,37 @@ export const moduleDefinitions: Record<ModuleSlug, ModuleDefinition> = {
     slug: 'catalogs',
     label: 'Catálogos de productos',
     eyebrow: 'Documentos comerciales',
-    description:
-      'Delimita la futura creación y distribución controlada de catálogos PDF sin presentar operaciones todavía no contratadas.',
-    objective:
-      'Expone el alcance aprobado por diseño y las decisiones pendientes antes de almacenar, publicar o compartir un catálogo.',
+    description: 'Catálogos PDF con vigencia, archivos privados y enlaces compartidos.',
+    objective: 'Carga, actualiza y comparte catálogos PDF; consulta su vigencia y auditoría.',
     actions: [
-      'Revisa las dependencias de seguridad, almacenamiento y auditoría pendientes.',
-      'Confirma que no existen catálogos ni enlaces ficticios en este ambiente.',
-      'Consulta qué decisiones habilitarán la carga y la compartición.',
+      'Sube un PDF de hasta 50 MB con título, descripción y vigencia.',
+      'Edita sus datos o reemplaza el PDF; elimina y restaura catálogos según tus permisos.',
+      'Genera un enlace para un catálogo vigente, elige su plazo y revócalo cuando corresponda.',
+      'Busca y filtra la tabla o exporta sus resultados completos a Excel.',
     ],
     dataSource:
-      'El estado bloqueado proviene de la API autenticada; no existe todavía una fuente persistente de catálogos PDF.',
+      'API autenticada con metadatos y auditoría persistidos en PostgreSQL; PDF en almacenamiento privado del servidor.',
     limitation:
-      'No se habilitan carga, vigencia, enlaces públicos ni conteo de visitas hasta aprobar permisos, límites, almacenamiento, retención y contrato de compartición.',
+      'Solo Administración y Compras mantienen catálogos. Los enlaces dependen de su plazo y de la vigencia del catálogo. Una baja revoca sus enlaces; restaurar el catálogo no los reactiva.',
     kind: 'workspace',
     capabilities: [
       {
         title: 'Registro y vigencia',
-        description:
-          'Título, descripción, PDF, vigencia y auditoría requieren un modelo persistente aprobado.',
-        status: 'blocked',
+        description: 'Título, descripción, PDF, fechas y auditoría persistentes.',
+        status: 'available',
       },
       {
-        title: 'Carga segura de PDF',
-        description:
-          'Permisos, tamaño máximo, validación de archivo, antimalware y almacenamiento siguen pendientes.',
-        status: 'blocked',
+        title: 'Archivo privado',
+        description: 'Validación de formato, tamaño y acceso al PDF desde el servidor.',
+        status: 'available',
       },
       {
         title: 'Compartición externa',
-        description:
-          'Expiración, revocación, tokens, límites de acceso y trazabilidad aún no tienen contrato.',
-        status: 'blocked',
+        description: 'Enlaces con plazo, revocación y contador de accesos.',
+        status: 'available',
       },
     ],
-    dependencies: [
-      'Matriz de permisos para crear, publicar, revocar y consultar',
-      'Límites, tipos admitidos, validación y antimalware',
-      'Almacenamiento privado, retención y eliminación',
-      'Contrato de enlaces públicos, expiración, revocación y visitas',
-    ],
+    dependencies: [],
   },
   imports: {
     slug: 'imports',

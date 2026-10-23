@@ -1,0 +1,27 @@
+import {
+  productCatalogGeneratedShareSchema,
+  productCatalogShareCreateSchema,
+  uuidSchema,
+} from '@cdr/contracts';
+import { type NextRequest, NextResponse } from 'next/server';
+
+import { securePrivateResponse } from '@/lib/http-security';
+import { proxyPrivateApi } from '@/lib/private-api-route';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const id = uuidSchema.safeParse((await context.params).id);
+  if (!id.success) {
+    return securePrivateResponse(
+      NextResponse.json({ message: 'El catálogo indicado no es válido.' }, { status: 400 }),
+    );
+  }
+  return proxyPrivateApi({
+    request,
+    method: 'POST',
+    path: `/product-catalogs/${id.data}/shares`,
+    inputSchema: productCatalogShareCreateSchema,
+    outputSchema: productCatalogGeneratedShareSchema,
+  });
+}

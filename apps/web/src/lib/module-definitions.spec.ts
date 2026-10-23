@@ -76,7 +76,7 @@ describe('definiciones de módulos', () => {
     expect(moduleDefinitions.catalogs.capabilities).toHaveLength(3);
     expect(
       moduleDefinitions.catalogs.capabilities.every(
-        (capability) => capability.status === 'blocked',
+        (capability) => capability.status === 'available',
       ),
     ).toBe(true);
   });

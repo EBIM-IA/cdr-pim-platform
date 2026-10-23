@@ -18,6 +18,7 @@ import { JwtAuthGuard } from './modules/identity/presentation/guards/jwt-auth.gu
 import { RolesGuard } from './modules/identity/presentation/guards/roles.guard';
 import { ImportsModule } from './modules/imports/imports.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { ProductCatalogsModule } from './modules/product-catalogs/product-catalogs.module';
 import { ProductAssetsModule } from './modules/product-assets/product-assets.module';
 import { SearchModule } from './modules/search/search.module';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module';
@@ -129,6 +130,7 @@ import { API_ENV } from './shared/tokens';
     ImportsModule,
     IntegrationsModule,
     ProductAssetsModule,
+    ProductCatalogsModule,
     AxIntegrationModule,
     WorkspacesModule,
   ],

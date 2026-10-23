@@ -46,4 +46,38 @@ describe('web security middleware', () => {
     expect(response.headers.get('x-middleware-next')).toBe('1');
     expect(response.headers.get('location')).toBeNull();
   });
+
+  it.each(['/shared/catalogs', '/api/shared/catalogs/resolve', '/api/shared/catalogs/file'])(
+    'allows only the exact shared catalog route %s while retaining browser protections',
+    (path) => {
+      const response = middleware(new NextRequest(`http://localhost:3100${path}`));
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+      expect(response.headers.get('location')).toBeNull();
+      expect(response.headers.get('cache-control')).toContain('private, no-store');
+      expect(response.headers.get('content-security-policy')).toContain("object-src 'none'");
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('x-frame-options')).toBe('DENY');
+    },
+  );
+
+  it.each([
+    '/api/shared/catalogs',
+    '/api/shared/catalogs/resolve/extra',
+    '/api/shared/catalogs/file/extra',
+    '/api/shared/catalogs/another',
+    '/api/product-catalogs',
+    '/api/product-catalogs/shared/resolve',
+  ])('keeps sibling and nested API route %s authenticated', (path) => {
+    const response = middleware(new NextRequest(`http://localhost:3100${path}`));
+    expect(response.status).toBe(401);
+    expect(response.headers.get('x-middleware-next')).toBeNull();
+  });
+
+  it('does not exempt other shared pages or a nested catalog route', () => {
+    for (const path of ['/shared', '/shared/catalogs/extra', '/shared/another']) {
+      const response = middleware(new NextRequest(`http://localhost:3100${path}`));
+      expect(response.status).toBe(307);
+      expect(response.headers.get('location')).toContain('/login?returnTo=');
+    }
+  });
 });

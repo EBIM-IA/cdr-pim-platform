@@ -41,43 +41,43 @@ en [FIVE_SCREEN_REVIEW_2026-10-23.md](FIVE_SCREEN_REVIEW_2026-10-23.md).
 
 ## Cobertura por pantalla
 
-| Referencia | Pantalla                 | Resultado de revisión                                                                |
-| ---------- | ------------------------ | ------------------------------------------------------------------------------------ |
-| 3          | Acceso                   | Estructura y marcas conservadas.                                                     |
-| 4          | Inicio                   | Indicadores y actividad basados en datos actuales.                                   |
-| 5          | Productos                | Catálogo compacto; exportación de fichas PDF masiva pendiente.                       |
-| 6          | Ficha                    | Identidad, datos base y edición inline conservadas; resumen de conflictos pendiente. |
-| 7          | Enriquecimiento          | Edición operativa; motivo y envío a aprobación necesitan flujo durable.              |
-| 8          | Categorías               | Árbol y administración existentes; alta/reorganización no habilitadas.               |
-| 9          | Plantillas               | Selector, BUSQUEDA, herencia consultiva, ocho filtros y matriz específica (#9).      |
-| 10         | Aplicaciones             | Barra compacta y tabla del diseño con edición, filtros, importación y exportación.   |
-| 11         | Código unificador        | Tabla por SKU, pestañas Homólogos/OEM y detalle del grupo.                           |
-| 12         | Identificadores por SKU  | Contexto, identificadores, atributos de identificación y relaciones reales.          |
-| 13         | Documentos               | Tabla/contexto, leyenda, requisitos reales por plantilla y carga ZIP lateral.        |
-| 14         | Importaciones            | Historial y resultados existentes.                                                   |
-| 15         | Nueva importación        | Mapeo y arrastre funcionales, sin campos técnicos en el flujo principal.             |
-| 16         | Resultado de importación | Detalle por fila y descarga de errores incorporados.                                 |
-| 17         | Búsqueda inteligente     | Consulta real; retirados indicadores genéricos de Calidad alrededor del buscador.    |
-| 18         | Extracción IA            | Comparación, evidencia y selección humana antes de aplicar.                          |
-| 19         | Descripción comercial    | Borrador editable y comparación; aprobación durable pendiente.                       |
-| 20         | Calidad                  | Pantalla específica con cinco indicadores y requisitos reales.                       |
-| 21         | Duplicados               | Estructura conservada; motor de alertas y comparación pendientes.                    |
-| 22         | Bandeja                  | Estructura conservada; solicitudes y decisiones durables pendientes.                 |
-| 23         | Fuentes                  | Matriz de prioridad y datos de categorías existentes.                                |
-| 24         | Conflictos               | Sin candidatos ficticios; decisiones persistidas pendientes.                         |
-| 25         | Publicación por canal    | Secciones y selección persistida por plantilla incorporadas.                         |
-| 26         | PrestaShop               | Operaciones y vista de consumo; conexión pendiente.                                  |
-| 27         | Migración de imágenes    | Consulta en contexto y tabla de lote; conexión pendiente.                            |
-| 28         | Fuentes externas         | Tarjetas por prioridad y tabla contextual de candidatos.                             |
-| 29         | Monitor                  | Ejecuciones recientes y conectores; historial externo no disponible.                 |
-| 30         | Lote AX                  | Cabecera y errores por registro; consulta de lotes externos no disponible.           |
-| 31         | Usuarios                 | Tabla y métricas delimitadas; directorio y mantenimiento no disponibles.             |
-| 32         | Roles                    | Matriz real de permisos; sin simulador ni cambios de autorización.                   |
-| 33         | Auditoría                | Historial real directo; retirado panel genérico interpuesto.                         |
-| 34         | Reportes                 | Estructura 3 + 4 + 8 y reportes consultables/exportables.                            |
-| 35         | Búsquedas                | Telemetría no disponible, sin cifras ilustrativas.                                   |
-| 36         | Parámetros               | Catálogos específicos y valores actuales; mantenimiento adicional pendiente.         |
-| 37         | Catálogos PDF            | Barra, estado vacío y formulario del diseño; persistencia/compartición pendientes.   |
+| Referencia | Pantalla                 | Resultado de revisión                                                                               |
+| ---------- | ------------------------ | --------------------------------------------------------------------------------------------------- |
+| 3          | Acceso                   | Estructura y marcas conservadas.                                                                    |
+| 4          | Inicio                   | Indicadores y actividad basados en datos actuales.                                                  |
+| 5          | Productos                | Catálogo compacto; exportación de fichas PDF masiva pendiente.                                      |
+| 6          | Ficha                    | Identidad, datos base y edición inline conservadas; resumen de conflictos pendiente.                |
+| 7          | Enriquecimiento          | Edición operativa; motivo y envío a aprobación necesitan flujo durable.                             |
+| 8          | Categorías               | Árbol y administración existentes; alta/reorganización no habilitadas.                              |
+| 9          | Plantillas               | Selector, BUSQUEDA, herencia consultiva, ocho filtros y matriz específica (#9).                     |
+| 10         | Aplicaciones             | Barra compacta y tabla del diseño con edición, filtros, importación y exportación.                  |
+| 11         | Código unificador        | Tabla por SKU, pestañas Homólogos/OEM y detalle del grupo.                                          |
+| 12         | Identificadores por SKU  | Contexto, identificadores, atributos de identificación y relaciones reales.                         |
+| 13         | Documentos               | Tabla/contexto, leyenda, requisitos reales por plantilla y carga ZIP lateral.                       |
+| 14         | Importaciones            | Historial y resultados existentes.                                                                  |
+| 15         | Nueva importación        | Mapeo y arrastre funcionales, sin campos técnicos en el flujo principal.                            |
+| 16         | Resultado de importación | Detalle por fila y descarga de errores incorporados.                                                |
+| 17         | Búsqueda inteligente     | Consulta real; retirados indicadores genéricos de Calidad alrededor del buscador.                   |
+| 18         | Extracción IA            | Comparación, evidencia y selección humana antes de aplicar.                                         |
+| 19         | Descripción comercial    | Borrador editable y comparación; aprobación durable pendiente.                                      |
+| 20         | Calidad                  | Pantalla específica con cinco indicadores y requisitos reales.                                      |
+| 21         | Duplicados               | Estructura conservada; motor de alertas y comparación pendientes.                                   |
+| 22         | Bandeja                  | Estructura conservada; solicitudes y decisiones durables pendientes.                                |
+| 23         | Fuentes                  | Matriz de prioridad y datos de categorías existentes.                                               |
+| 24         | Conflictos               | Sin candidatos ficticios; decisiones persistidas pendientes.                                        |
+| 25         | Publicación por canal    | Secciones y selección persistida por plantilla incorporadas.                                        |
+| 26         | PrestaShop               | Operaciones y vista de consumo; conexión pendiente.                                                 |
+| 27         | Migración de imágenes    | Consulta en contexto y tabla de lote; conexión pendiente.                                           |
+| 28         | Fuentes externas         | Tarjetas por prioridad y tabla contextual de candidatos.                                            |
+| 29         | Monitor                  | Ejecuciones recientes y conectores; historial externo no disponible.                                |
+| 30         | Lote AX                  | Cabecera y errores por registro; consulta de lotes externos no disponible.                          |
+| 31         | Usuarios                 | Tabla y métricas delimitadas; directorio y mantenimiento no disponibles.                            |
+| 32         | Roles                    | Matriz real de permisos; sin simulador ni cambios de autorización.                                  |
+| 33         | Auditoría                | Historial real directo; retirado panel genérico interpuesto.                                        |
+| 34         | Reportes                 | Estructura 3 + 4 + 8 y reportes consultables/exportables.                                           |
+| 35         | Búsquedas                | Telemetría no disponible, sin cifras ilustrativas.                                                  |
+| 36         | Parámetros               | Catálogos específicos y valores actuales; mantenimiento adicional pendiente.                        |
+| 37         | Catálogos PDF            | Carga PDF, mantenimiento, recuperación y enlaces con vencimiento/revocación implementados el 23/10. |
 
 ## Datos y límites funcionales
 

@@ -13,6 +13,22 @@ import {
 } from './role';
 
 describe('role capability policy', () => {
+  it('allows sales to consult and share PDF catalogs while keeping maintenance with purchasing and administration', () => {
+    for (const role of [
+      Role.Administrator,
+      Role.Purchasing,
+      Role.Sales,
+      Role.Admin,
+      Role.Editor,
+      Role.Viewer,
+    ]) {
+      expect(actorHasCapability(actor(role), Capability.ProductCatalogsRead)).toBe(true);
+      expect(actorHasCapability(actor(role), Capability.ProductCatalogsShare)).toBe(true);
+      expect(actorHasCapability(actor(role), Capability.ProductCatalogsWrite)).toBe(
+        role !== Role.Sales && role !== Role.Viewer,
+      );
+    }
+  });
   it('uses explicit grants without a business-role hierarchy', () => {
     expect(actorHasCapability(actor(Role.Administrator), Capability.AuditRead)).toBe(true);
     expect(actorHasCapability(actor(Role.Purchasing), Capability.AuditRead)).toBe(false);
