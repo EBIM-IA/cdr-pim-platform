@@ -3,7 +3,9 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getAccessToken } = vi.hoisted(() => ({ getAccessToken: vi.fn() }));
-vi.mock('@/lib/env', () => ({ env: { API_BASE_URL: 'http://api.internal' } }));
+vi.mock('@/lib/env', () => ({
+  env: { API_BASE_URL: 'http://api.internal', PUBLIC_APP_ORIGIN: 'http://localhost:3100' },
+}));
 vi.mock('@/lib/server-auth', () => ({ getAccessToken }));
 
 import { GET as list, POST as create } from './route';

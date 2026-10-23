@@ -54,7 +54,7 @@ export async function proxyPrivateApi<
   const { method, request } = options;
   if (
     method !== 'GET' &&
-    !hasExpectedOrigin(request.headers.get('origin'), request.nextUrl.origin)
+    !hasExpectedOrigin(request.headers.get('origin'), env.PUBLIC_APP_ORIGIN)
   ) {
     return jsonError('Origen de solicitud no permitido.', 403);
   }
@@ -112,7 +112,7 @@ export async function proxyPrivateApi<
 export async function proxyPrivateMultipart<TOutput extends ZodTypeAny>(
   options: PrivateApiMultipartOptions<TOutput>,
 ): Promise<NextResponse> {
-  if (!hasExpectedOrigin(options.request.headers.get('origin'), options.request.nextUrl.origin)) {
+  if (!hasExpectedOrigin(options.request.headers.get('origin'), env.PUBLIC_APP_ORIGIN)) {
     return jsonError('Origen de solicitud no permitido.', 403);
   }
   const accessToken = await getAccessToken();
