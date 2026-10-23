@@ -194,41 +194,36 @@ export class UploadProductAssetUseCase {
       uploadedAt: now,
     });
 
-    let saved: ProductAsset;
-    let replaced: ProductAsset | null;
     const correlationId = getCorrelationId() ?? newUuid();
-    try {
-      ({ saved, replaced } = await this.assets.saveReplacing(
-        asset,
-        actor.id,
-        now,
-        (persisted, previous) => {
-          const current = persisted.toSnapshot();
-          const before = previous?.toSnapshot();
-          return createAuditEntry({
-            resourceType: 'product_asset',
-            resourceId: current.id,
-            action: previous ? AuditAction.Updated : AuditAction.Created,
-            actorId: actor.id,
-            source: source === 'bulk' ? 'api:asset_zip' : 'api',
-            correlationId,
-            occurredAt: now,
-            changes: {
-              productId: { after: current.productId },
-              sku: { after: current.sku },
-              type: { before: before?.type, after: current.type },
-              filename: { before: before?.filename, after: current.filename },
-              position: { before: before?.position, after: current.position },
-              checksum: { before: before?.checksum, after: current.checksum },
-            },
-          });
-        },
-      ));
-    } catch (error) {
-      await this.storage.delete(stored.key).catch(() => undefined);
-      throw error;
-    }
-    if (replaced) await this.storage.delete(replaced.toSnapshot().objectKey).catch(() => undefined);
+    const { saved } = await this.assets.saveReplacing(
+      asset,
+      actor.id,
+      now,
+      (persisted, previous) => {
+        const current = persisted.toSnapshot();
+        const before = previous?.toSnapshot();
+        return createAuditEntry({
+          resourceType: 'product_asset',
+          resourceId: current.id,
+          action: previous ? AuditAction.Updated : AuditAction.Created,
+          actorId: actor.id,
+          source: source === 'bulk' ? 'api:asset_zip' : 'api',
+          correlationId,
+          occurredAt: now,
+          changes: {
+            productId: { after: current.productId },
+            sku: { after: current.sku },
+            type: { before: before?.type, after: current.type },
+            filename: { before: before?.filename, after: current.filename },
+            position: { before: before?.position, after: current.position },
+            checksum: { before: before?.checksum, after: current.checksum },
+          },
+        });
+      },
+      async () => {
+        if (!(await this.storage.exists(stored.key))) throw new NotFoundError('StoredAsset', id);
+      },
+    );
     return saved;
   }
 }
@@ -253,7 +248,7 @@ export class DeleteProductAssetUseCase {
   constructor(
     @Inject(PRODUCT_ASSET_REPOSITORY)
     private readonly assets: ProductAssetRepositoryPort,
-    @Inject(ASSET_BINARY_STORAGE) private readonly storage: AssetBinaryStoragePort,
+    @Inject(ASSET_BINARY_STORAGE) _storage: AssetBinaryStoragePort,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -280,8 +275,6 @@ export class DeleteProductAssetUseCase {
       });
     });
     if (!asset) throw new NotFoundError('ProductAsset', rawId);
-    const snapshot = asset.toSnapshot();
-    await this.storage.delete(snapshot.objectKey).catch(() => undefined);
     return asset;
   }
 }

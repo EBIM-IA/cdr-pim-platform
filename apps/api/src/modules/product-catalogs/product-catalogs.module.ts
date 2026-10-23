@@ -1,3 +1,5 @@
+import { PRODUCT_CATALOG_OBJECT_REFERENCES } from './domain/ports/product-catalog-object-references.port';
+import { DrizzleProductCatalogObjectReferences } from './infrastructure/persistence/drizzle-product-catalog-object-references';
 import { Module } from '@nestjs/common';
 import {
   ChangeProductCatalogDeletionUseCase,
@@ -24,6 +26,7 @@ import { ProductCatalogsController } from './presentation/product-catalogs.contr
 @Module({
   controllers: [ProductCatalogsController],
   providers: [
+    { provide: PRODUCT_CATALOG_OBJECT_REFERENCES, useClass: DrizzleProductCatalogObjectReferences },
     { provide: PRODUCT_CATALOG_REPOSITORY, useClass: DrizzleProductCatalogRepository },
     { provide: CATALOG_BINARY_STORAGE, useClass: PlatformCatalogStorageAdapter },
     { provide: CATALOG_SHARE_TOKEN, useClass: CryptoCatalogTokenAdapter },
@@ -39,6 +42,6 @@ import { ProductCatalogsController } from './presentation/product-catalogs.contr
     CatalogShareAuthGuard,
     { provide: PRODUCT_CATALOG_QUERY, useExisting: ListProductCatalogsUseCase },
   ],
-  exports: [PRODUCT_CATALOG_QUERY],
+  exports: [PRODUCT_CATALOG_QUERY, PRODUCT_CATALOG_OBJECT_REFERENCES],
 })
 export class ProductCatalogsModule {}

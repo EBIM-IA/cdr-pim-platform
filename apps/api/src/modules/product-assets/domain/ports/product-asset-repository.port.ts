@@ -22,6 +22,7 @@ export interface ProductAssetRepositoryPort {
     actorId: string,
     now: Date,
     audit: (saved: ProductAsset, replaced: ProductAsset | null) => AuditEntry,
+    assertObjectAvailable?: () => Promise<void>,
   ): Promise<{ saved: ProductAsset; replaced: ProductAsset | null }>;
   softDelete(
     id: Uuid,
@@ -61,6 +62,7 @@ export interface AssetBinaryStoragePort {
     readonly metadata: Readonly<Record<string, string>>;
   }): Promise<StoredAssetBinary>;
   get(key: string): Promise<Uint8Array>;
+  exists(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
 }
 

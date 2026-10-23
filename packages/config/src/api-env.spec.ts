@@ -27,6 +27,9 @@ const hostedQas = {
   SQS_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/1/cdr-pim-qas-jobs',
   STORAGE_DRIVER: 's3',
   S3_BUCKET_ASSETS: 'cdr-pim-qas-assets',
+  MALWARE_SCAN_DRIVER: 'clamav',
+  CLAMAV_HOST: '127.0.0.1',
+  CLAMAV_PORT: '3310',
   CORS_ORIGINS: 'https://pim-qas.example.test',
 } as NodeJS.ProcessEnv;
 
@@ -362,5 +365,51 @@ describe('boolean environment variables', () => {
     expect(() => loadApiEnv({ ...minimal, DATABASE_SSL: 'maybe' })).toThrow(
       EnvironmentValidationError,
     );
+  });
+});
+
+describe('file malware protection and cleanup configuration', () => {
+  it('permits disabled scanning only in local/test and applies bounded cleanup defaults', () => {
+    for (const APP_ENV of ['local', 'test']) {
+      const env = loadApiEnv({ ...minimal, APP_ENV });
+      expect(env.MALWARE_SCAN_DRIVER).toBe('disabled');
+      expect(env.FILE_CLEANUP_ENABLED).toBe(false);
+      expect(env.FILE_CLEANUP_INTERVAL_MS).toBe(3_600_000);
+      expect(env.FILE_CLEANUP_PAGE_SIZE).toBe(50);
+      expect(env.FILE_CLEANUP_MAX_PAGES).toBe(20);
+    }
+  });
+  it.each(['qas', 'prd'])('requires the real malware driver in %s', (APP_ENV) => {
+    expect(() => loadApiEnv({ ...hostedQas, APP_ENV, MALWARE_SCAN_DRIVER: 'disabled' })).toThrow(
+      /MALWARE_SCAN_DRIVER.*must be "clamav"/s,
+    );
+  });
+  it('requires an explicit engine host and port instead of silently bypassing an absent engine', () => {
+    expect(() => loadApiEnv({ ...minimal, MALWARE_SCAN_DRIVER: 'clamav' })).toThrow(
+      /CLAMAV_HOST.*required.*CLAMAV_PORT.*required/s,
+    );
+    const env = loadApiEnv({
+      ...hostedQas,
+      ALLOW_LOCAL_AUTH_IN_QAS: 'true',
+      CLAMAV_TIMEOUT_MS: '30000',
+    });
+    expect(env.MALWARE_SCAN_DRIVER).toBe('clamav');
+    expect(env.CLAMAV_HOST).toBe('127.0.0.1');
+    expect(env.CLAMAV_PORT).toBe(3310);
+    expect(env.CLAMAV_TIMEOUT_MS).toBe(30_000);
+  });
+  it.each([
+    ['CLAMAV_TIMEOUT_MS', '30001'],
+    ['CLAMAV_TIMEOUT_MS', '0'],
+    ['CLAMAV_PORT', '0'],
+    ['CLAMAV_HOST', 'host with spaces'],
+    ['FILE_CLEANUP_INTERVAL_MS', '59999'],
+    ['FILE_CLEANUP_INTERVAL_MS', '86400001'],
+    ['FILE_CLEANUP_PAGE_SIZE', '0'],
+    ['FILE_CLEANUP_PAGE_SIZE', '101'],
+    ['FILE_CLEANUP_MAX_PAGES', '0'],
+    ['FILE_CLEANUP_MAX_PAGES', '101'],
+  ])('rejects invalid %s=%s', (key, value) => {
+    expect(() => loadApiEnv({ ...minimal, [key]: value })).toThrow(new RegExp(key));
   });
 });

@@ -1,3 +1,4 @@
+import { lockFileObject } from '../../../../shared/persistence/file-object-lock';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
@@ -127,9 +128,15 @@ export class DrizzleProductCatalogRepository implements ProductCatalogRepository
       ),
     );
   }
-  insert(catalog: ProductCatalog, audit: AuditEntry): Promise<CatalogWithShares> {
+  insert(
+    catalog: ProductCatalog,
+    audit: AuditEntry,
+    assertObjectAvailable?: () => Promise<void>,
+  ): Promise<CatalogWithShares> {
     return this.safe(() =>
       this.db.transaction(async (tx) => {
+        await lockFileObject(tx, catalog.objectKey);
+        await assertObjectAvailable?.();
         const { code: _code, ...values } = catalog;
         const [saved] = await tx.insert(productCatalogs).values(values).returning();
         await recordAuditWithinTransaction(tx, audit);
@@ -141,6 +148,7 @@ export class DrizzleProductCatalogRepository implements ProductCatalogRepository
     id: string,
     expected: CatalogVersion,
     change: (current: CatalogWithShares) => CatalogMutation,
+    assertObjectAvailable?: () => Promise<void>,
   ): Promise<CatalogWithShares> {
     return this.safe(() =>
       this.db.transaction(async (tx) => {
@@ -165,6 +173,9 @@ export class DrizzleProductCatalogRepository implements ProductCatalogRepository
         )
           throw new ConflictError('The catalog or share was modified by another request');
         const changed = change({ catalog: catalogRecord(catalog), shares });
+        if (changed.catalog.objectKey !== catalog.objectKey)
+          await lockFileObject(tx, changed.catalog.objectKey);
+        await assertObjectAvailable?.();
         const { code: _code, ...catalogValues } = changed.catalog;
         await tx.update(productCatalogs).set(catalogValues).where(eq(productCatalogs.id, id));
         for (const share of changed.shares) {

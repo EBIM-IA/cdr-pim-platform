@@ -193,6 +193,10 @@ export class CreateProductCatalogUseCase {
     return this.repository.insert(
       catalog,
       audit(catalog, actor, AuditAction.Created, { catalog: { after: metadataSnapshot(catalog) } }),
+      async () => {
+        if (!(await this.storage.exists(catalog.objectKey)))
+          throw new NotFoundError('StoredCatalog', catalog.id);
+      },
     );
   }
 }
@@ -218,25 +222,38 @@ export class UpdateProductCatalogUseCase {
     const fileName = file ? validateCatalogPdf(file) : undefined;
     const objectKey = file ? `product-catalogs/${catalogId}/${newUuid()}.pdf` : undefined;
     if (file && objectKey) await this.storage.put(objectKey, file.content);
-    return this.repository.mutate(catalogId, expected, (current) => {
-      available(current);
-      const catalog: ProductCatalog = {
-        ...current.catalog,
-        ...metadata,
-        ...(file && objectKey && fileName
-          ? { fileName, fileSize: file.content.length, objectKey }
-          : {}),
-        updatedBy: actorSnapshot(actor),
-        updatedAt: nextCatalogVersion(current.catalog.updatedAt, this.clock.now()),
-      };
-      return {
-        catalog,
-        shares: current.shares,
-        audit: audit(catalog, actor, AuditAction.Updated, {
-          catalog: { before: metadataSnapshot(current.catalog), after: metadataSnapshot(catalog) },
-        }),
-      };
-    });
+    return this.repository.mutate(
+      catalogId,
+      expected,
+      (current) => {
+        available(current);
+        const catalog: ProductCatalog = {
+          ...current.catalog,
+          ...metadata,
+          ...(file && objectKey && fileName
+            ? { fileName, fileSize: file.content.length, objectKey }
+            : {}),
+          updatedBy: actorSnapshot(actor),
+          updatedAt: nextCatalogVersion(current.catalog.updatedAt, this.clock.now()),
+        };
+        return {
+          catalog,
+          shares: current.shares,
+          audit: audit(catalog, actor, AuditAction.Updated, {
+            catalog: {
+              before: metadataSnapshot(current.catalog),
+              after: metadataSnapshot(catalog),
+            },
+          }),
+        };
+      },
+      file && objectKey
+        ? async () => {
+            if (!(await this.storage.exists(objectKey)))
+              throw new NotFoundError('StoredCatalog', catalogId);
+          }
+        : undefined,
+    );
   }
 }
 @Injectable()

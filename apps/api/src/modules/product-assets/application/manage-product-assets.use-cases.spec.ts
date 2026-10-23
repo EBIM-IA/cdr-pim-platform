@@ -39,7 +39,7 @@ describe('UploadProductAssetUseCase', () => {
     expect(repository.listByProductIds).toHaveBeenCalledTimes(1);
   });
 
-  it('deletes the newly stored object when the metadata+audit transaction fails', async () => {
+  it('retains a failed upload for the durable 30-day orphan reconciler', async () => {
     const deleted: string[] = [];
     const storage = storageFake(deleted);
     const repository = repositoryFake();
@@ -64,8 +64,7 @@ describe('UploadProductAssetUseCase', () => {
       ),
     ).rejects.toThrow('database unavailable');
 
-    expect(deleted).toHaveLength(1);
-    expect(deleted[0]).toMatch(/^stored\/products\/.+\/documents\/.+\.pdf$/);
+    expect(deleted).toHaveLength(0);
   });
 
   it('supplies the metadata transaction with a field-level audit event', async () => {
@@ -193,6 +192,7 @@ function storageFake(deleted: string[]): AssetBinaryStoragePort {
       checksum: 'checksum',
     }),
     get: async () => new Uint8Array(),
+    exists: async () => true,
     delete: async (key) => {
       deleted.push(key);
     },

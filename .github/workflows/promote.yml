@@ -136,6 +136,14 @@ jobs:
       TARGET_ENVIRONMENT: ${{ needs.validate-input.outputs.environment }}
 
     steps:
+      # Promotion tooling belongs to this workflow revision, including when IMAGE_TAG
+      # selects an older application for rollback. Never execute tooling from that image.
+      - name: Check out promotion tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
@@ -275,6 +283,12 @@ jobs:
                     .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
             ' "td-$app.json" > "new-td-$app.json"
 
+            if [[ "$app" == 'api' ]]; then
+              python3 scripts/configure-api-file-protection.py \
+                "new-td-$app.json" "protected-td-$app.json"
+              mv "protected-td-$app.json" "new-td-$app.json"
+            fi
+
             new_td=$(aws ecs register-task-definition \
               --cli-input-json "file://new-td-$app.json" \
               --query 'taskDefinition.taskDefinitionArn' --output text)
@@ -303,6 +317,7 @@ jobs:
           WORKER_IMAGE: ${{ steps.digests.outputs.worker_image }}
         run: |
           set -euo pipefail
+          umask 077
           cluster="cdr-pim-$TARGET_ENVIRONMENT"
           status=0
 
@@ -317,12 +332,24 @@ jobs:
             task_definition=$(aws ecs describe-services --cluster "$cluster" \
               --services "cdr-pim-$TARGET_ENVIRONMENT-$app" \
               --query 'services[0].taskDefinition' --output text)
-            running=$(aws ecs describe-task-definition --task-definition "$task_definition" \
-              --query 'taskDefinition.containerDefinitions[0].image' --output text)
-            running_version=$(aws ecs describe-task-definition \
+            # Verify what ECS reports for the stable service, rather than the local JSON
+            # used to register it. Never emit the full definition or its environment.
+            aws ecs describe-task-definition \
               --task-definition "$task_definition" \
-              --query "taskDefinition.containerDefinitions[0].environment[?name=='APP_VERSION'].value | [0]" \
-              --output text)
+              --query taskDefinition > "running-td-$app.json"
+            running=$(jq -r '.containerDefinitions[0].image' "running-td-$app.json")
+            running_version=$(jq -r \
+              '[.containerDefinitions[0].environment[]? | select(.name == "APP_VERSION") | .value][0]' \
+              "running-td-$app.json")
+            protection_ok=true
+            if [[ "$app" == 'api' ]]; then
+              if ! python3 scripts/configure-api-file-protection.py --check "running-td-$app.json"; then
+                echo '::error::The running API task does not match the file protection policy.'
+                protection_ok=false
+                status=1
+              fi
+            fi
+            rm "running-td-$app.json"
 
             if [[ "$running" != "$expected" ]]; then
               echo "::error::$app is running $running, expected $expected"
@@ -332,8 +359,17 @@ jobs:
               echo "::error::$app reports version $running_version, expected $IMAGE_TAG"
               status=1
             fi
-            if [[ "$running" == "$expected" && "$running_version" == "$IMAGE_TAG" ]]; then
+            if [[ "$running" == "$expected" && "$running_version" == "$IMAGE_TAG" && "$protection_ok" == true ]]; then
               echo "OK  $app  $running  version=$running_version"
             fi
           done
           exit "$status"
+
+      - name: Read first file cleanup execution evidence
+        id: cleanup-evidence
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          set -euo pipefail
+          python3 scripts/probe-file-maintenance.py \
+            --environment "$TARGET_ENVIRONMENT" --version "$IMAGE_TAG"

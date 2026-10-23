@@ -29,11 +29,16 @@ export interface ProductCatalogRepositoryPort {
     readonly now: Date;
   }): Promise<{ items: CatalogWithShares[]; total: number; metrics: CatalogMetrics }>;
   find(id: string): Promise<CatalogWithShares | null>;
-  insert(catalog: ProductCatalog, audit: AuditEntry): Promise<CatalogWithShares>;
+  insert(
+    catalog: ProductCatalog,
+    audit: AuditEntry,
+    assertObjectAvailable?: () => Promise<void>,
+  ): Promise<CatalogWithShares>;
   mutate(
     id: string,
     expectedUpdatedAt: CatalogVersion,
     change: (current: CatalogWithShares) => CatalogMutation,
+    assertObjectAvailable?: () => Promise<void>,
   ): Promise<CatalogWithShares>;
   accessShared(
     digest: string,
@@ -46,6 +51,7 @@ export const PRODUCT_CATALOG_REPOSITORY = Symbol('ProductCatalogRepositoryPort')
 export interface CatalogBinaryStoragePort {
   put(key: string, content: Uint8Array): Promise<void>;
   get(key: string): Promise<Uint8Array>;
+  exists(key: string): Promise<boolean>;
 }
 export const CATALOG_BINARY_STORAGE = Symbol('CatalogBinaryStoragePort');
 export interface CatalogShareTokenPort {

@@ -101,6 +101,23 @@ const apiOnlySchema = z.object({
   STORAGE_DRIVER: storageDriverSchema.default('memory'),
   S3_BUCKET_ASSETS: z.string().optional(),
   S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().positive().max(3_600).default(900),
+
+  /** Hosted uploads fail closed unless the real ClamAV persistence gate is configured. */
+  MALWARE_SCAN_DRIVER: z.enum(['disabled', 'clamav']).default('disabled'),
+  CLAMAV_HOST: z
+    .string()
+    .trim()
+    .min(1)
+    .max(253)
+    .regex(/^[A-Za-z0-9._:-]+$/u)
+    .optional(),
+  CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+  CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1).max(30_000).default(20_000),
+
+  FILE_CLEANUP_ENABLED: booleanEnv(false),
+  FILE_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(3_600_000),
+  FILE_CLEANUP_PAGE_SIZE: z.coerce.number().int().min(1).max(100).default(50),
+  FILE_CLEANUP_MAX_PAGES: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 const durationUnitMs = {
@@ -153,6 +170,20 @@ export const apiEnvSchema = baseEnvSchema
         path: ['S3_BUCKET_ASSETS'],
         message: 'is required when STORAGE_DRIVER=s3',
       });
+    }
+    if (env.MALWARE_SCAN_DRIVER === 'clamav') {
+      if (!env.CLAMAV_HOST)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CLAMAV_HOST'],
+          message: 'is required when MALWARE_SCAN_DRIVER=clamav',
+        });
+      if (!env.CLAMAV_PORT)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CLAMAV_PORT'],
+          message: 'is required when MALWARE_SCAN_DRIVER=clamav',
+        });
     }
     if (
       Object.values(resolveAiCapabilityProviders(env)).includes('openai') &&
@@ -275,6 +306,13 @@ export const apiEnvSchema = baseEnvSchema
     }
     // Guard-rails that only apply once we are outside a developer laptop.
     if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
+      if (env.MALWARE_SCAN_DRIVER !== 'clamav') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['MALWARE_SCAN_DRIVER'],
+          message: 'must be "clamav" in qas/prd — uploaded files require real malware scanning',
+        });
+      }
       if (env.NODE_ENV !== 'production') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

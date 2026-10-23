@@ -1,3 +1,8 @@
+import { S3StorageMaintenanceAdapter } from './s3-storage-maintenance.adapter';
+import type {
+  ObjectStorageMaintenancePort,
+  StorageObjectIdentity,
+} from './object-storage-maintenance.port';
 import { createHash } from 'node:crypto';
 
 import {
@@ -31,8 +36,9 @@ export interface S3StorageOptions {
  * bucket's default encryption — defence in depth, so an object is never stored in the
  * clear even if the bucket policy is later changed by mistake.
  */
-export class S3StorageAdapter implements ObjectStoragePort {
+export class S3StorageAdapter implements ObjectStoragePort, ObjectStorageMaintenancePort {
   private readonly client: S3Client;
+  private readonly maintenance: S3StorageMaintenanceAdapter;
 
   constructor(private readonly options: S3StorageOptions) {
     this.client = new S3Client({
@@ -42,6 +48,7 @@ export class S3StorageAdapter implements ObjectStoragePort {
           { endpoint: options.endpoint, forcePathStyle: true }
         : {}),
     });
+    this.maintenance = new S3StorageMaintenanceAdapter(options, this.client);
   }
 
   async put(command: PutObjectCommand): Promise<StoredObject> {
@@ -99,7 +106,9 @@ export class S3StorageAdapter implements ObjectStoragePort {
   async exists(key: string): Promise<boolean> {
     assertSafeObjectKey(key);
     try {
-      await this.client.send(new HeadObjectCommand({ Bucket: this.options.bucket, Key: key }));
+      await this.client.send(new HeadObjectCommand({ Bucket: this.options.bucket, Key: key }), {
+        abortSignal: AbortSignal.timeout(10000),
+      });
       return true;
     } catch (error) {
       if (isNotFound(error)) return false;
@@ -130,7 +139,16 @@ export class S3StorageAdapter implements ObjectStoragePort {
     );
   }
 
+  listPage(input: { prefix: string; cursor?: string | null; limit: number }) {
+    return this.maintenance.listPage(input);
+  }
+
+  purgeIdentity(object: StorageObjectIdentity) {
+    return this.maintenance.purgeIdentity(object);
+  }
+
   destroy(): void {
+    this.maintenance.destroy();
     this.client.destroy();
   }
 }

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { OBJECT_STORAGE, type ObjectStoragePort } from '@cdr/storage';
-import { DependencyUnavailableError } from '@cdr/shared';
+import { DependencyUnavailableError, isDomainError } from '@cdr/shared';
 import type { CatalogBinaryStoragePort } from '../domain/ports/product-catalog.port';
 
 @Injectable()
@@ -9,14 +9,24 @@ export class PlatformCatalogStorageAdapter implements CatalogBinaryStoragePort {
   async put(key: string, content: Uint8Array): Promise<void> {
     try {
       await this.storage.put({ key, content, mimeType: 'application/pdf' });
-    } catch {
+    } catch (error) {
+      if (isDomainError(error)) throw error;
       throw new DependencyUnavailableError('catalog-storage');
     }
   }
   async get(key: string): Promise<Uint8Array> {
     try {
       return await this.storage.get(key);
-    } catch {
+    } catch (error) {
+      if (isDomainError(error)) throw error;
+      throw new DependencyUnavailableError('catalog-storage');
+    }
+  }
+  async exists(key: string): Promise<boolean> {
+    try {
+      return await this.storage.exists(key);
+    } catch (error) {
+      if (isDomainError(error)) throw error;
       throw new DependencyUnavailableError('catalog-storage');
     }
   }
