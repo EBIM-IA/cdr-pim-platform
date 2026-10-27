@@ -137,7 +137,10 @@ describe('CatalogQualityWorkspace', () => {
       product: { ...sheet.product, id: second.id, sku: second.sku },
     });
     render(<CatalogQualityWorkspace workspace={workspace} />);
-    await screen.findByText('6301 · 50% completo');
+    // The selected summary can render before the detail effect starts loading assets.
+    // Wait for the evaluated attributes table, which requires both requests to settle.
+    await screen.findByRole('table');
+    expect(screen.getByText('6301 · 50% completo')).toBeInTheDocument();
     expect(screen.getByLabelText('SKU en contexto')).toHaveValue(second.id);
     expect(fetchProductAttributeSheet).toHaveBeenCalledTimes(1);
     expect(fetchProductAttributeSheet).toHaveBeenCalledWith(second.id, expect.any(AbortSignal));
