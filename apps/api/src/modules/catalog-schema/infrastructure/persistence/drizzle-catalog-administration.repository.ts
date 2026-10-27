@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Uuid } from '@cdr/shared';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
 import { DATABASE } from '../../../../shared/tokens';
@@ -20,23 +20,53 @@ import {
   attributeDefinitions,
   attributeTemplates,
   catalogCategories,
+  productTemplateAssignments,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
   templateAssetRequirements,
 } from './catalog-schema.tables';
 import { recordAuditWithin } from './record-audit-within-transaction';
 
+/** Accumulates assignments through parent IDs, independently of display-path formats. */
+export function categorySkuCounts(
+  categories: readonly { readonly id: string; readonly parentId: string | null }[],
+  assignments: readonly { readonly categoryId: string; readonly count: number }[],
+): ReadonlyMap<string, number> {
+  const parents = new Map(categories.map((category) => [category.id, category.parentId]));
+  const counts = new Map(categories.map((category) => [category.id, 0]));
+  for (const assignment of assignments) {
+    let categoryId: string | null = assignment.categoryId;
+    const visited = new Set<string>();
+    while (categoryId && parents.has(categoryId) && !visited.has(categoryId)) {
+      visited.add(categoryId);
+      counts.set(categoryId, (counts.get(categoryId) ?? 0) + assignment.count);
+      categoryId = parents.get(categoryId) ?? null;
+    }
+  }
+  return counts;
+}
+
 @Injectable()
 export class DrizzleCatalogAdministrationRepository implements CatalogAdministrationRepositoryPort {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
   async listCategories(includeInactive: boolean): Promise<readonly AdminCatalogCategory[]> {
-    const rows = await this.db
-      .select()
-      .from(catalogCategories)
-      .where(includeInactive ? undefined : eq(catalogCategories.active, true))
-      .orderBy(catalogCategories.path);
-    return rows.map(toCategory);
+    const rows = await this.db.select().from(catalogCategories).orderBy(catalogCategories.path);
+    const counts = await this.db
+      .select({ categoryId: attributeTemplates.categoryId, count: sql<number>`count(*)::integer` })
+      .from(productTemplateAssignments)
+      .innerJoin(
+        attributeTemplates,
+        eq(attributeTemplates.id, productTemplateAssignments.templateId),
+      )
+      .groupBy(attributeTemplates.categoryId);
+    const totals = categorySkuCounts(rows, counts);
+    return rows
+      .filter((row) => includeInactive || row.active)
+      .map((row) => ({
+        ...toCategory(row),
+        skuCount: totals.get(row.id) ?? 0,
+      }));
   }
 
   async updateCategory(

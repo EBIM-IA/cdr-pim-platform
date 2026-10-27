@@ -2,7 +2,7 @@ import { loadApiEnv } from '@cdr/config';
 import { JwtService } from '@nestjs/jwt';
 import { describe, expect, it } from 'vitest';
 
-import { Role } from '../domain/entities/role';
+import { Capability, Role, actorHasCapability } from '../domain/entities/role';
 import { JwtTokenService } from './jwt-token.service';
 
 const env = loadApiEnv({
@@ -71,5 +71,32 @@ describe('JwtTokenService', () => {
     );
 
     await expect(tokens.verifyAccessToken(token)).rejects.toThrow('Invalid or expired token');
+  });
+
+  it('recomputes consultation permissions from roles and ignores obsolete capability claims', async () => {
+    const obsoleteWrites = [
+      Capability.CatalogWrite,
+      Capability.AttributesWrite,
+      Capability.ApplicationsWrite,
+      Capability.EquivalencesWrite,
+      Capability.ProductCatalogsWrite,
+      Capability.ProductCatalogsShare,
+    ];
+    const token = await jwt.signAsync(
+      { sub: actor.id, email: actor.email, roles: [Role.Purchasing], capabilities: obsoleteWrites },
+      {
+        secret: env.JWT_ACCESS_SECRET,
+        algorithm: 'HS256',
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
+        jwtid: 'older-purchasing-session',
+        expiresIn: '15m',
+      },
+    );
+    const verified = await tokens.verifyAccessToken(token);
+    expect(verified).not.toHaveProperty('capabilities');
+    for (const capability of obsoleteWrites)
+      expect(actorHasCapability(verified, capability)).toBe(false);
+    expect(actorHasCapability(verified, Capability.CatalogRead)).toBe(true);
   });
 });

@@ -101,12 +101,12 @@ describe('flujos del diseño conectados al catálogo', () => {
     expect(api.getAdminTemplate).toHaveBeenCalledTimes(1);
   });
 
-  it('contrae el árbol y permite abrir la plantilla desde el detalle de la categoría', () => {
+  it('muestra el árbol AX con columnas fijas y abre y oculta el detalle sin perder la selección', () => {
     render(
       <CategoryTreePanel
         rows={[
-          { category, depth: 0, leaf: false },
-          { category: child, depth: 1, leaf: true },
+          { category: { ...category, skuCount: 4 }, depth: 0, leaf: false },
+          { category: { ...child, skuCount: 4 }, depth: 1, leaf: true },
         ]}
         templatesForCategory={(id) => (id === child.id ? [template] : [])}
         searching={false}
@@ -115,6 +115,11 @@ describe('flujos del diseño conectados al catálogo', () => {
         onSetActive={vi.fn()}
       />,
     );
+    expect(screen.getByText('Categoría', { exact: true })).toBeVisible();
+    expect(screen.getByText('Plantilla', { exact: true })).toBeVisible();
+    expect(screen.getByText('SKU', { exact: true })).toBeVisible();
+    expect(screen.getByLabelText('SKU en Rodamientos')).toHaveTextContent('4');
+    expect(screen.queryByLabelText('Detalle de la categoría')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Contraer Rodamientos' }));
     expect(
       screen.queryByRole('button', { name: 'Seleccionar categoría Rígidos' }),
@@ -125,6 +130,14 @@ describe('flujos del diseño conectados al catálogo', () => {
       'href',
       `/templates?template=${template.id}`,
     );
+    expect(screen.getByRole('link', { name: 'Ver productos' })).toHaveAttribute(
+      'href',
+      `/products?category=${child.id}`,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar detalle' }));
+    expect(screen.queryByLabelText('Detalle de la categoría')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Detalle' }));
+    expect(screen.getByRole('link', { name: template.name })).toBeVisible();
   });
 
   it('guarda el interruptor con la versión vigente y refleja la respuesta persistida', async () => {

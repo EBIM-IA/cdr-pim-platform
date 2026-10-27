@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { ConflictError, FixedClock, ValidationError } from '@cdr/shared';
+import { ConflictError, FixedClock, ForbiddenError, ValidationError } from '@cdr/shared';
 import type { Uuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -14,9 +14,9 @@ import { ReassignProductTemplateUseCase } from './reassign-product-template.use-
 const id = (): Uuid => randomUUID() as Uuid;
 const now = new Date('2026-10-20T14:00:00.000Z');
 const actor: AuthenticatedActor = {
-  id: 'buyer-1',
-  email: 'compras@casadelruliman.com',
-  roles: [Role.Purchasing],
+  id: 'admin-1',
+  email: 'admin@casadelruliman.com',
+  roles: [Role.Administrator],
 };
 
 function repository(result: ReassignProductTemplateResult) {
@@ -26,6 +26,20 @@ function repository(result: ReassignProductTemplateResult) {
 }
 
 describe('ReassignProductTemplateUseCase', () => {
+  it.each([Role.Purchasing, Role.Sales, Role.Editor, Role.Viewer])(
+    'rejects a %s reassignment before accessing persistence',
+    async (role) => {
+      const assignments = repository({ kind: 'product_not_found' });
+      await expect(
+        new ReassignProductTemplateUseCase(assignments, new FixedClock(now)).execute(
+          { productId: id(), templateId: id(), expectedTemplateId: id() },
+          { ...actor, roles: [role] },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      expect(assignments.reassign).not.toHaveBeenCalled();
+    },
+  );
+
   it('reassigns a product to another variant without deriving a client mapping', async () => {
     const productId = id();
     const previousTemplateId = id();
@@ -62,7 +76,7 @@ describe('ReassignProductTemplateUseCase', () => {
         productId,
         templateId,
         expectedTemplateId: previousTemplateId,
-        roles: ['COMPRAS'],
+        roles: ['ADMINISTRADOR'],
         now,
         audit: expect.objectContaining({ actorId: actor.id }),
       }),

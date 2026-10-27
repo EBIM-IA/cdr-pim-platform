@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listApplications, updateApplication } from '@/lib/operational-api';
 import { downloadXlsx } from '@/lib/tabular-export';
+import { findApplicationUnifiedCodes } from '@/lib/application-search';
+import type * as ApplicationSearch from '@/lib/application-search';
 
 import { ApplicationsWorkspace } from './applications-workspace';
 
@@ -14,6 +16,10 @@ vi.mock('@/lib/operational-api', () => ({
   deactivateApplication: vi.fn(),
 }));
 vi.mock('@/lib/tabular-export', () => ({ downloadXlsx: vi.fn(), downloadCsv: vi.fn() }));
+vi.mock('@/lib/application-search', async (original) => ({
+  ...(await original<typeof ApplicationSearch>()),
+  findApplicationUnifiedCodes: vi.fn(),
+}));
 const first: GroupApplicationDto = {
   id: 'application-1',
   groupId: 'group-1',
@@ -49,6 +55,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.history.replaceState({}, '', '/applications');
   vi.mocked(listApplications).mockResolvedValue([first, second]);
+  vi.mocked(findApplicationUnifiedCodes).mockResolvedValue(new Set());
   vi.mocked(updateApplication).mockResolvedValue({
     ...first,
     make: 'LEXUS',
@@ -100,7 +107,7 @@ describe('applications reference layout', () => {
     expect(exported.rows[0]).not.toContain('NISSAN');
   });
 
-  it('keeps inline updates persistent and disables import/selection for a read-only role', async () => {
+  it('keeps inline updates persistent and removes write and upload-template controls for a read-only role', async () => {
     const { unmount } = render(<ApplicationsWorkspace canWrite />);
     await screen.findByRole('table');
     fireEvent.click(
@@ -117,8 +124,66 @@ describe('applications reference layout', () => {
     );
     unmount();
     render(<ApplicationsWorkspace canWrite={false} />);
-    expect(await screen.findByRole('button', { name: 'Importar' })).toBeDisabled();
     expect(await screen.findByLabelText('Seleccionar aplicación TOYOTA COROLLA')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plantilla' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Agregar fila' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
+  });
+
+  it('combines vehicle terms across columns and clears its active search without a catalog lookup', async () => {
+    render(<ApplicationsWorkspace canWrite={false} />);
+    await screen.findByRole('table');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar aplicaciones' }), {
+      target: { value: 'toyota corolla 2014' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+    expect(screen.getByText('TOYOTA')).toBeVisible();
+    expect(screen.queryByText('NISSAN')).not.toBeInTheDocument();
+    expect(findApplicationUnifiedCodes).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar búsqueda toyota corolla 2014' }));
+    expect(screen.getByText('NISSAN')).toBeVisible();
+  });
+
+  it('finds applications through real product unified codes when the query is a SKU', async () => {
+    vi.mocked(listApplications).mockResolvedValue([first, { ...second, unifiedCode: 'UNI-OTHER' }]);
+    vi.mocked(findApplicationUnifiedCodes).mockResolvedValue(new Set(['UNI-6205']));
+    render(<ApplicationsWorkspace canWrite={false} />);
+    await screen.findByRole('table');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar aplicaciones' }), {
+      target: { value: '6205-2RS1 SKF' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+    await waitFor(() =>
+      expect(findApplicationUnifiedCodes).toHaveBeenCalledWith(
+        '6205-2RS1 SKF',
+        ['UNI-6205', 'UNI-OTHER'],
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(await screen.findByText('TOYOTA')).toBeVisible();
+    expect(screen.queryByText('NISSAN')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    expect(vi.mocked(downloadXlsx).mock.calls[0]![0].rows).toHaveLength(1);
+  });
+
+  it('reports an incomplete product lookup as an error and allows retry without exporting partial rows', async () => {
+    vi.mocked(findApplicationUnifiedCodes)
+      .mockRejectedValueOnce(new Error('La consulta del catálogo falló.'))
+      .mockResolvedValueOnce(new Set(['UNI-6205']));
+    render(<ApplicationsWorkspace canWrite={false} />);
+    await screen.findByRole('table');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar aplicaciones' }), {
+      target: { value: 'SKU-SKF' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+    expect(
+      await screen.findByRole('heading', { name: 'No pudimos completar la búsqueda' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Sin aplicaciones' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar búsqueda' }));
+    expect(await screen.findByText('TOYOTA')).toBeVisible();
   });
 });

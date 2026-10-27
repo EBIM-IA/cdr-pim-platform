@@ -230,8 +230,11 @@ describe('designer equivalence screens', () => {
     expect(screen.queryByRole('columnheader', { name: /Estado SKU/u })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /Descripción/u })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Homólogos 1' }));
-    expect(screen.getByRole('button', { name: 'Agregar fila' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Agregar fila' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Importar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plantilla' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Eliminar/u })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Seleccionar homólogo EXT-6205')).toBeDisabled();
     fireEvent.click(screen.getByRole('tab', { name: 'OEM 1' }));
     expect(screen.getByText('TOYOTA, LEXUS')).toBeVisible();

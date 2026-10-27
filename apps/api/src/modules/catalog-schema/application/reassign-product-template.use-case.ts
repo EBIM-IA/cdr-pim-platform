@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   type Clock,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   ValidationError,
   assertUuid,
@@ -10,7 +11,11 @@ import {
 } from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
-import type { AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  type AuthenticatedActor,
+  Capability,
+  actorHasCapability,
+} from '../../identity/domain/entities/role';
 import {
   PRODUCT_TEMPLATE_ASSIGNMENT_REPOSITORY,
   type ProductTemplateAssignment,
@@ -40,6 +45,9 @@ export class ReassignProductTemplateUseCase {
     command: ReassignProductTemplateCommand,
     actor: AuthenticatedActor,
   ): Promise<ReassignedProductTemplate> {
+    if (!actorHasCapability(actor, Capability.AttributesWrite)) {
+      throw new ForbiddenError('This profile can only consult product attributes');
+    }
     const productId = assertUuid(command.productId, 'productId');
     const templateId = assertUuid(command.templateId, 'templateId');
     const expectedTemplateId = assertUuid(command.expectedTemplateId, 'expectedTemplateId');

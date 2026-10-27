@@ -338,6 +338,8 @@ export const adminCatalogCategorySchema = z.object({
   position: z.number().int().min(0),
   active: z.boolean(),
   updatedAt: z.string().datetime(),
+  /** Persisted SKU assignments in this category and all its descendants. */
+  skuCount: z.number().int().min(0).optional(),
 });
 export type AdminCatalogCategoryDto = z.infer<typeof adminCatalogCategorySchema>;
 

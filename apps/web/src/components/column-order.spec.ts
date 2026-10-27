@@ -9,6 +9,7 @@ import {
   reconcileColumnOrder,
   usePersistentColumnOrder,
 } from '@/components/column-order';
+import { resetColumnPreferences } from '@/components/column-resize';
 
 describe('orden persistente de columnas', () => {
   beforeEach(() => window.localStorage.clear());
@@ -26,6 +27,12 @@ describe('orden persistente de columnas', () => {
   it('mueve una columna antes o después del destino según la dirección del arrastre', () => {
     expect(moveColumnInOrder(['a', 'b', 'c'], 'a', 'c')).toEqual(['b', 'c', 'a']);
     expect(moveColumnInOrder(['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'a', 'b']);
+  });
+
+  it('mantiene las columnas fijas delante al restaurar preferencias anteriores', () => {
+    expect(
+      reconcileColumnOrder(['brand', 'sku', 'name'], ['sku', 'name', 'brand'], ['sku']),
+    ).toEqual(['sku', 'brand', 'name']);
   });
 
   it('aísla la preferencia por usuario y pantalla', () => {
@@ -70,5 +77,8 @@ describe('orden persistente de columnas', () => {
 
     expect(restored.result.current.orderedColumnKeys).toEqual(['make', 'model', 'year']);
     expect(window.localStorage.getItem('cdr:column-order:actor-1:applications')).toBeNull();
+    act(() => restored.result.current.getColumnControl('model', 'Modelo').onMoveLeft());
+    act(() => resetColumnPreferences('actor-1'));
+    expect(restored.result.current.orderedColumnKeys).toEqual(['make', 'model', 'year']);
   });
 });

@@ -378,14 +378,16 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           >
             <FileSpreadsheet className="size-3.5" aria-hidden="true" /> Exportar Excel
           </Button>
-          <a
-            className={styles.example}
-            href="/templates/documentos_ejemplo.zip"
-            download
-            title="Ejemplo de estructura: sustituye el SKU y adjunta tus archivos reales"
-          >
-            ZIP de ejemplo
-          </a>
+          {canWrite ? (
+            <a
+              className={styles.example}
+              href="/templates/documentos_ejemplo.zip"
+              download
+              title="Ejemplo de estructura: sustituye el SKU y adjunta tus archivos reales"
+            >
+              ZIP de ejemplo
+            </a>
+          ) : null}
           <label className={styles.search}>
             <Search className="size-3.5" aria-hidden="true" />
             <span className="sr-only">Buscar SKU</span>
@@ -490,7 +492,11 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
                 <tr className={styles.groups}>
                   <th>SKU</th>
                   <th colSpan={7}>Imagen y Datos Base ERP · Solo Lectura</th>
-                  <th colSpan={5}>Documentos · «Cargar» o arrastra el archivo a la celda</th>
+                  <th colSpan={5}>
+                    {canWrite
+                      ? 'Documentos · «Cargar» o arrastra el archivo a la celda'
+                      : 'Documentos disponibles'}
+                  </th>
                   <th>Control</th>
                 </tr>
                 <tr>

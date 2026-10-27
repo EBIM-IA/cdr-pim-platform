@@ -170,9 +170,7 @@ describe('CatalogWorkbookTable', () => {
     const { container } = render(<CatalogWorkbookTable canEdit />);
     await screen.findByRole('link', { name: 'SKU-1' });
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Mover columna Descripción a la izquierda' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mover columna Plantilla a la izquierda' }));
 
     expect(
       [
@@ -180,9 +178,13 @@ describe('CatalogWorkbookTable', () => {
           'thead tr:nth-child(2) [data-column-key]',
         ),
       ]
-        .slice(0, 2)
+        .slice(0, 3)
         .map((header) => header.dataset.columnKey),
-    ).toEqual(['base:name', 'base:sku']);
+    ).toEqual(['base:sku', 'base:template', 'base:name']);
+    expect(screen.queryByRole('button', { name: 'Arrastrar columna SKU' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Mover columna Plantilla a la izquierda' }),
+    ).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /CSV · 2 filas$/u }));
     await waitFor(() => {
@@ -193,7 +195,7 @@ describe('CatalogWorkbookTable', () => {
         'catalogo-pim-vista-filtrada',
       );
       const headers = mocks.downloadCsv.mock.calls.at(-1)?.[0].headers;
-      expect(headers.slice(0, 2)).toEqual(['Descripción', 'SKU']);
+      expect(headers.slice(0, 3)).toEqual(['SKU', 'Plantilla', 'Descripción']);
     });
   });
 

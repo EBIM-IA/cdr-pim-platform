@@ -11,7 +11,11 @@ import {
 } from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
-import type { AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  type AuthenticatedActor,
+  Capability,
+  actorHasCapability,
+} from '../../identity/domain/entities/role';
 import {
   type CatalogAttributeValue,
   AttributeValueSource,
@@ -52,6 +56,9 @@ export class UpdateProductAttributesUseCase {
     command: UpdateProductAttributesCommand,
     actor: AuthenticatedActor,
   ): Promise<UpdatedProductAttributes> {
+    if (!actorHasCapability(actor, Capability.AttributesWrite)) {
+      throw new ForbiddenError('This profile can only consult product attributes');
+    }
     const productId = assertUuid(command.productId, 'productId');
     if (command.updates.length === 0) {
       throw new ValidationError('At least one attribute update is required');

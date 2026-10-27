@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { cn } from '@/lib/utils';
+import { COLUMN_PREFERENCES_RESET } from '@/components/column-resize';
 
 const ColumnOrderUserContext = createContext('guest');
 const DRAG_DATA_TYPE = 'application/x-cdr-column-key';
@@ -32,6 +33,7 @@ export function ColumnOrderUserProvider({
 export function reconcileColumnOrder<Key extends string>(
   saved: readonly string[],
   available: readonly Key[],
+  fixed: readonly Key[] = [],
 ): Key[] {
   const valid = new Set<string>(available);
   const seen = new Set<string>();
@@ -40,7 +42,11 @@ export function reconcileColumnOrder<Key extends string>(
     seen.add(key);
     return true;
   });
-  return [...restored, ...available.filter((key) => !seen.has(key))];
+  const order = [...restored, ...available.filter((key) => !seen.has(key))];
+  return [
+    ...available.filter((key) => fixed.includes(key)),
+    ...order.filter((key) => !fixed.includes(key)),
+  ];
 }
 
 export function moveColumnInOrder<Key extends string>(
@@ -78,15 +84,22 @@ export interface ColumnOrderControl<Key extends string> {
 export function usePersistentColumnOrder<Key extends string>({
   screenKey,
   columnKeys,
+  fixedColumnKeys = [],
 }: {
   readonly screenKey: string;
   readonly columnKeys: readonly Key[];
+  readonly fixedColumnKeys?: readonly Key[];
 }) {
   const userId = useContext(ColumnOrderUserContext);
   const availableSignature = columnKeys.join('\u001f');
   const available = useMemo(
     () => availableSignature.split('\u001f').filter(Boolean) as Key[],
     [availableSignature],
+  );
+  const fixedSignature = fixedColumnKeys.join('\u001f');
+  const fixed = useMemo(
+    () => fixedSignature.split('\u001f').filter(Boolean) as Key[],
+    [fixedSignature],
   );
   const storageKey = useMemo(() => columnOrderStorageKey(userId, screenKey), [screenKey, userId]);
   const [orderedColumnKeys, setOrderedColumnKeys] = useState<Key[]>(available);
@@ -98,13 +111,21 @@ export function usePersistentColumnOrder<Key extends string>({
       const raw = window.localStorage.getItem(storageKey);
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed) && parsed.every((key) => typeof key === 'string')) {
-        restored = reconcileColumnOrder(parsed, available);
+        restored = reconcileColumnOrder(parsed, available, fixed);
       }
     } catch {
       // Storage is optional in hardened/private modes; the default order remains usable.
     }
     setOrderedColumnKeys(restored);
-  }, [available, storageKey]);
+  }, [available, fixed, storageKey]);
+
+  useEffect(() => {
+    const reset = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === userId) setOrderedColumnKeys(available);
+    };
+    window.addEventListener(COLUMN_PREFERENCES_RESET, reset);
+    return () => window.removeEventListener(COLUMN_PREFERENCES_RESET, reset);
+  }, [available, userId]);
 
   const persist = useCallback(
     (next: Key[]) => {
@@ -120,21 +141,22 @@ export function usePersistentColumnOrder<Key extends string>({
 
   const move = useCallback(
     (source: Key, target: Key) => {
+      if (fixed.includes(source) || fixed.includes(target)) return;
       persist(moveColumnInOrder(orderedColumnKeys, source, target));
     },
-    [orderedColumnKeys, persist],
+    [fixed, orderedColumnKeys, persist],
   );
 
   const moveBy = useCallback(
     (key: Key, offset: -1 | 1) => {
       const index = orderedColumnKeys.indexOf(key);
       const target = orderedColumnKeys[index + offset];
-      if (index < 0 || !target) return;
+      if (index < 0 || !target || fixed.includes(key) || fixed.includes(target)) return;
       const next = [...orderedColumnKeys];
       [next[index], next[index + offset]] = [next[index + offset] as Key, next[index] as Key];
       persist(next);
     },
-    [orderedColumnKeys, persist],
+    [fixed, orderedColumnKeys, persist],
   );
 
   const resetOrder = useCallback(() => {
@@ -156,8 +178,9 @@ export function usePersistentColumnOrder<Key extends string>({
       return {
         columnKey,
         label,
-        canMoveLeft: index > 0,
-        canMoveRight: index >= 0 && index < orderedColumnKeys.length - 1,
+        canMoveLeft: index > fixed.length && !fixed.includes(columnKey),
+        canMoveRight:
+          index >= 0 && index < orderedColumnKeys.length - 1 && !fixed.includes(columnKey),
         dragging: draggingKey === columnKey,
         onMoveLeft: () => moveBy(columnKey, -1),
         onMoveRight: () => moveBy(columnKey, 1),
@@ -179,7 +202,7 @@ export function usePersistentColumnOrder<Key extends string>({
         },
       };
     },
-    [draggingKey, move, moveBy, orderedColumnKeys],
+    [draggingKey, fixed, move, moveBy, orderedColumnKeys],
   );
 
   return {

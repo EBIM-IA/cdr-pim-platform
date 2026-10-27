@@ -48,9 +48,14 @@ describe('RolesGuard', () => {
   });
 
   it('enforces capabilities without treating roles as a hierarchy', () => {
-    expect(
+    expect(() =>
       guardRequiring(undefined, false, [Capability.CatalogWrite]).canActivate(
         contextWith({ ...editor, roles: [Role.Purchasing] }),
+      ),
+    ).toThrow(ForbiddenError);
+    expect(
+      guardRequiring(undefined, false, [Capability.CatalogWrite]).canActivate(
+        contextWith({ ...editor, roles: [Role.Purchasing, Role.Administrator] }),
       ),
     ).toBe(true);
     expect(() =>

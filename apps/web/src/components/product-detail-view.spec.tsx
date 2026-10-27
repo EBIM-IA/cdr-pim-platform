@@ -301,7 +301,19 @@ describe('ProductDetailView operational data', () => {
     ).toBeInTheDocument();
     expect(rendered.queryByText('Publicado')).not.toBeInTheDocument();
     expect(rendered.queryByText('Regla pendiente')).not.toBeInTheDocument();
-    expect(rendered.getByText('Información PIM')).toBeInTheDocument();
+    expect(
+      rendered.queryByRole('button', { name: 'Editar enriquecimiento' }),
+    ).not.toBeInTheDocument();
+    expect(rendered.queryByRole('button', { name: 'Gestionar activos' })).not.toBeInTheDocument();
+    expect(rendered.queryByText('Fuente: Manual')).not.toBeInTheDocument();
+    expect(rendered.queryByText('Autoridad: PIM')).not.toBeInTheDocument();
+    expect(rendered.queryByText('Solo detalle')).not.toBeInTheDocument();
+    expect(
+      rendered.queryByRole('heading', { name: 'Atributos obligatorios faltantes' }),
+    ).not.toBeInTheDocument();
+    expect(rendered.queryByRole('tab', { name: 'Fuentes' })).not.toBeInTheDocument();
+    expect(rendered.queryByRole('tab', { name: 'Historial' })).not.toBeInTheDocument();
+    expect(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' })).toBeInTheDocument();
   });
 
   it('previews a technical sheet using only attributes enabled by the template', async () => {
@@ -432,6 +444,20 @@ describe('ProductDetailView operational data', () => {
       },
     };
     vi.mocked(fetchProductAttributeSheet).mockResolvedValue(editableSheet);
+    vi.mocked(patchProductAttributes).mockResolvedValue({
+      productId: product.id,
+      attributes: [
+        {
+          productId: product.id,
+          attributeKey: 'descripcion_interna',
+          value: 'Pastilla semimetálica',
+          version: 2,
+          source: 'manual',
+          updatedAt: '2026-10-27T10:00:00.000Z',
+          replicatedProductIds: [],
+        },
+      ],
+    });
     const view = render(
       <ProductDetailView productId={product.id} canReassignTemplate showCompleteness />,
     );
@@ -441,10 +467,16 @@ describe('ProductDetailView operational data', () => {
     );
 
     expect(rendered.queryByRole('textbox', { name: 'Código unificador' })).not.toBeInTheDocument();
-    fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
-      target: { value: 'Pastilla semimetálica' },
-    });
-    fireEvent.click(rendered.getByRole('button', { name: 'Guardar atributos' }));
+    const saveBar = rendered.getByRole('region', { name: 'Guardar cambios de la ficha' });
+    expect(saveBar).toHaveTextContent('0 cambios sin guardar');
+    expect(rendered.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+    expect(rendered.getByRole('button', { name: 'Descartar cambios' })).toBeDisabled();
+    expect(rendered.queryByRole('button', { name: 'Editar atributos' })).not.toBeInTheDocument();
+    const input = rendered.getByRole('textbox', { name: 'Descripción interna' });
+    fireEvent.change(input, { target: { value: 'Pastilla semimetálica' } });
+    expect(saveBar).toHaveTextContent('1 cambio sin guardar');
+    expect(input.closest('tr')).toHaveClass('bg-amber-50');
+    fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
 
     await waitFor(() =>
       expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
@@ -458,6 +490,9 @@ describe('ProductDetailView operational data', () => {
       }),
     );
     expect(await rendered.findByText('Cambios guardados para este SKU.')).toBeInTheDocument();
+    expect(input).toHaveValue('Pastilla semimetálica');
+    expect(saveBar).toHaveTextContent('0 cambios sin guardar');
+    expect(rendered.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
   });
 
   it('preserves unsaved technical edits when switching between product tabs', async () => {
@@ -492,7 +527,27 @@ describe('ProductDetailView operational data', () => {
     expect(patchProductAttributes).not.toHaveBeenCalled();
   });
 
-  it('keeps a discarded direct editor closed when switching tabs and allows explicitly reopening it', async () => {
+  it('keeps missing required attributes and source information visible for purchasing without completeness or editing', async () => {
+    const view = render(<ProductDetailView productId={product.id} showProductStatus />);
+    const rendered = within(view.container);
+
+    expect(await rendered.findByText('Fuente: Manual')).toBeInTheDocument();
+    expect(
+      rendered.getByRole('heading', { name: 'Atributos obligatorios faltantes' }),
+    ).toBeInTheDocument();
+    expect(
+      rendered.queryByRole('heading', { name: 'Completitud de plantilla' }),
+    ).not.toBeInTheDocument();
+    expect(rendered.queryByRole('heading', { name: 'Control PIM' })).not.toBeInTheDocument();
+    expect(
+      rendered.queryByRole('button', { name: 'Editar enriquecimiento' }),
+    ).not.toBeInTheDocument();
+    expect(rendered.queryByRole('button', { name: 'Gestionar activos' })).not.toBeInTheDocument();
+    expect(rendered.getByRole('tab', { name: 'Fuentes' })).toBeInTheDocument();
+    expect(rendered.getByRole('tab', { name: 'Historial' })).toBeInTheDocument();
+  });
+
+  it('discards changes without closing the direct editor and keeps the clean editor across tabs', async () => {
     vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
       ...sheet,
       schema: {
@@ -510,17 +565,16 @@ describe('ProductDetailView operational data', () => {
     const rendered = within(view.container);
     const input = await rendered.findByRole('textbox', { name: 'Descripción interna' });
     fireEvent.change(input, { target: { value: 'Cambio descartado' } });
-    fireEvent.click(rendered.getByRole('button', { name: 'Cancelar edición' }));
-    expect(
-      rendered.queryByRole('textbox', { name: 'Descripción interna' }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(rendered.getByRole('button', { name: 'Descartar cambios' }));
+    expect(input).toHaveValue('Pastilla cerámica');
+    expect(rendered.getByRole('button', { name: 'Descartar cambios' })).toBeDisabled();
+    expect(rendered.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+    expect(rendered.getByRole('region', { name: 'Guardar cambios de la ficha' })).toHaveTextContent(
+      '0 cambios sin guardar',
+    );
     fireEvent.click(rendered.getByRole('tab', { name: 'Aplicaciones' }));
     fireEvent.click(rendered.getByRole('tab', { name: 'Información técnica' }));
-    expect(
-      rendered.queryByRole('textbox', { name: 'Descripción interna' }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(rendered.getByRole('button', { name: 'Editar enriquecimiento' }));
-    expect(await rendered.findByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+    expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
       'Pastilla cerámica',
     );
     expect(patchProductAttributes).not.toHaveBeenCalled();
@@ -552,7 +606,7 @@ describe('ProductDetailView operational data', () => {
     fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
       target: { value: 'Valor en conflicto' },
     });
-    fireEvent.click(rendered.getByRole('button', { name: 'Guardar atributos' }));
+    fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
 
     expect(await rendered.findByRole('alert')).toHaveTextContent(
       'Otro usuario actualizó estos atributos',
@@ -622,7 +676,7 @@ describe('ProductDetailView operational data', () => {
     expect(rendered.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
       'Borrador preservado',
     );
-    fireEvent.click(rendered.getByRole('button', { name: 'Cancelar edición' }));
+    fireEvent.click(rendered.getByRole('button', { name: 'Descartar cambios' }));
     expect(selector).toBeEnabled();
   });
 

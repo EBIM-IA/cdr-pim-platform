@@ -632,6 +632,7 @@ export function ExcelTableHeader<Key extends string>({
         sortDirection === 'asc' ? 'ascending' : sortDirection === 'desc' ? 'descending' : 'none'
       }
       data-column-key={columnKey}
+      data-column-label={label}
       className={cn('relative px-3 py-3 font-semibold', className)}
     >
       <span className="flex min-w-max items-center gap-2">
@@ -660,16 +661,23 @@ export function ExcelTableHeader<Key extends string>({
           )}
         </button>
       </span>
-      <label className="mt-2 block min-w-28 normal-case tracking-normal">
+      <label className="mt-1 block min-w-28 normal-case tracking-normal">
         <span className="sr-only">Filtro de columna {label}</span>
         <Input
           type="search"
           value={expression}
           onChange={(event) => applyExpression(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              applyExpression('');
+            }
+          }}
           placeholder="Filtrar…"
           title={'Sintaxis: texto, texto*, *texto*, !texto, a|b, a..b, >10 o ""'}
           className={cn(
-            'h-7 min-w-28 rounded border bg-white px-2 text-[11px] font-normal normal-case tracking-normal',
+            'h-[22px] min-w-28 rounded border bg-white px-1.5 py-0.5 text-[11px] font-normal normal-case tracking-normal',
             filtered && 'border-primary bg-orange-50 text-orange-950',
           )}
         />

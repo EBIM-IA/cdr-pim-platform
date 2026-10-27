@@ -751,8 +751,12 @@ export function EquivalencesWorkspace({
         objective="Consulta las asignaciones que envía AX y mantiene homólogos y OEM por código unificador."
         actions={[
           'Filtra y ordena cualquier columna, consulta el grupo o abre la ficha de un SKU.',
-          'Agrega homólogos y OEM como filas nuevas; las celdas permitidas se guardan al salir.',
-          'Exporta las filas filtradas o descarga la plantilla de importación.',
+          ...(canWrite
+            ? [
+                'Agrega homólogos y OEM como filas nuevas; las celdas permitidas se guardan al salir.',
+                'Exporta las filas filtradas o descarga la plantilla de importación.',
+              ]
+            : ['Exporta las filas filtradas a Excel.']),
         ]}
         dataSource="Catálogo y relaciones persistidos en el PIM."
         limitation="AX gobierna el código unificador. No se registra sincronización con AX ni se fusionan fichas desde esta pantalla."
@@ -1032,7 +1036,7 @@ export function EquivalencesWorkspace({
               role="toolbar"
               aria-label={`Acciones de ${view === 'groups' ? 'Códigos unificadores' : kind === 'homologs' ? 'Homólogos' : 'Códigos OEM'}`}
             >
-              {view !== 'groups' ? (
+              {view !== 'groups' && canWrite ? (
                 <Button
                   disabled={!canWrite || saving || !!activeDraft}
                   onClick={() => setDrafts((current) => ({ ...current, [kind]: newDraft() }))}
@@ -1042,22 +1046,24 @@ export function EquivalencesWorkspace({
                   Nuevo
                 </Button>
               ) : null}
-              <Button
-                variant="outline"
-                disabled={
-                  view === 'groups' ||
-                  !canWrite ||
-                  saving ||
-                  !relationItems.some((row) => row.active && selected.has(row.id))
-                }
-                title={view === 'groups' ? 'Las asignaciones están gobernadas por AX' : undefined}
-                onClick={() =>
-                  setDeleteRows(relationItems.filter((row) => row.active && selected.has(row.id)))
-                }
-              >
-                <Trash2 />
-                Eliminar{selected.size ? ` (${selected.size})` : ''}
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="outline"
+                  disabled={
+                    view === 'groups' ||
+                    !canWrite ||
+                    saving ||
+                    !relationItems.some((row) => row.active && selected.has(row.id))
+                  }
+                  title={view === 'groups' ? 'Las asignaciones están gobernadas por AX' : undefined}
+                  onClick={() =>
+                    setDeleteRows(relationItems.filter((row) => row.active && selected.has(row.id)))
+                  }
+                >
+                  <Trash2 />
+                  Eliminar{selected.size ? ` (${selected.size})` : ''}
+                </Button>
+              ) : null}
               {view !== 'groups' && canWrite ? (
                 <Button asChild variant="outline">
                   <Link href={`/imports?view=new&target=${kind}`}>
@@ -1065,7 +1071,7 @@ export function EquivalencesWorkspace({
                     Importar
                   </Link>
                 </Button>
-              ) : (
+              ) : canWrite ? (
                 <Button
                   variant="outline"
                   disabled
@@ -1074,7 +1080,7 @@ export function EquivalencesWorkspace({
                   <Upload />
                   Importar
                 </Button>
-              )}
+              ) : null}
               <Button
                 variant="outline"
                 disabled={
@@ -1087,9 +1093,11 @@ export function EquivalencesWorkspace({
                 <Download />
                 Exportar Excel
               </Button>
-              <Button variant="ghost" onClick={() => exportTable(true)}>
-                Plantilla
-              </Button>
+              {canWrite ? (
+                <Button variant="ghost" onClick={() => exportTable(true)}>
+                  Plantilla
+                </Button>
+              ) : null}
               <Button
                 variant="ghost"
                 aria-label="Restaurar columnas"

@@ -10,6 +10,8 @@ import {
   catalogCategories,
   equivalenceGroupMembers,
   equivalenceGroups,
+  externalHomologs,
+  groupOemCodes,
   groupApplications,
   productAttributeValues,
   productAssets,
@@ -42,6 +44,145 @@ describe('DrizzleDynamicCatalogRepository', () => {
   });
   afterAll(() => database.close());
 
+  it('does not elevate denied administrator attributes using obsolete purchasing grants in a mixed profile', async () => {
+    const category = (await repository.listActiveCategories(['ADMINISTRADOR'])).find(
+      (item) => item.slug === BRAKE_PAD_CATEGORY_SLUG,
+    )!;
+    const schema = await repository.getActiveSchema(
+      category.id,
+      { templateId: category.templateId },
+      ['ADMINISTRADOR'],
+    );
+    const attribute = schema!.attributes.find((item) => item.sourceAuthority === 'pim')!;
+    for (const [role, grant] of [
+      ['ADMINISTRADOR', false],
+      ['COMPRAS', true],
+    ] as const) {
+      await database.db
+        .update(templateAttributeRoleAccess)
+        .set({ canView: true, canEdit: grant, canImport: grant })
+        .where(
+          and(
+            eq(templateAttributeRoleAccess.templateId, category.templateId),
+            eq(templateAttributeRoleAccess.attributeDefinitionId, attribute.id),
+            eq(templateAttributeRoleAccess.role, role),
+          ),
+        );
+    }
+    const roles = ['ADMINISTRADOR', 'COMPRAS'];
+    const mixed = await repository.getActiveSchema(
+      category.id,
+      { templateId: category.templateId },
+      roles,
+    );
+    expect(mixed!.attributes.find((item) => item.key === attribute.key)?.permissions).toMatchObject(
+      { edit: false, import: false },
+    );
+    const workbook = await repository.listWorkbook({
+      roles,
+      categoryId: category.id,
+      page: 1,
+      pageSize: 25,
+      filters: [],
+    });
+    expect(
+      workbook.columns.find((column) => column.key === attribute.key)?.permissions,
+    ).toMatchObject({ edit: false, import: false });
+    expect(workbook.items.length).toBeGreaterThan(0);
+    for (const item of workbook.items) {
+      const cell = item.attributes[attribute.key];
+      if (cell?.applicable) expect(cell.permissions.edit).toBe(false);
+    }
+  });
+
+  it('searches all words across product, category and approved relations without accepting pending references', async () => {
+    const [product] = await database.db.select().from(products).where(eq(products.sku, 'D1672'));
+    await database.db
+      .update(products)
+      .set({ brand: 'Diseño QA' })
+      .where(eq(products.id, product!.id));
+    const groupId = newUuid();
+    await database.db
+      .insert(equivalenceGroups)
+      .values({ id: groupId, code: 'UNIFICADOR-PRUEBA', name: 'Búsqueda' });
+    await database.db.insert(equivalenceGroupMembers).values({ groupId, productId: product!.id });
+    await database.db.insert(externalHomologs).values([
+      {
+        id: newUuid(),
+        groupId,
+        externalCode: 'HOM-VALIDADO',
+        externalBrand: 'Marca',
+        approvalStatus: 'approved',
+      },
+      {
+        id: newUuid(),
+        groupId,
+        externalCode: 'HOM-PENDIENTE',
+        externalBrand: 'Marca',
+        approvalStatus: 'pending',
+      },
+      {
+        id: newUuid(),
+        groupId,
+        externalCode: 'HOM-INACTIVO',
+        externalBrand: 'Marca',
+        approvalStatus: 'approved',
+        active: false,
+      },
+    ]);
+    await database.db.insert(groupOemCodes).values([
+      {
+        id: newUuid(),
+        groupId,
+        oemCode: 'OEM-VALIDADO',
+        brands: ['Marca'],
+        approvalStatus: 'approved',
+      },
+      {
+        id: newUuid(),
+        groupId,
+        oemCode: 'OEM-PENDIENTE',
+        brands: ['Marca'],
+        approvalStatus: 'pending',
+      },
+    ]);
+    await database.db.insert(groupApplications).values({
+      id: newUuid(),
+      groupId,
+      make: 'Vehículo QA',
+      model: 'Modelo QA',
+      yearFrom: 2019,
+      yearTo: 2026,
+    });
+    const scope = { roles: ['ADMINISTRADOR'], page: 1, pageSize: 25, filters: [] };
+    for (const q of [
+      'D1672 diseno',
+      'pastilla diseno',
+      'balata diseno',
+      'HOM-VALIDADO diseno',
+      'OEM-VALIDADO diseno',
+      'vehiculo modelo diseno',
+      'UNIFICADOR-PRUEBA diseno',
+    ]) {
+      expect(await repository.listWorkbook({ ...scope, q }), q).toMatchObject({
+        total: 1,
+        items: [{ sku: 'D1672' }],
+      });
+    }
+    for (const q of [
+      'HOM-PENDIENTE',
+      'HOM-INACTIVO',
+      'OEM-PENDIENTE',
+      'D1672 inexistente',
+      'D1672 %',
+    ]) {
+      expect(await repository.listWorkbook({ ...scope, q }), q).toMatchObject({
+        total: 0,
+        items: [],
+      });
+    }
+  });
+
   it('discovers active categories and filters every schema by role access', async () => {
     const categories = await repository.listActiveCategories(['COMPRAS']);
     expect(categories).toHaveLength(52);
@@ -59,8 +200,8 @@ describe('DrizzleDynamicCatalogRepository', () => {
     );
     expect(purchasing?.attributes.length).toBeGreaterThan(6);
     expect(
-      purchasing?.attributes.some(
-        (attribute) => attribute.sourceAuthority === 'pim' && attribute.permissions.edit,
+      purchasing?.attributes.every(
+        (attribute) => !attribute.permissions.edit && !attribute.permissions.import,
       ),
     ).toBe(true);
     expect(
@@ -402,7 +543,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
     const exclusive = all.columns.find((column) => column.key === 'material_exclusivo_prueba');
     expect(exclusive).toMatchObject({
       applicableTemplateIds: [assignment!.templateId],
-      permissions: { edit: true, export: true },
+      permissions: { edit: false, export: true },
     });
     expect(all.items.find((item) => item.id === product!.id)?.attributes).toMatchObject({
       material_exclusivo_prueba: {

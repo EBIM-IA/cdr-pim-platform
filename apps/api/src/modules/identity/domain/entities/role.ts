@@ -73,20 +73,14 @@ const VIEWING_CAPABILITIES: readonly Capability[] = [
   Capability.MenuCatalogsView,
   Capability.CatalogRead,
   Capability.ProductCatalogsRead,
-  Capability.ProductCatalogsShare,
   Capability.AttributesRead,
   Capability.ApplicationsRead,
   Capability.EquivalencesRead,
 ];
 
-const PURCHASING_CAPABILITIES: readonly Capability[] = [
-  ...VIEWING_CAPABILITIES,
-  Capability.CatalogWrite,
-  Capability.ProductCatalogsWrite,
-  Capability.AttributesWrite,
-  Capability.ApplicationsWrite,
-  Capability.EquivalencesWrite,
-];
+// Both business consultation profiles are read-only. Template matrices cannot elevate them
+// to mutation privileges; administrator grants remain explicit.
+const PURCHASING_CAPABILITIES: readonly Capability[] = [...VIEWING_CAPABILITIES];
 
 const SALES_CAPABILITIES: readonly Capability[] = [...VIEWING_CAPABILITIES];
 

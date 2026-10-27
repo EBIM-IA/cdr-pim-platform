@@ -65,7 +65,14 @@ describe('catalog HTTP boundary', () => {
           ListProductCatalogsUseCase,
           RevokeProductCatalogShareUseCase,
           UpdateProductCatalogUseCase,
-        ].map((provide) => ({ provide, useValue: { execute: vi.fn(async () => record) } })),
+        ].map((provide) => ({
+          provide,
+          useValue: {
+            execute: vi.fn(async () =>
+              provide === GetProductCatalogUseCase ? { ...record, audit: [] } : record,
+            ),
+          },
+        })),
         { provide: CreateProductCatalogUseCase, useValue: { execute: executeCreate } },
         {
           provide: ResolveSharedProductCatalogUseCase,
@@ -83,7 +90,13 @@ describe('catalog HTTP boundary', () => {
         if (req.headers.authorization)
           req.actor = {
             ...actor,
-            roles: [req.headers.authorization === 'sales' ? Role.Sales : Role.Purchasing],
+            roles: [
+              req.headers.authorization === 'sales'
+                ? Role.Sales
+                : req.headers.authorization === 'admin'
+                  ? Role.Administrator
+                  : Role.Purchasing,
+            ],
           };
         next();
       },
@@ -99,14 +112,15 @@ describe('catalog HTTP boundary', () => {
   afterAll(async () => {
     await app?.close();
   });
-  it('denies sales writes but accepts purchasing multipart uploads and exposes no object keys', async () => {
-    await request(app.getHttpServer())
-      .post('/product-catalogs')
-      .set('Authorization', 'sales')
-      .expect(403);
+  it('denies consultation profile writes but accepts administrator uploads and exposes no object keys', async () => {
+    for (const profile of ['sales', 'buyer'])
+      await request(app.getHttpServer())
+        .post('/product-catalogs')
+        .set('Authorization', profile)
+        .expect(403);
     const response = await request(app.getHttpServer())
       .post('/product-catalogs')
-      .set('Authorization', 'buyer')
+      .set('Authorization', 'admin')
       .field('title', 'PDF')
       .field('validFrom', '2026-01-01')
       .field('validUntil', '')
@@ -120,27 +134,38 @@ describe('catalog HTTP boundary', () => {
     expect(executeCreate).toHaveBeenCalledWith(
       expect.objectContaining({ validUntil: null }),
       expect.objectContaining({ filename: 'Catalogo.pdf' }),
-      expect.objectContaining({ roles: [Role.Purchasing] }),
+      expect.objectContaining({ roles: [Role.Administrator] }),
     );
   });
   it('rejects invalid dates before invoking the use case', async () => {
     const count = executeCreate.mock.calls.length;
     await request(app.getHttpServer())
       .post('/product-catalogs')
-      .set('Authorization', 'buyer')
+      .set('Authorization', 'admin')
       .field('title', 'PDF')
       .field('validFrom', '2026-02-30')
       .field('validUntil', '')
       .expect(400);
     expect(executeCreate).toHaveBeenCalledTimes(count);
   });
-  it('requires read policy for private metadata and write policy for restore, while sharing is permitted for sales', async () => {
+  it('requires read policy for private metadata and reserves restore and sharing for administration', async () => {
     await request(app.getHttpServer()).get(`/product-catalogs/${record.catalog.id}`).expect(403);
     await request(app.getHttpServer())
       .post(`/product-catalogs/${record.catalog.id}/restore`)
       .set('Authorization', 'sales')
       .send({ expectedUpdatedAt: now.toISOString() })
       .expect(403);
+    for (const profile of ['sales', 'buyer']) {
+      await request(app.getHttpServer())
+        .get(`/product-catalogs/${record.catalog.id}`)
+        .set('Authorization', profile)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/product-catalogs/${record.catalog.id}/shares`)
+        .set('Authorization', profile)
+        .send({})
+        .expect(403);
+    }
     const reflector = new Reflector();
     const { REQUIRED_CAPABILITIES } = await import('../../../shared/http/capability.decorator');
     expect(reflector.get(REQUIRED_CAPABILITIES, ProductCatalogsController.prototype.share)).toEqual(

@@ -13,7 +13,7 @@ import {
 } from './role';
 
 describe('role capability policy', () => {
-  it('allows sales to consult and share PDF catalogs while keeping maintenance with purchasing and administration', () => {
+  it('allows consultation profiles to read PDF catalogs and reserves writes and sharing for administration', () => {
     for (const role of [
       Role.Administrator,
       Role.Purchasing,
@@ -23,10 +23,9 @@ describe('role capability policy', () => {
       Role.Viewer,
     ]) {
       expect(actorHasCapability(actor(role), Capability.ProductCatalogsRead)).toBe(true);
-      expect(actorHasCapability(actor(role), Capability.ProductCatalogsShare)).toBe(true);
-      expect(actorHasCapability(actor(role), Capability.ProductCatalogsWrite)).toBe(
-        role !== Role.Sales && role !== Role.Viewer,
-      );
+      const administrator = role === Role.Administrator || role === Role.Admin;
+      expect(actorHasCapability(actor(role), Capability.ProductCatalogsShare)).toBe(administrator);
+      expect(actorHasCapability(actor(role), Capability.ProductCatalogsWrite)).toBe(administrator);
     }
   });
   it('uses explicit grants without a business-role hierarchy', () => {
@@ -42,6 +41,9 @@ describe('role capability policy', () => {
     expect(satisfies(Role.Admin, Role.Administrator)).toBe(true);
     expect(satisfies(Role.Editor, Role.Purchasing)).toBe(true);
     expect(actorSatisfies(actor(Role.Viewer), Role.Sales)).toBe(true);
+    expect(capabilitiesForRole(Role.Admin)).toEqual(capabilitiesForRole(Role.Administrator));
+    expect(capabilitiesForRole(Role.Editor)).toEqual(capabilitiesForRole(Role.Purchasing));
+    expect(capabilitiesForRole(Role.Viewer)).toEqual(capabilitiesForRole(Role.Sales));
   });
 
   it('returns the deduplicated capabilities exposed to the web client', () => {
@@ -49,7 +51,8 @@ describe('role capability policy', () => {
       ...actor(Role.Purchasing),
       roles: [Role.Purchasing, Role.Sales],
     });
-    expect(capabilities).toContain(Capability.CatalogWrite);
+    expect(capabilities).toContain(Capability.CatalogRead);
+    expect(capabilities).not.toContain(Capability.CatalogWrite);
     expect(capabilities).not.toContain(Capability.PublicationExecute);
     expect(new Set(capabilities).size).toBe(capabilities.length);
   });
@@ -66,6 +69,37 @@ describe('role capability policy', () => {
       expect(
         capabilitiesForRole(role).filter((capability) => capability.startsWith('menu:')),
       ).toEqual(expectedMenus);
+    }
+  });
+
+  it('keeps purchasing and sales read-only even when both profiles are assigned', () => {
+    const writes = [
+      Capability.CatalogWrite,
+      Capability.AttributesWrite,
+      Capability.ApplicationsWrite,
+      Capability.EquivalencesWrite,
+      Capability.ProductCatalogsWrite,
+      Capability.ProductCatalogsShare,
+      Capability.ImportsExecute,
+    ];
+    for (const roles of [
+      [Role.Purchasing],
+      [Role.Sales],
+      [Role.Editor],
+      [Role.Viewer],
+      [Role.Purchasing, Role.Sales],
+    ]) {
+      for (const capability of writes) {
+        expect(actorHasCapability({ ...actor(Role.Purchasing), roles }, capability)).toBe(false);
+      }
+    }
+    for (const capability of writes) {
+      expect(
+        actorHasCapability(
+          { ...actor(Role.Purchasing), roles: [Role.Purchasing, Role.Administrator] },
+          capability,
+        ),
+      ).toBe(true);
     }
   });
 

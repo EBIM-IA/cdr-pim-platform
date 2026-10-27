@@ -555,7 +555,10 @@ export function DynamicCatalogSheet() {
           </div>
           <Card className="min-w-0 overflow-hidden">
             <div className="scrollbar-thin max-w-full overflow-auto">
-              <table className="w-full min-w-max border-collapse text-left text-sm">
+              <table
+                className="w-full min-w-max border-collapse text-left text-sm"
+                data-column-resize-key="dynamic-catalog-sheet"
+              >
                 <caption className="sr-only">
                   Productos y atributos técnicos configurados por la plantilla{' '}
                   {schema.template.name}
@@ -626,7 +629,7 @@ export function DynamicCatalogSheet() {
                         <td className="max-w-80 px-4 py-3 font-semibold">{product.name}</td>
                         <td className="px-4 py-3">{product.brand ?? '—'}</td>
                         <td className="px-4 py-3">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold">
+                          <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold">
                             {product.status}
                           </span>
                         </td>
@@ -636,7 +639,18 @@ export function DynamicCatalogSheet() {
                             editing?.productId === product.id &&
                             editing.attributeKey === column.key;
                           return (
-                            <td key={column.id} className="px-4 py-3">
+                            <td
+                              key={column.id}
+                              data-cell-state={
+                                column.required &&
+                                (cell?.value === null ||
+                                  cell?.value === undefined ||
+                                  cell?.value === '')
+                                  ? 'missing'
+                                  : undefined
+                              }
+                              className="px-4 py-3"
+                            >
                               {isEditing && editing ? (
                                 <AttributeEditor
                                   column={column}
@@ -649,7 +663,7 @@ export function DynamicCatalogSheet() {
                               ) : column.permissions.edit ? (
                                 <button
                                   type="button"
-                                  className="group/cell flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-2 text-left hover:bg-white hover:ring-1 hover:ring-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                                  className="group/cell flex min-h-5 w-full items-center justify-between gap-3 rounded-md px-1 text-left hover:bg-black/5 hover:ring-1 hover:ring-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
                                   onClick={() =>
                                     setEditing({
                                       productId: product.id,

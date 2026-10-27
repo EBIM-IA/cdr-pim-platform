@@ -203,8 +203,9 @@ describe('ProductsCatalog table view', () => {
     render(<ProductsCatalog />);
     fireEvent.click(screen.getByRole('button', { name: 'Tabla' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
-    const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
+    const category = await screen.findByRole('combobox', {
+      name: 'Filtrar la tabla por categoría',
+    });
     fireEvent.focus(category);
     fireEvent.click(screen.getByRole('button', { name: 'Rodamientos' }));
 

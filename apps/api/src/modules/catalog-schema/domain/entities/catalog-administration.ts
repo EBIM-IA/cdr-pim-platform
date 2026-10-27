@@ -41,6 +41,8 @@ export interface AdminCatalogCategory {
   readonly position: number;
   readonly active: boolean;
   readonly updatedAt: Date;
+  /** Includes product assignments in descendant categories. Present on the category list. */
+  readonly skuCount?: number;
 }
 
 export interface AdminTemplateAttribute {

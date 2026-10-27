@@ -113,6 +113,10 @@ describe('ExcelTableHeader', () => {
 
     expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(2);
     expect(screen.getByRole('status')).toHaveTextContent('2 de 4 filas visibles');
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filtro de columna Marca' }), {
+      key: 'Escape',
+    });
+    expect(within(screen.getByTestId('rows')).getAllByRole('row')).toHaveLength(4);
   });
 
   it('re-evaluates an AX expression when another column restores available values', () => {

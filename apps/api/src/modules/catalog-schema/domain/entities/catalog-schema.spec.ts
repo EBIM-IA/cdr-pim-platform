@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AttributeSourceAuthority,
   CatalogAttributeDataType,
+  catalogAttributePermissionsForRoles,
   validateAttributeValue,
 } from './catalog-schema';
 
@@ -16,6 +17,31 @@ const definition = {
   allowedValues: [],
   sourceAuthority: AttributeSourceAuthority.Pim,
 };
+
+describe('catalog attribute consultation permissions', () => {
+  it.each([['COMPRAS'], ['VENTAS'], ['COMPRAS', 'VENTAS']])(
+    'ignores stored mutation grants for %s',
+    (...roles) => {
+      expect(
+        catalogAttributePermissionsForRoles({ edit: true, import: true, export: true }, roles),
+      ).toEqual({ edit: false, import: false, export: true });
+    },
+  );
+
+  it('retains administrator grants in mixed profiles without inventing template access', () => {
+    expect(
+      catalogAttributePermissionsForRoles({ edit: true, import: true, export: false }, [
+        'ADMINISTRADOR',
+        'COMPRAS',
+      ]),
+    ).toEqual({ edit: true, import: true, export: false });
+    expect(
+      catalogAttributePermissionsForRoles({ edit: false, import: false, export: false }, [
+        'ADMINISTRADOR',
+      ]),
+    ).toEqual({ edit: false, import: false, export: false });
+  });
+});
 
 describe('dynamic attribute validation', () => {
   it('accepts values matching the declared type', () => {

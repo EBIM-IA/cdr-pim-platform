@@ -21,6 +21,7 @@ import {
   ChevronUp,
   UsersRound,
   PackageSearch,
+  Ruler,
   Search,
   ShieldCheck,
   Sparkles,
@@ -30,6 +31,8 @@ import {
 } from 'lucide-react';
 
 import { ColumnOrderUserProvider } from '@/components/column-order';
+import { resetColumnPreferences, TableColumnResizeController } from '@/components/column-resize';
+import { TableActionTooltip } from '@/components/table-action-tooltip';
 import { Button } from '@/components/ui/button';
 import type { AuthActor } from '@/lib/auth';
 import { logoutSession } from '@/lib/bff-client';
@@ -679,6 +682,17 @@ function Sidebar({
           ) : null}
           <button
             type="button"
+            className="cdr-account-action"
+            onClick={() => {
+              resetColumnPreferences(actor.id);
+              setAccountOpen(false);
+            }}
+          >
+            <Ruler aria-hidden="true" className="size-4" />
+            Restablecer columnas de las tablas
+          </button>
+          <button
+            type="button"
             className="cdr-account-action border-t"
             onClick={onLogout}
             disabled={loggingOut}
@@ -956,7 +970,7 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
             <main
               id="main-content"
               tabIndex={-1}
-              className="min-h-dvh min-w-0 max-w-full bg-white px-3 pb-16 pt-5 outline-none min-[721px]:px-6 min-[1051px]:px-[35px] min-[1051px]:pt-6"
+              className="cdr-main min-h-dvh min-w-0 max-w-full bg-white px-3 pb-16 pt-5 outline-none min-[721px]:px-6 min-[1051px]:px-[35px] min-[1051px]:pt-6"
             >
               {!pathname.startsWith('/products/') ? (
                 <nav
@@ -1056,6 +1070,11 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
             </div>
           </div>
         ) : null}
+        <TableColumnResizeController
+          userId={actor.id}
+          scopeKey={`${pathname}:${searchParams.get('view') ?? ''}`}
+        />
+        <TableActionTooltip scopeKey={`${pathname}:${searchParams.get('view') ?? ''}`} />
       </div>
     </ColumnOrderUserProvider>
   );

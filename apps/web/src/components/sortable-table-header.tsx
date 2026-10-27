@@ -23,7 +23,12 @@ export function SortableTableHeader({
 }: SortableTableHeaderProps) {
   const Icon = active ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
-    <th scope="col" className={cn('px-4 py-3 font-semibold', className)}>
+    <th
+      scope="col"
+      data-column-key={label}
+      data-column-label={label}
+      className={cn('relative px-4 py-3 font-semibold', className)}
+    >
       <button
         type="button"
         className="inline-flex items-center gap-1.5 rounded-sm text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
