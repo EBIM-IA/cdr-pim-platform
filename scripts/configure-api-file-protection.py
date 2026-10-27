@@ -26,6 +26,8 @@ CLAMAV_IMAGE = (
 )
 CLAMAV_CPU = 512
 CLAMAV_MEMORY = 4096
+CLAMAV_ENTRYPOINT = ("/bin/sh", "-ec")
+CLAMAV_COMMAND = (Path(__file__).with_name("start-clamav.sh").read_text(),)
 MINIMUM_TASK_MEMORY = 6144
 CLAMAV_HEALTH_COMMAND = (
     "CMD-SHELL",
@@ -39,7 +41,7 @@ API_ENVIRONMENT = {
     "FILE_CLEANUP_ENABLED": "true",
 }
 # The pinned official image ships #TCPAddr commented; /init replaces that line.
-# Leave its original entrypoint in control of freshclam and daemon startup.
+# Refresh signatures first, then hand control to its original /init entrypoint.
 CLAMAV_ENVIRONMENT = {
     "TZ": "UTC",
     "CLAMD_CONF_TCPAddr": "127.0.0.1",
@@ -135,6 +137,8 @@ def configure_api_file_protection(definition: dict[str, Any]) -> dict[str, Any]:
         "essential": True,
         "cpu": CLAMAV_CPU,
         "memory": CLAMAV_MEMORY,
+        "entryPoint": list(CLAMAV_ENTRYPOINT),
+        "command": list(CLAMAV_COMMAND),
         "environment": environment_values(CLAMAV_ENVIRONMENT),
         "healthCheck": {
             "command": list(CLAMAV_HEALTH_COMMAND),
@@ -192,8 +196,12 @@ def check_api_file_protection(definition: dict[str, Any]) -> None:
     scanner = scanners[0]
     if scanner.get("image") != CLAMAV_IMAGE or scanner.get("essential") is not True:
         raise ValueError("The running scanner must use the pinned image and be essential")
-    if scanner.get("entryPoint") or scanner.get("command") or scanner.get("portMappings"):
-        raise ValueError("The running scanner must keep its original startup and private ports")
+    if (
+        scanner.get("entryPoint") != list(CLAMAV_ENTRYPOINT)
+        or scanner.get("command") != list(CLAMAV_COMMAND)
+        or scanner.get("portMappings")
+    ):
+        raise ValueError("The running scanner must refresh signatures before official startup and keep private ports")
     for container, required in ((api, API_ENVIRONMENT), (scanner, CLAMAV_ENVIRONMENT)):
         environment = container.get("environment", [])
         if not isinstance(environment, list) or not all(isinstance(item, dict) for item in environment):

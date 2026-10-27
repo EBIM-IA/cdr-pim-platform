@@ -183,6 +183,14 @@ cannot be inferred safely from the application repository.
 
 ## Network deployment requirements
 
+File uploads require the pinned private ClamAV sidecar and reject unavailable,
+unsuccessful or stale scans before persistence. Its exact checked-in bootstrap
+updates signatures synchronously before handing control to the official daemon
+launcher; failed updates prevent startup. The seven-day freshness limit stays in
+both ClamD and the application. Deployment verification rejects any other scanner
+entrypoint or command. See [file protection](FILE_PROTECTION.md) for the runtime
+contract, resource limits and real-engine gate.
+
 The following are required for QAS/PRD but must be verified in the separate infrastructure
 repository; this application repository is not evidence that they are deployed:
 

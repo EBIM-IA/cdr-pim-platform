@@ -119,7 +119,10 @@ export const productCatalogAuditSchema = z.object({
   action: z.string(),
   actorId: z.string().nullable(),
   occurredAt: z.string().datetime(),
-  changes: z.record(z.object({ before: z.unknown().optional(), after: z.unknown().optional() })),
+  changes: z.record(
+    z.string(),
+    z.object({ before: z.unknown().optional(), after: z.unknown().optional() }),
+  ),
 });
 export const productCatalogDetailSchema = z.object({
   catalog: productCatalogSchema,

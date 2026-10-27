@@ -51,7 +51,7 @@ Las capacidades incluidas en tokens antiguos no se aceptan como fuente de autori
 
 ## Validación
 
-- `pnpm verify`: formato, lint, tipos, 1.097 pruebas unitarias/arquitectura y
+- `pnpm verify`: formato, lint, tipos, 1.103 pruebas unitarias/arquitectura y
   compilación de todo el monorepo.
 - PostgreSQL temporal con pgvector en el puerto 5544, separado de las bases del
   usuario y con bases distintas para integración y vista previa.
@@ -70,3 +70,23 @@ Las capacidades incluidas en tokens antiguos no se aceptan como fuente de autori
 
 No hay migraciones nuevas, cambios de configuración guardada ni cambios de datos
 en QAS/PRD.
+
+## Dependencias para publicación
+
+La auditoría de CI identificó tres avisos altos publicados después de la última
+entrega. Se actualiza el motor real de validación a Zod 4.6.7 y se sustituye el
+conversor anterior por `z.toJSONSchema`, con esquemas de entrada OpenAPI 3.0. Se
+conservan las reglas de los contratos existentes y se comprueba la compatibilidad
+de respuestas, consultas y configuración.
+
+Se fijan también los mínimos compatibles body-parser 2.4.0 y multer 2.5.0 para la
+línea actual de Nest 11. La auditoría mantiene su umbral y no se añaden exclusiones.
+Referencias: [Zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5),
+[body-parser](https://github.com/advisories/GHSA-27r3-jxmh-p828) y
+[multer](https://github.com/advisories/GHSA-q7qp-rjg7-q26m).
+
+La validación completa posterior a la actualización comprende 1.103 pruebas
+unitarias/arquitectura y las 149 pruebas de integración en PostgreSQL aislado,
+todas correctas. También se corrige el arranque de ClamAV para actualizar y
+validar las firmas antes de iniciar el daemon, conservando el límite de siete
+días, el actualizador periódico y la condición de salud previa al inicio de la API.

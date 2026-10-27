@@ -36,8 +36,7 @@
     "postgres": "^3.4.7",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.24.6"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cdr/eslint-config": "workspace:*",

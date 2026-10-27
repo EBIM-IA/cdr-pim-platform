@@ -64,6 +64,8 @@ services:
     restart: unless-stopped
     cpus: 0.5
     mem_limit: 4g
+    # Bootstrap existing pinned-image databases before /init starts both daemons.
+    entrypoint: ['/bin/sh', '/usr/local/bin/cdr-start-clamav.sh']
     environment:
       TZ: UTC
       # Containers have their own network namespace in Compose. Only the host-loopback
@@ -87,6 +89,7 @@ services:
       - '127.0.0.1:3310:3310'
     volumes:
       - clamav-data:/var/lib/clamav
+      - ./scripts/start-clamav.sh:/usr/local/bin/cdr-start-clamav.sh:ro
     healthcheck:
       test:
         - CMD-SHELL

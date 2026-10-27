@@ -37,6 +37,25 @@ describe('code-affix HTTP contracts', () => {
     expect(parseProductCodeSchema.safeParse({ code: 'X'.repeat(121) }).success).toBe(false);
   });
 
+  it('does not inject creation defaults into partial updates', () => {
+    expect(
+      updateCodeAffixSchema.parse({
+        meaning: 'Juego radial actualizado',
+        expectedUpdatedAt: '2026-10-27T10:00:00.000Z',
+      }),
+    ).toEqual({
+      meaning: 'Juego radial actualizado',
+      expectedUpdatedAt: '2026-10-27T10:00:00.000Z',
+    });
+    expect(
+      updateCodeAffixSchema.parse({
+        boreRule: 'none',
+        priority: 0,
+        expectedUpdatedAt: '2026-10-27T10:00:00.000Z',
+      }),
+    ).toMatchObject({ boreRule: 'none', priority: 0 });
+  });
+
   it('rejects confidence values that the database would round', () => {
     expect(
       createCodeAffixSchema.safeParse({

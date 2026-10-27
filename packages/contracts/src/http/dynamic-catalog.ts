@@ -101,7 +101,7 @@ export const catalogGridProductSchema = z.object({
   name: z.string(),
   brand: z.string().nullable(),
   status: z.string(),
-  attributes: z.record(catalogGridCellSchema),
+  attributes: z.record(z.string(), catalogGridCellSchema),
 });
 export type CatalogGridProductDto = z.infer<typeof catalogGridProductSchema>;
 
@@ -162,7 +162,7 @@ export const catalogWorkbookProductSchema = z.object({
   unifiedCode: z.string().nullable(),
   applicationTypes: z.array(z.string()),
   completeness: z.number().int().min(0).max(100).nullable(),
-  attributes: z.record(catalogWorkbookCellSchema),
+  attributes: z.record(z.string(), catalogWorkbookCellSchema),
   assetRequirements: z
     .array(z.object({ type: productAssetTypeSchema, required: z.boolean() }))
     .optional(),

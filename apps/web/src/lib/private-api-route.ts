@@ -2,7 +2,7 @@ import 'server-only';
 
 import { API_PREFIX, apiErrorSchema } from '@cdr/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
-import type { ZodTypeAny, z } from 'zod';
+import type { ZodTypeAny } from 'zod';
 
 import { hasExpectedOrigin } from '@/lib/auth';
 import { env } from '@/lib/env';
@@ -62,7 +62,7 @@ export async function proxyPrivateApi<
   const accessToken = await getAccessToken();
   if (!accessToken) return jsonError('Debes iniciar sesión.', 401);
 
-  let input: z.infer<Exclude<TInput, undefined>> | undefined;
+  let input: unknown;
   if (options.inputSchema) {
     const body: unknown = await request.json().catch(() => null);
     const parsed = options.inputSchema.safeParse(body);
