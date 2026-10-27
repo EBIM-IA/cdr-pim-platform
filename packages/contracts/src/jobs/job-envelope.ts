@@ -39,7 +39,7 @@ export const jobEnvelopeSchema = z.object({
   occurredAt: z.string().datetime(),
   /** Producer name, e.g. `api` or `eventbridge:ax-delta-sync`. */
   source: z.string().min(1),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
 });
 
 export type JobEnvelope = z.infer<typeof jobEnvelopeSchema>;

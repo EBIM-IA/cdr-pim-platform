@@ -473,10 +473,12 @@ function EnrichmentDrawer({
 function ProductTechnicalAssets({
   productId,
   active,
+  canManage,
   onManage,
 }: {
   productId: string;
   active: boolean;
+  canManage: boolean;
   onManage: () => void;
 }) {
   const [assets, setAssets] = useState<ProductAssetDto[]>([]);
@@ -539,9 +541,11 @@ function ProductTechnicalAssets({
             ))}
           </ul>
         )}
-        <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onManage}>
-          Gestionar activos
-        </Button>
+        {canManage ? (
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onManage}>
+            Gestionar activos
+          </Button>
+        ) : null}
       </div>
     </Card>
   );
@@ -557,6 +561,8 @@ function TechnicalPanel({
   canEditDirect,
   editRequest,
   showCompleteness,
+  showInternalDetails,
+  canManageAssets,
   onDirtyChange,
   onSaved,
   onManageAssets,
@@ -570,6 +576,8 @@ function TechnicalPanel({
   canEditDirect: boolean;
   editRequest: number;
   showCompleteness: boolean;
+  showInternalDetails: boolean;
+  canManageAssets: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (replicatedProducts: number) => void;
   onManageAssets: () => void;
@@ -579,21 +587,34 @@ function TechnicalPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const editingSnapshot = useRef<ProductAttributeSheetDto | null>(null);
+  const pendingSheet = useRef<ProductAttributeSheetDto | null>(null);
   const initializedSheet = useRef<ProductAttributeSheetDto | null | undefined>(undefined);
+  const initializedEditPermission = useRef<boolean | undefined>(undefined);
+  const initializedProductId = useRef<string | undefined>(undefined);
   const handledEditRequest = useRef(0);
   const editorElement = useRef<HTMLDivElement>(null);
-  const dirty =
-    editing &&
-    Object.entries(drafts).some(
-      ([key, value]) =>
-        value !== attributeInputValue(editingSnapshot.current?.product.attributes[key]?.value),
-    );
+  const dirtyCount = editing
+    ? Object.entries(drafts).filter(
+        ([key, value]) =>
+          value !== attributeInputValue(editingSnapshot.current?.product.attributes[key]?.value),
+      ).length
+    : 0;
+  const dirty = dirtyCount > 0;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => {
-    if (sheet === initializedSheet.current) return;
+    if (
+      sheet === initializedSheet.current &&
+      canEditDirect === initializedEditPermission.current &&
+      product.id === initializedProductId.current
+    )
+      return;
+    const sameProduct = product.id === initializedProductId.current;
     initializedSheet.current = sheet;
-    if (dirty) {
+    initializedEditPermission.current = canEditDirect;
+    initializedProductId.current = product.id;
+    if (dirty && canEditDirect && sameProduct) {
+      pendingSheet.current = sheet;
       setSaveError(
         'La ficha recibió una actualización. Conservamos tu borrador; revisa los cambios antes de guardar.',
       );
@@ -606,6 +627,7 @@ function TechnicalPanel({
           )
         : [];
     editingSnapshot.current = allowed.length ? sheet : null;
+    pendingSheet.current = null;
     setDrafts(
       Object.fromEntries(
         allowed.map((column) => [
@@ -616,7 +638,7 @@ function TechnicalPanel({
     );
     setSaveError(null);
     setEditing(allowed.length > 0);
-  }, [canEditDirect, dirty, sheet]);
+  }, [canEditDirect, dirty, product.id, sheet]);
 
   const attributes = sheet
     ? technicalAttributesFromSheet(sheet).map((attribute) => ({
@@ -753,10 +775,7 @@ function TechnicalPanel({
           (drafts[column.key] ?? '') !==
           attributeInputValue(original.product.attributes[column.key]?.value),
       );
-      if (!changed.length) {
-        setEditing(false);
-        return;
-      }
+      if (!changed.length) return;
       const result = await patchProductAttributes(product.id, {
         updates: changed.map((column) => ({
           attributeKey: column.key,
@@ -764,7 +783,38 @@ function TechnicalPanel({
           expectedVersion: original.product.attributes[column.key]?.version ?? 0,
         })),
       });
-      setEditing(false);
+      // Keep the editor available after saving, and establish the new concurrency baseline
+      // before the refreshed sheet arrives.
+      const savedSheet: ProductAttributeSheetDto = {
+        ...original,
+        product: {
+          ...original.product,
+          attributes: {
+            ...original.product.attributes,
+            ...Object.fromEntries(
+              result.attributes.map((saved) => [
+                saved.attributeKey,
+                {
+                  value: saved.value,
+                  version: saved.version,
+                  source: saved.source,
+                  updatedAt: saved.updatedAt,
+                },
+              ]),
+            ),
+          },
+        },
+      };
+      editingSnapshot.current = savedSheet;
+      pendingSheet.current = null;
+      setDrafts(
+        Object.fromEntries(
+          editableColumns.map((column) => [
+            column.key,
+            attributeInputValue(savedSheet.product.attributes[column.key]?.value),
+          ]),
+        ),
+      );
       onSaved(
         new Set(result.attributes.flatMap((attribute) => attribute.replicatedProductIds)).size,
       );
@@ -812,12 +862,6 @@ function TechnicalPanel({
               <span className="rounded-md border px-2 py-1 text-[11px] text-muted-foreground">
                 {editing ? 'Edición directa · base ERP de solo lectura' : 'Solo consulta'}
               </span>
-              {canEditDirect && editableColumns.length > 0 && !editing ? (
-                <Button type="button" variant="outline" size="sm" onClick={startEditing}>
-                  <Pencil aria-hidden="true" className="size-3" />
-                  Editar atributos
-                </Button>
-              ) : null}
             </div>
           </div>
           {convertibleAttributes > 0 ? (
@@ -910,7 +954,17 @@ function TechnicalPanel({
                     const inputClass =
                       'h-7 w-full min-w-0 rounded border bg-white px-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary';
                     return (
-                      <tr key={attribute.key}>
+                      <tr
+                        key={attribute.key}
+                        className={cn(
+                          editable &&
+                            value !==
+                              attributeInputValue(
+                                editingSnapshot.current?.product.attributes[attribute.key]?.value,
+                              ) &&
+                            'bg-amber-50',
+                        )}
+                      >
                         <td className="w-[10%] px-2 py-2 align-top text-sm text-muted-foreground">
                           {symbol?.[1]}
                         </td>
@@ -996,13 +1050,13 @@ function TechnicalPanel({
                             ) : null}
                           </span>
                           <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
-                            {attribute.source ? (
+                            {showInternalDetails && attribute.source ? (
                               <span>Fuente: {sourceLabels[attribute.source]}</span>
                             ) : null}
-                            {attribute.authority ? (
+                            {showInternalDetails && attribute.authority ? (
                               <span>Autoridad: {authorityLabels[attribute.authority]}</span>
                             ) : null}
-                            {attribute.includeInTechnicalSheet !== null ? (
+                            {showInternalDetails && attribute.includeInTechnicalSheet !== null ? (
                               <span>
                                 {attribute.includeInTechnicalSheet
                                   ? 'Ficha técnica'
@@ -1021,29 +1075,51 @@ function TechnicalPanel({
           ))}
         </div>
         {editing ? (
-          <div className="sticky bottom-3 mt-4 rounded-lg border bg-white p-3 shadow-lg">
+          <div
+            role="region"
+            aria-label="Guardar cambios de la ficha"
+            className="sticky bottom-3 mt-4 rounded-lg border bg-white p-3 shadow-lg"
+          >
             {saveError ? (
               <p role="alert" className="mb-2 text-xs text-red-700">
                 {saveError}
               </p>
             ) : null}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                Los cambios conservan su fuente y trazabilidad.
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                <strong>{dirtyCount}</strong> {dirtyCount === 1 ? 'cambio' : 'cambios'} sin guardar
               </p>
               <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={saving}
-                  onClick={() => setEditing(false)}
+                  disabled={saving || !dirty}
+                  onClick={() => {
+                    const baseline = pendingSheet.current ?? editingSnapshot.current ?? sheet;
+                    editingSnapshot.current = baseline;
+                    pendingSheet.current = null;
+                    setDrafts(
+                      Object.fromEntries(
+                        editableColumns.map((column) => [
+                          column.key,
+                          attributeInputValue(baseline?.product.attributes[column.key]?.value),
+                        ]),
+                      ),
+                    );
+                    setSaveError(null);
+                  }}
                 >
-                  Cancelar edición
+                  Descartar cambios
                 </Button>
-                <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={saving || !dirty}
+                  onClick={() => void save()}
+                >
                   <Save aria-hidden="true" className="size-3" />
-                  {saving ? 'Guardando…' : 'Guardar atributos'}
+                  {saving ? 'Guardando…' : 'Guardar cambios'}
                 </Button>
               </div>
             </div>
@@ -1054,63 +1130,68 @@ function TechnicalPanel({
         className="min-w-0 space-y-4 lg:col-start-2 xl:col-start-3 xl:row-start-1"
         aria-label="Documentos y calidad del SKU"
       >
-        <ProductTechnicalAssets productId={product.id} active={active} onManage={onManageAssets} />
+        <ProductTechnicalAssets
+          productId={product.id}
+          active={active}
+          canManage={canManageAssets}
+          onManage={onManageAssets}
+        />
         {showCompleteness ? (
-          <>
-            <Card className="p-3">
-              <h3 className="text-sm font-semibold">Completitud de plantilla</h3>
+          <Card className="p-3">
+            <h3 className="text-sm font-semibold">Completitud de plantilla</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Atributos y documentos obligatorios
+            </p>
+            <div className="my-3">
+              <strong className="text-3xl font-semibold">
+                {completeness ?? '—'}
+                {completeness !== null ? '%' : ''}
+              </strong>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Atributos y documentos obligatorios
+                Cobertura visible: {filled}/{attributes.length} atributos con valor
               </p>
-              <div className="my-3">
-                <strong className="text-3xl font-semibold">
-                  {completeness ?? '—'}
-                  {completeness !== null ? '%' : ''}
-                </strong>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Cobertura visible: {filled}/{attributes.length} atributos con valor
-                </p>
-              </div>
-              {completeness !== null ? (
-                <Progress value={completeness} label="Completitud de plantilla" />
-              ) : null}
-              <dl className="mt-3 divide-y text-xs">
-                {[
-                  [
-                    'Atributos obligatorios visibles',
-                    `${requiredColumns.length - missingRequired.length}/${requiredColumns.length}`,
-                  ],
-                  [
-                    'Base ERP',
-                    `${erp.filter((attribute) => hasValue(attribute.rawValue)).length}/${erp.length}`,
-                  ],
-                  [
-                    'Enriquecimiento',
-                    `${enrichment.filter((attribute) => hasValue(attribute.rawValue)).length}/${enrichment.length}`,
-                  ],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-3 py-1.5">
-                    <dt className="text-muted-foreground">{label}</dt>
-                    <dd>{value}</dd>
-                  </div>
+            </div>
+            {completeness !== null ? (
+              <Progress value={completeness} label="Completitud de plantilla" />
+            ) : null}
+            <dl className="mt-3 divide-y text-xs">
+              {[
+                [
+                  'Atributos obligatorios visibles',
+                  `${requiredColumns.length - missingRequired.length}/${requiredColumns.length}`,
+                ],
+                [
+                  'Base ERP',
+                  `${erp.filter((attribute) => hasValue(attribute.rawValue)).length}/${erp.length}`,
+                ],
+                [
+                  'Enriquecimiento',
+                  `${enrichment.filter((attribute) => hasValue(attribute.rawValue)).length}/${enrichment.length}`,
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-3 py-1.5">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        ) : null}
+        {showInternalDetails ? (
+          <Card className="p-3">
+            <h3 className="text-sm font-semibold">Atributos obligatorios faltantes</h3>
+            {missingRequired.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                {missingRequired.map((column) => (
+                  <li key={column.key}>{column.label}</li>
                 ))}
-              </dl>
-            </Card>
-            <Card className="p-3">
-              <h3 className="text-sm font-semibold">Atributos obligatorios faltantes</h3>
-              {missingRequired.length ? (
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-                  {missingRequired.map((column) => (
-                    <li key={column.key}>{column.label}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-xs text-emerald-700">
-                  Todos los atributos obligatorios visibles tienen valor.
-                </p>
-              )}
-            </Card>
-          </>
+              </ul>
+            ) : (
+              <p className="mt-2 text-xs text-emerald-700">
+                Todos los atributos obligatorios visibles tienen valor.
+              </p>
+            )}
+          </Card>
         ) : null}
       </aside>
     </div>
@@ -2293,16 +2374,18 @@ export function ProductDetailView({
           {!showCompleteness ? (
             <div aria-label="Información PIM" className="mt-3 flex flex-wrap gap-2">
               <span className="sr-only">Información PIM</span>
-              <Button
-                type="button"
-                variant="dark"
-                size="sm"
-                onClick={openEnrichment}
-                disabled={!attributeSheet || editableAttributeCount === 0}
-              >
-                <Pencil aria-hidden="true" className="size-3.5" />
-                Editar enriquecimiento
-              </Button>
+              {editableAttributeCount > 0 ? (
+                <Button
+                  type="button"
+                  variant="dark"
+                  size="sm"
+                  onClick={openEnrichment}
+                  disabled={!attributeSheet || editableAttributeCount === 0}
+                >
+                  <Pencil aria-hidden="true" className="size-3.5" />
+                  Editar enriquecimiento
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -2496,6 +2579,8 @@ export function ProductDetailView({
               editRequest={inlineEditRequest}
               onDirtyChange={setInlineDirty}
               showCompleteness={showCompleteness}
+              showInternalDetails={showProductStatus || showCompleteness}
+              canManageAssets={canWriteAssets}
               onManageAssets={() => setActiveTab('documents')}
               onSaved={(replicatedProducts) => {
                 setSaveNotice(

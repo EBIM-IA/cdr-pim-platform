@@ -256,6 +256,7 @@ describe('DocumentsWorkspace', () => {
     );
     expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /Carga masiva/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'ZIP de ejemplo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Eliminar/ })).not.toBeInTheDocument();
     expect(container.querySelector('input[type="file"]')).toBeNull();
     const cell = screen.getByText(asset.filename).closest('td')!;

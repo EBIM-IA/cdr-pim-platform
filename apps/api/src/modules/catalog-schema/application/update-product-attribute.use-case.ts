@@ -10,7 +10,11 @@ import {
 } from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
-import type { AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  type AuthenticatedActor,
+  Capability,
+  actorHasCapability,
+} from '../../identity/domain/entities/role';
 import {
   type AttributeValueSource,
   AttributeValueSource as AttributeValueSourceValue,
@@ -52,6 +56,9 @@ export class UpdateProductAttributeUseCase {
     command: UpdateProductAttributeCommand,
     actor: AuthenticatedActor,
   ): Promise<UpdatedProductAttribute> {
+    if (!actorHasCapability(actor, Capability.AttributesWrite)) {
+      throw new ForbiddenError('This profile can only consult product attributes');
+    }
     const productId = assertUuid(command.productId, 'productId');
     const assignment = await this.catalog.findProductAttributeAssignment(
       productId,

@@ -108,7 +108,7 @@ export const workspaceCellSchema = z.union([
 
 export const workspaceRowSchema = z.object({
   id: z.string().min(1).max(200),
-  values: z.record(workspaceCellSchema),
+  values: z.record(z.string(), workspaceCellSchema),
 });
 export type WorkspaceRow = z.infer<typeof workspaceRowSchema>;
 

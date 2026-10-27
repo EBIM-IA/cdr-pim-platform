@@ -108,6 +108,19 @@ afterEach(() => {
 });
 
 describe('ProductCatalogsWorkspace', () => {
+  it('keeps consultation and downloads while hiding all mutation and sharing actions for readers', async () => {
+    mount(false, false);
+    await screen.findByRole('button', { name: catalog.title });
+    for (const name of ['Subir catálogo', 'Editar', 'Compartir', 'Eliminar']) {
+      expect(toolbar().queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: `Seleccionar ${catalog.title}` }));
+    expect(toolbar().getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
+    const drawer = await openDetail();
+    expect(drawer.getByRole('link', { name: 'Descargar' })).toBeVisible();
+    expect(drawer.queryByRole('button', { name: 'Generar enlace' })).not.toBeInTheDocument();
+  });
+
   it('shows real metrics, PDF actions and role permissions without placeholder blocks', async () => {
     mount(false, true);
     expect(await screen.findByRole('button', { name: catalog.title })).toBeVisible();
@@ -116,9 +129,9 @@ describe('ProductCatalogsWorkspace', () => {
       { q: '', includeDeleted: false },
       expect.any(AbortSignal),
     );
-    expect(toolbar().getByRole('button', { name: 'Subir catálogo' })).toBeDisabled();
+    expect(toolbar().queryByRole('button', { name: 'Subir catálogo' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: `Seleccionar ${catalog.title}` }));
-    expect(toolbar().getByRole('button', { name: 'Editar' })).toBeDisabled();
+    expect(toolbar().queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
     expect(toolbar().getByRole('button', { name: 'Compartir' })).toBeEnabled();
     const drawer = await openDetail();
     expect(drawer.getByRole('link', { name: 'Ver PDF' })).toHaveAttribute(

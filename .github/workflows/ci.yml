@@ -87,34 +87,33 @@ jobs:
     name: Real ClamAV upload gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      clamav:
-        image: clamav/clamav:1.5.4@sha256:e19130cdebaeacc71fa46eab3ed6f69941f2f22aa5e08d55e9197f8edf43ce5e
-        env:
-          TZ: UTC
-          CLAMD_CONF_TCPAddr: 0.0.0.0
-          CLAMD_CONF_MaxThreads: '2'
-          CLAMD_CONF_StreamMaxLength: 64M
-          CLAMD_CONF_MaxFileSize: 64M
-          CLAMD_CONF_MaxScanSize: 256M
-          CLAMD_CONF_MaxRecursion: '16'
-          CLAMD_CONF_MaxFiles: '1000'
-          CLAMD_CONF_MaxScanTime: '20000'
-          CLAMD_CONF_AlertExceedsMax: 'yes'
-          CLAMD_CONF_AlertEncrypted: 'yes'
-          CLAMD_CONF_ConcurrentDatabaseReload: 'no'
-          CLAMD_CONF_FailIfCvdOlderThan: '7'
-          FRESHCLAM_CHECKS: '12'
-          CLAMAV_NO_MILTERD: 'true'
-        ports: ['127.0.0.1:3310:3310']
-        options: >-
-          --cpus 2 --memory 4g
-          --health-cmd "printf 'nPING\n' | nc -w 3 127.0.0.1 3310 | grep -qx PONG" --health-interval 10s
-          --health-timeout 5s --health-retries 30 --health-start-period 60s
+    env:
+      CLAMAV_IMAGE: clamav/clamav:1.5.4@sha256:e19130cdebaeacc71fa46eab3ed6f69941f2f22aa5e08d55e9197f8edf43ce5e
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # Service containers start before checkout and cannot run the shared bootstrap.
+      # Start the pinned scanner explicitly so old embedded signatures update first.
+      - name: Start ClamAV with signature bootstrap
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import runpy
+
+          policy = runpy.run_path('scripts/configure-api-file-protection.py')
+          assert policy['CLAMAV_IMAGE'] == os.environ['CLAMAV_IMAGE'], 'Scanner image pins must match'
+          environment = {**policy['CLAMAV_ENVIRONMENT'], 'CLAMD_CONF_TCPAddr': '0.0.0.0'}
+          destination = pathlib.Path(os.environ['RUNNER_TEMP']) / 'clamav.env'
+          destination.write_text(''.join(f'{key}={value}\n' for key, value in environment.items()))
+          PY
+          docker run --detach --name cdr-ci-clamav --cpus 2 --memory 4g \
+            --publish 127.0.0.1:3310:3310 \
+            --env-file "$RUNNER_TEMP/clamav.env" \
+            --mount "type=bind,source=$PWD/scripts/start-clamav.sh,target=/usr/local/bin/cdr-start-clamav.sh,readonly" \
+            --entrypoint /bin/sh \
+            "$CLAMAV_IMAGE" /usr/local/bin/cdr-start-clamav.sh
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -123,7 +122,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cdr/storage... build
       - name: Verify clean file, EICAR detection and unavailable scanner
-        run: node scripts/verify-file-scanner.mjs 180
+        run: node scripts/verify-file-scanner.mjs 300
+      - name: Scanner startup diagnostics
+        if: failure()
+        run: docker logs cdr-ci-clamav
+      - name: Stop scanner
+        if: always()
+        run: docker rm --force cdr-ci-clamav
 
   security:
     name: Dependency and secret scanning
@@ -147,7 +152,7 @@ jobs:
           action = re.compile(r'^\s*uses:\s*([^\s#]+)')
           immutable_action = re.compile(r'^[^@]+@[0-9a-f]{40}$')
           digest = re.compile(r'@sha256:[0-9a-f]{64}$')
-          service_image = re.compile(r'^\s+image:\s*([^\s#]+)')
+          service_image = re.compile(r'^\s+(?:image|CLAMAV_IMAGE):\s*([^\s#]+)')
 
           for path in pathlib.Path('.github/workflows').glob('*.yml'):
               for line_number, line in enumerate(path.read_text().splitlines(), 1):

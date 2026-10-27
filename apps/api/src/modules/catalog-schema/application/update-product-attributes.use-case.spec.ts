@@ -1,4 +1,4 @@
-import { FixedClock, ValidationError, newUuid } from '@cdr/shared';
+import { FixedClock, ForbiddenError, ValidationError, newUuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
@@ -15,9 +15,9 @@ const productId = newUuid();
 const replicaId = newUuid();
 const now = new Date('2026-10-07T10:00:00.000Z');
 const actor: AuthenticatedActor = {
-  id: 'buyer-1',
-  email: 'compras@casadelruliman.com',
-  roles: [Role.Purchasing],
+  id: 'admin-1',
+  email: 'admin@casadelruliman.com',
+  roles: [Role.Administrator],
 };
 
 function definition(key: string, dataType: CatalogAttributeDataType): TemplateAttribute {
@@ -55,6 +55,29 @@ function repository(
 }
 
 describe('UpdateProductAttributesUseCase', () => {
+  it.each([Role.Purchasing, Role.Sales, Role.Editor, Role.Viewer])(
+    'rejects a %s batch before accessing persistence',
+    async (role) => {
+      const findProductAttributeAssignment = vi.fn();
+      const updateAttributes = vi.fn();
+      const catalog = {
+        findProductAttributeAssignment,
+        updateAttributes,
+      } as unknown as DynamicCatalogRepositoryPort;
+      await expect(
+        new UpdateProductAttributesUseCase(catalog, new FixedClock(now)).execute(
+          {
+            productId,
+            updates: [{ attributeKey: 'material', value: 'Acero', expectedVersion: 1 }],
+          },
+          { ...actor, roles: [role] },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      expect(findProductAttributeAssignment).not.toHaveBeenCalled();
+      expect(updateAttributes).not.toHaveBeenCalled();
+    },
+  );
+
   it('persists and reports a validated multi-attribute command as one batch', async () => {
     const updateAttributes = vi.fn<DynamicCatalogRepositoryPort['updateAttributes']>();
     updateAttributes.mockResolvedValue({

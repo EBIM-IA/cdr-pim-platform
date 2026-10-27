@@ -26,6 +26,7 @@ import {
   type ProductAttributeCell,
   type TemplateAttribute,
   type TemplateAssetRequirement,
+  catalogAttributePermissionsForRoles,
   validateAttributeValue,
 } from '../../domain/entities/catalog-schema';
 import type {
@@ -300,6 +301,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     const accessRows = await this.db
       .select({
         attributeDefinitionId: templateAttributeRoleAccess.attributeDefinitionId,
+        role: templateAttributeRoleAccess.role,
         canEdit: templateAttributeRoleAccess.canEdit,
         canImport: templateAttributeRoleAccess.canImport,
         canExport: templateAttributeRoleAccess.canExport,
@@ -314,15 +316,19 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       );
     const access = new Map<string, { edit: boolean; import: boolean; export: boolean }>();
     for (const row of accessRows) {
+      const rolePermissions = catalogAttributePermissionsForRoles(
+        { edit: row.canEdit, import: row.canImport, export: row.canExport },
+        [row.role],
+      );
       const current = access.get(row.attributeDefinitionId) ?? {
         edit: false,
         import: false,
         export: false,
       };
       access.set(row.attributeDefinitionId, {
-        edit: current.edit || row.canEdit,
-        import: current.import || row.canImport,
-        export: current.export || row.canExport,
+        edit: current.edit || rolePermissions.edit,
+        import: current.import || rolePermissions.import,
+        export: current.export || rolePermissions.export,
       });
     }
 
@@ -540,8 +546,30 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       if (options.completeness === 'incomplete') filters.push(sql`${score} < 100`);
     }
 
-    if (options.q) {
-      const pattern = `%${escapeLike(options.q)}%`;
+    for (const term of [
+      ...new Set(
+        normalizeAxFilterText(options.q ?? '')
+          .trim()
+          .split(/\s+/u)
+          .filter(Boolean),
+      ),
+    ]) {
+      // Vocabulary supplied by the designer; both the typed term and its synonym remain valid.
+      const synonyms: Record<string, string> = {
+        ruliman: 'rodamiento',
+        balinera: 'rodamiento',
+        reten: 'retenedor',
+        faja: 'banda',
+        balata: 'pastilla',
+      };
+      const patterns = [
+        ...new Set([term, synonyms[term]].filter((word): word is string => Boolean(word))),
+      ].map((word) => `%${escapeLike(word)}%`);
+      const matches = (expression: SQL) =>
+        sql<boolean>`${normalizedAxColumnSql(expression)} LIKE ANY (ARRAY[${sql.join(
+          patterns.map((pattern) => sql`${pattern}`),
+          sql`, `,
+        )}]::text[])`;
       const visibleIds = workbookSchema.columns.map((column) => column.id);
       const attributeSearch =
         visibleIds.length > 0
@@ -572,25 +600,43 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           )
           AND qra.can_view = TRUE
           AND qv.deleted_at IS NULL
-          AND COALESCE(
-            qv.value_text,
-            qv.value_number::text,
-            qv.value_boolean::text,
-            qv.value_date::text,
-            qv.value_json::text
-          ) ILIKE ${pattern}
+          AND ${matches(sql`COALESCE(qv.value_text, qv.value_number::text, qv.value_boolean::text, qv.value_date::text, qv.value_json::text)`)}
       )`
           : sql<boolean>`FALSE`;
       const identifierSearch = sql<boolean>`EXISTS (
         SELECT 1 FROM product_identifiers qi
         WHERE qi.product_id = ${products.id}
-          AND qi.value ILIKE ${pattern}
+          AND ${matches(sql`qi.value`)}
       )`;
       const search = or(
-        ilike(products.sku, pattern),
-        ilike(products.name, pattern),
-        ilike(products.description, pattern),
-        ilike(products.brand, pattern),
+        sql`${matches(sql`${products.sku}`)}`,
+        sql`${matches(sql`${products.name}`)}`,
+        sql`${matches(sql`${products.description}`)}`,
+        sql`${matches(sql`${products.brand}`)}`,
+        sql`${catalogCategories.active} = TRUE AND ${matches(sql`${catalogCategories.path}`)}`,
+        sql<boolean>`EXISTS (
+          SELECT 1 FROM equivalence_group_members qgm
+          INNER JOIN equivalence_groups qg ON qg.id = qgm.group_id
+          WHERE qgm.product_id = ${products.id}
+            AND (
+              ${matches(sql`qg.code`)}
+              OR EXISTS (
+                SELECT 1 FROM external_homologs qh
+                WHERE qh.equivalence_group_id = qgm.group_id
+                  AND qh.active = TRUE AND qh.approval_status = 'approved'
+                  AND ${matches(sql`concat_ws(' ', qh.external_code, qh.external_brand)`)}
+              ) OR EXISTS (
+                SELECT 1 FROM group_oem_codes qo
+                WHERE qo.equivalence_group_id = qgm.group_id
+                  AND qo.active = TRUE AND qo.approval_status = 'approved'
+                  AND ${matches(sql`concat_ws(' ', qo.oem_code, array_to_string(qo.brands, ' '))`)}
+              ) OR EXISTS (
+                SELECT 1 FROM group_applications qa
+                WHERE qa.equivalence_group_id = qgm.group_id AND qa.active = TRUE
+                  AND ${matches(sql`concat_ws(' ', qa.vehicle_type, qa.make, qa.model, qa.body_style, qa.fuel, qa.traction, qa.displacement, qa.area, qa.subarea, qa.engine, qa.year_from, qa.year_to)`)}
+              )
+            )
+        )`,
         identifierSearch,
         attributeSearch,
       );
@@ -1473,6 +1519,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
         position: templateAttributeAssignments.position,
+        role: templateAttributeRoleAccess.role,
         canEdit: templateAttributeRoleAccess.canEdit,
         canImport: templateAttributeRoleAccess.canImport,
         canExport: templateAttributeRoleAccess.canExport,
@@ -1514,11 +1561,14 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     for (const row of rows) {
       const template = byTemplate.get(row.templateId) ?? new Map<string, TemplateAttribute>();
       const previous = template.get(row.key);
-      const rolePermissions = {
-        edit: row.canEdit,
-        import: row.canImport,
-        export: row.canExport,
-      };
+      const rolePermissions = catalogAttributePermissionsForRoles(
+        {
+          edit: row.canEdit,
+          import: row.canImport,
+          export: row.canExport,
+        },
+        [row.role],
+      );
       const definition = toTemplateAttribute(row, {
         edit: (previous?.permissions.edit ?? false) || rolePermissions.edit,
         import: (previous?.permissions.import ?? false) || rolePermissions.import,

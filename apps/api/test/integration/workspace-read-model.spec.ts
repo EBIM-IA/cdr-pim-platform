@@ -229,13 +229,15 @@ describe('PostgresWorkspaceReadModel', () => {
       value: 1,
       format: 'integer',
     });
-    expect(catalogs.actions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'share-catalog', availability: 'supported' }),
-      ]),
-    );
+    expect(catalogs.actions.some((action) => action.id === 'share-catalog')).toBe(false);
     expect(catalogs.actions.some((action) => action.id === 'upload-catalog')).toBe(false);
-    const editable = await readModel.read('catalogs', { ...actor, roles: [Role.Purchasing] });
+    const purchasing = await readModel.read('catalogs', { ...actor, roles: [Role.Purchasing] });
+    expect(
+      purchasing.actions.some(
+        (action) => action.id === 'upload-catalog' || action.id === 'share-catalog',
+      ),
+    ).toBe(false);
+    const editable = await readModel.read('catalogs', { ...actor, roles: [Role.Administrator] });
     expect(editable.actions).toContainEqual(
       expect.objectContaining({ id: 'upload-catalog', availability: 'supported' }),
     );

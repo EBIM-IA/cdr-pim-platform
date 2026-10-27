@@ -28,9 +28,9 @@ import { DrizzleProductCatalogRepository } from '../../src/modules/product-catal
 import { type TestDatabase, createTestDatabase } from './database.helper';
 const instant = new Date('2026-10-23T12:00:00Z');
 const actor: AuthenticatedActor = {
-  id: 'buyer-1',
-  email: 'buyer@example.test',
-  roles: [Role.Purchasing],
+  id: 'admin-1',
+  email: 'admin@example.test',
+  roles: [Role.Administrator],
 };
 const metadata = {
   title: 'SKF 2026',
@@ -210,6 +210,12 @@ describe('private PDF catalog persistence and workflow', () => {
     await expect(s.download.execute(created.catalog.id)).rejects.toThrow(
       'ProductCatalog not found',
     );
+    await expect(
+      s.list.execute(
+        { page: 1, pageSize: 100, includeDeleted: true },
+        { ...actor, roles: [Role.Purchasing] },
+      ),
+    ).rejects.toThrow('Only catalog editors can view deleted catalogs');
     expect(
       (await s.list.execute({ page: 1, pageSize: 100, includeDeleted: false }, actor)).total,
     ).toBe(0);

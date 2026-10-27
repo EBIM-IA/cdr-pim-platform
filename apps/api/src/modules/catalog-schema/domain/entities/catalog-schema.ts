@@ -63,6 +63,19 @@ export interface TemplateAttribute extends DynamicAttributeDefinition {
   };
 }
 
+/** Role access rows control visibility and export; consultation profiles cannot gain writes. */
+export function catalogAttributePermissionsForRoles(
+  permissions: TemplateAttribute['permissions'],
+  roles: readonly string[],
+): TemplateAttribute['permissions'] {
+  const administrator = roles.includes('ADMINISTRADOR');
+  return {
+    edit: administrator && permissions.edit,
+    import: administrator && permissions.import,
+    export: permissions.export,
+  };
+}
+
 export interface DynamicCatalogSchema {
   readonly category: {
     readonly id: Uuid;

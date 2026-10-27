@@ -11,6 +11,7 @@ import { ChevronLeft, ChevronRight, Columns3, Search, SlidersHorizontal, X } fro
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { CatalogSearch } from '@/components/catalog-search';
 import { PageHeader } from '@/components/page-header';
 import { CatalogWorkbookTable } from '@/components/catalog-workbook-table';
 import { DynamicCatalogSheet } from '@/components/dynamic-catalog-sheet';
@@ -25,7 +26,6 @@ import {
   CategoryTreeSelect,
   type CategoryTreeSelectOption,
 } from '@/components/ui/category-tree-select';
-import { Input } from '@/components/ui/input';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -132,6 +132,7 @@ function ProductCatalogList({
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/products/${encodeURIComponent(product.id)}`}
+                title={`Ver ficha técnica de ${product.sku}`}
                 className="break-all text-base font-extrabold tracking-tight hover:text-primary"
               >
                 {product.sku}
@@ -557,6 +558,20 @@ export function ProductsCatalog({
                 </Button>
               ))}
             </div>
+            {view === 'table' ? (
+              <CategoryTreeSelect
+                label="Filtrar la tabla por categoría"
+                value={category}
+                placeholder="Todas las categorías"
+                options={categoryOptions}
+                disabled={catalogCategories.length === 0}
+                onValueChange={(value) => {
+                  setCategory(value);
+                  setPage(1);
+                }}
+                className="w-64 max-w-full"
+              />
+            ) : null}
             {canViewImports ? (
               <Button asChild variant="secondary" size="sm">
                 <Link href="/imports">Importaciones</Link>
@@ -614,27 +629,18 @@ export function ProductsCatalog({
         <>
           <Card className="mb-3 overflow-visible">
             <div className="flex flex-wrap items-center gap-2 p-2.5">
-              <label className="relative min-w-0 flex-[1_1_320px]">
-                <span className="sr-only">Buscar en el catálogo</span>
-                <Input
-                  type="search"
-                  aria-label="Buscar en el catálogo"
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="Buscar por SKU, marca, categoría o cualquier atributo: 2RS, caucho, C3, FMSI…"
-                  className="h-9 bg-slate-50 pr-9 text-xs [&::-webkit-search-cancel-button]:appearance-none"
-                />
-                {searchInput ? (
-                  <button
-                    type="button"
-                    onClick={clearSearch}
-                    aria-label="Limpiar búsqueda"
-                    className="absolute right-1 top-1 grid size-7 place-items-center rounded hover:bg-slate-100"
-                  >
-                    <X aria-hidden="true" className="size-3.5" />
-                  </button>
-                ) : null}
-              </label>
+              <CatalogSearch
+                value={searchInput}
+                onChange={setSearchInput}
+                showDescription={showTableDescriptionAndTemplate}
+                onSearch={(query, filter) => {
+                  setSearchInput(query);
+                  setDebouncedSearch(query.trim());
+                  if (filter?.categoryId) setCategory(filter.categoryId);
+                  if (filter?.brand) setBrand(filter.brand);
+                  setPage(1);
+                }}
+              />
               {canViewQuality ? (
                 <Button asChild variant="secondary" size="sm">
                   <Link href="/quality?view=search">
@@ -669,17 +675,19 @@ export function ProductsCatalog({
                 id="catalog-advanced-filters"
                 className="grid gap-3 border-t bg-white p-3 sm:grid-cols-2 xl:grid-cols-5"
               >
-                <CategoryTreeSelect
-                  label="Línea / categoría"
-                  value={category}
-                  placeholder="Todas las categorías"
-                  options={categoryOptions}
-                  disabled={catalogCategories.length === 0}
-                  onValueChange={(value) => {
-                    setCategory(value);
-                    setPage(1);
-                  }}
-                />
+                {view !== 'table' ? (
+                  <CategoryTreeSelect
+                    label="Línea / categoría"
+                    value={category}
+                    placeholder="Todas las categorías"
+                    options={categoryOptions}
+                    disabled={catalogCategories.length === 0}
+                    onValueChange={(value) => {
+                      setCategory(value);
+                      setPage(1);
+                    }}
+                  />
+                ) : null}
                 <SearchableSelect
                   label="Marca"
                   value={brand}

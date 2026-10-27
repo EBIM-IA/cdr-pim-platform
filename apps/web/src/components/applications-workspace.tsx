@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Trash2,
   Upload,
   X,
@@ -31,6 +32,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { downloadCsv, downloadXlsx } from '@/lib/tabular-export';
+import { applicationMatches, findApplicationUnifiedCodes } from '@/lib/application-search';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   createApplication,
@@ -195,6 +197,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [queryInput, setQueryInput] = useState('');
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [productSearch, setProductSearch] = useState<{
+    query: string;
+    codes: ReadonlySet<string>;
+    loading: boolean;
+    error: string | null;
+  }>({ query: '', codes: new Set(), loading: false, error: null });
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingCell, setEditingCell] = useState<EditingApplicationCell | null>(null);
@@ -233,29 +243,48 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   useEffect(() => void load(), [load]);
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('es');
-    return items.filter(
-      (item) =>
-        !normalized ||
-        [
-          item.unifiedCode,
-          item.vehicleType,
-          item.make,
-          item.model,
-          item.bodyStyle,
-          item.fuel,
-          item.traction,
-          item.displacement,
-          item.area,
-          item.subarea,
-          item.engine,
-          item.notes,
-        ]
-          .filter(Boolean)
-          .some((value) => String(value).toLocaleLowerCase('es').includes(normalized)),
-    );
-  }, [items, query]);
+  const directMatches = useMemo(
+    () => items.filter((item) => applicationMatches(query, item)),
+    [items, query],
+  );
+  useEffect(() => {
+    if (!query || directMatches.length || loading) return;
+    const controller = new AbortController();
+    setProductSearch({ query, codes: new Set(), loading: true, error: null });
+    void findApplicationUnifiedCodes(
+      query,
+      items.map((item) => item.unifiedCode),
+      controller.signal,
+    )
+      .then((codes) => {
+        if (!controller.signal.aborted)
+          setProductSearch({ query, codes, loading: false, error: null });
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted)
+          setProductSearch({
+            query,
+            codes: new Set(),
+            loading: false,
+            error:
+              reason instanceof Error
+                ? reason.message
+                : 'No fue posible buscar productos relacionados.',
+          });
+      });
+    return () => controller.abort();
+  }, [directMatches.length, items, loading, query, searchRevision]);
+  const filtered =
+    directMatches.length || !query
+      ? directMatches
+      : productSearch.query === query
+        ? items.filter((item) => productSearch.codes.has(item.unifiedCode))
+        : [];
+  const searchingProducts = Boolean(
+    query && !directMatches.length && productSearch.query === query && productSearch.loading,
+  );
+  const productSearchError =
+    query && !directMatches.length && productSearch.query === query ? productSearch.error : null;
 
   const unifiedCodes = useMemo(
     () => [...new Set(items.map((item) => item.unifiedCode))].sort(),
@@ -432,13 +461,69 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       <ScreenGuide
         objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
         actions={[
-          'Busca por código, marca, modelo, tipo, combustible, tracción, cilindraje, área, subárea, motor o notas.',
-          'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
-          'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
+          'Combina vehículo, modelo y año; también puedes buscar por SKU, marca de producto o referencias registradas del catálogo.',
+          ...(canWrite
+            ? [
+                'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
+                'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
+              ]
+            : ['Filtra las columnas y exporta las aplicaciones visibles a Excel.']),
         ]}
         dataSource="Los registros se leen y escriben en el API de aplicaciones. Cada cambio genera auditoría en el backend."
         limitation="El código unificador debe existir previamente; una aplicación no puede asociarse a un código desconocido."
       />
+
+      <Card className="mb-3 p-3">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          role="search"
+          aria-label="Buscador de aplicaciones"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setQuery(queryInput.trim());
+            setSearchRevision((value) => value + 1);
+          }}
+        >
+          <label className="relative min-w-48 flex-1">
+            <Search
+              className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="sr-only">Buscar aplicaciones</span>
+            <Input
+              type="search"
+              value={queryInput}
+              onChange={(event) => setQueryInput(event.target.value)}
+              placeholder="Vehículo, modelo, código unificador o SKU (Toyota Corolla, 6205 SKF…)"
+              className="pl-9"
+            />
+          </label>
+          <Button type="submit" size="sm">
+            Buscar
+          </Button>
+        </form>
+        {query ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Filtros activos</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border bg-slate-50 px-2 py-1"
+              aria-label={`Quitar búsqueda ${query}`}
+              onClick={() => {
+                setQuery('');
+                setQueryInput('');
+              }}
+            >
+              “{query}” <X className="size-3" aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
+        <p className="sr-only" aria-live="polite">
+          {searchingProducts
+            ? 'Buscando aplicaciones…'
+            : `${filtered.length} aplicaciones visibles`}
+        </p>
+      </Card>
 
       <div
         className="sticky top-0 z-20 -mx-1 mb-2 flex flex-wrap items-center gap-1.5 bg-white/95 px-1 py-1.5 backdrop-blur [&_button]:h-[30px] [&_button]:min-h-[30px] [&_button]:text-xs [&_a]:min-h-[30px] [&_a]:text-xs"
@@ -498,12 +583,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               Importar
             </Link>
           </Button>
-        ) : (
-          <Button size="sm" variant="outline" disabled>
-            <Upload className="size-3.5" aria-hidden="true" />
-            Importar
-          </Button>
-        )}
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -522,23 +602,16 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           <Download className="size-3.5" aria-hidden="true" />
           Exportar Excel
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={downloadTemplate}
-          title="Descargar plantilla CSV"
-        >
-          Plantilla
-        </Button>
-        <label className="ml-auto min-w-40 flex-[1_1_180px] text-xs">
-          <span className="sr-only">Buscar aplicaciones</span>
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar en la tabla…"
-            className="h-[30px] min-h-[30px] bg-slate-50 text-xs"
-          />
-        </label>
+        {canWrite ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={downloadTemplate}
+            title="Descargar plantilla CSV"
+          >
+            Plantilla
+          </Button>
+        ) : null}
         <Button
           size="sm"
           variant="ghost"
@@ -576,8 +649,16 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         </div>
       ) : null}
 
-      {loading ? (
+      {loading || searchingProducts ? (
         <Skeleton className="h-80 rounded-xl" />
+      ) : productSearchError && !showForm ? (
+        <StatePanel
+          variant="error"
+          title="No pudimos completar la búsqueda"
+          description={productSearchError}
+          actionLabel="Reintentar búsqueda"
+          onAction={() => setSearchRevision((value) => value + 1)}
+        />
       ) : tableRows.length === 0 && !showForm ? (
         <StatePanel
           variant="empty"

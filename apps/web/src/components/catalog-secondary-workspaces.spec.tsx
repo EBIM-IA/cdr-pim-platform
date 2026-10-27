@@ -210,6 +210,7 @@ describe('catálogo secundario aprobado', () => {
     fireEvent.change(screen.getByLabelText('Buscar aplicaciones'), {
       target: { value: 'SEDAN' },
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
     expect(screen.getByLabelText('Seleccionar aplicación Toyota Corolla')).toBeVisible();
     expect(screen.queryByLabelText('Seleccionar aplicación Ford Fiesta')).not.toBeInTheDocument();
   });

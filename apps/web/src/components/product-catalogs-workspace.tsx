@@ -998,47 +998,50 @@ export function ProductCatalogsWorkspace({
         role="toolbar"
         aria-label="Acciones de catálogos"
       >
-        <Button
-          size="sm"
-          disabled={!canManage || busy}
-          title={!canManage ? 'Solo Administrador y Compras pueden subir catálogos.' : undefined}
-          onClick={() => openForm(null)}
-        >
-          <Plus className="size-3.5" aria-hidden="true" />
-          Subir catálogo
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canManage || !one || Boolean(one.deletedAt) || disabled}
-          onClick={() => one && openForm(one)}
-        >
-          <Pencil className="size-3.5" aria-hidden="true" />
-          Editar
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canShare || !one || !canShareCatalog(one) || disabled}
-          onClick={() => one && setDetail({ catalog: one, focusShare: true })}
-        >
-          <Share2 className="size-3.5" aria-hidden="true" />
-          Compartir
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={
-            !canManage ||
-            !selectedRows.length ||
-            selectedRows.some((row) => row.deletedAt) ||
-            disabled
-          }
-          onClick={() => setDeleting(selectedRows)}
-        >
-          <Trash2 className="size-3.5" aria-hidden="true" />
-          Eliminar{selectedRows.length ? ` (${selectedRows.length})` : ''}
-        </Button>
+        {canManage ? (
+          <Button size="sm" disabled={busy} onClick={() => openForm(null)}>
+            <Plus className="size-3.5" aria-hidden="true" />
+            Subir catálogo
+          </Button>
+        ) : null}
+        {canManage ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!canManage || !one || Boolean(one.deletedAt) || disabled}
+            onClick={() => one && openForm(one)}
+          >
+            <Pencil className="size-3.5" aria-hidden="true" />
+            Editar
+          </Button>
+        ) : null}
+        {canShare ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!canShare || !one || !canShareCatalog(one) || disabled}
+            onClick={() => one && setDetail({ catalog: one, focusShare: true })}
+          >
+            <Share2 className="size-3.5" aria-hidden="true" />
+            Compartir
+          </Button>
+        ) : null}
+        {canManage ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={
+              !canManage ||
+              !selectedRows.length ||
+              selectedRows.some((row) => row.deletedAt) ||
+              disabled
+            }
+            onClick={() => setDeleting(selectedRows)}
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+            Eliminar{selectedRows.length ? ` (${selectedRows.length})` : ''}
+          </Button>
+        ) : null}
         {canManage && (scope !== 'active' || one?.deletedAt) ? (
           <Button
             size="sm"
@@ -1324,7 +1327,9 @@ export function ProductCatalogsWorkspace({
                     ? 'Cambia la búsqueda o quita los filtros para consultar los catálogos disponibles.'
                     : scope === 'deleted'
                       ? 'Las bajas aparecerán aquí para consultar su historial y restaurarlas.'
-                      : 'Sube el PDF de un catálogo con su título, descripción y vigencia. Después podrás compartirlo con un enlace que vence en el plazo que elijas.'}
+                      : canManage
+                        ? 'Sube el PDF de un catálogo con su título, descripción y vigencia. Después podrás compartirlo con un enlace que vence en el plazo que elijas.'
+                        : 'Los catálogos publicados aparecerán aquí para consultarlos y descargar sus archivos PDF.'}
                 </p>
                 {appliedQuery || table.filteredColumnKeys.length ? (
                   <Button size="sm" variant="outline" onClick={clear}>
@@ -1372,7 +1377,9 @@ export function ProductCatalogsWorkspace({
         )}
         <p className="border-t px-4 py-3 text-[11px] text-muted-foreground">
           {!canManage
-            ? 'Tu rol consulta, descarga y comparte; suben, editan y eliminan Administrador y Compras. '
+            ? canShare
+              ? 'Tu perfil consulta, descarga y comparte catálogos. '
+              : 'Tu perfil consulta y descarga catálogos. '
             : ''}
           La exportación incluye todos los catálogos que coinciden con los filtros. Las bajas y los
           enlaces quedan registrados en Auditoría.

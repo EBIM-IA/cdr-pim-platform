@@ -72,7 +72,10 @@ describe('ClamavScannerAdapter real TCP protocol', () => {
     const content = new Uint8Array(256 * 1024 + 7).map((_, index) => index % 256);
     await expect(scanner(port).assertClean(content)).resolves.toBeUndefined();
     expect(received.mock.calls.map(([command]) => command)).toEqual(['zVERSION', 'zINSTREAM']);
-    expect(received.mock.calls[1]?.[1]).toEqual(Buffer.from(content));
+    const payload = received.mock.calls[1]?.[1] as Buffer;
+    expect(payload.byteLength).toBe(content.byteLength);
+    // Native binary equality checks every byte without a recursive matcher per byte.
+    expect(payload.equals(content)).toBe(true);
   });
   it('blocks a threat reported by the real engine protocol without implementing a sample signature match', async () => {
     const port = await daemon((command, _content, socket) =>

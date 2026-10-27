@@ -352,18 +352,6 @@ export function CategoriesAdminWorkspace() {
         </span>
       </section>
 
-      <details className="mb-4 rounded-lg border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-        <summary className="cursor-pointer text-sm text-cdr-ink">
-          Cómo llega la categoría desde el ERP
-        </summary>
-        <p className="mt-2">
-          Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
-          interpreta como una sola categoría, no como un nodo duplicado. Si esa categoría tiene
-          varios subtipos, se muestran como variantes de plantilla y la asignación se realiza por
-          producto, sin agregar otro nivel al árbol.
-        </p>
-      </details>
-
       {notice ? (
         <div
           className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
@@ -737,6 +725,17 @@ export function CategoriesAdminWorkspace() {
           </div>
         </Card>
       )}
+      <details className="mt-4 rounded-lg border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+        <summary className="cursor-pointer text-sm text-cdr-ink">
+          Cómo llega la categoría desde el ERP
+        </summary>
+        <p className="mt-2">
+          Las ramas pueden terminar en nivel 2 o 3. Cuando el Excel repite el nivel final, el PIM lo
+          interpreta como una sola categoría, no como un nodo duplicado. Si esa categoría tiene
+          varios subtipos, se muestran como variantes de plantilla y la asignación se realiza por
+          producto, sin agregar otro nivel al árbol.
+        </p>
+      </details>
       {view === 'tree' && editingId && categories.find((category) => category.id === editingId) ? (
         <WorkspaceDrawer
           title="Editar categoría"

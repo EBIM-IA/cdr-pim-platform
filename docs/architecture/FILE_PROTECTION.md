@@ -25,8 +25,20 @@ how the container resolves `localhost`. This increases runtime
 capacity compared with an API-only task.
 
 FreshClam checks for updates twelve times daily. The container includes initial
-definitions and updates them without rebuilding the application. A failed update
-cannot silently allow arbitrarily old definitions. Scan limits are explicit:
+definitions and updates them without rebuilding the application. Before the
+official `/init` starts the daemons, `scripts/start-clamav.sh` runs one synchronous
+FreshClam update. This also refreshes databases already embedded in the pinned
+image: the upstream launcher otherwise updates those concurrently with ClamD,
+which can exit first when the embedded signatures are older than seven days.
+The one-shot configuration suppresses only `NotifyClamd` while no scanner exists;
+database validation remains enabled and the ongoing updater uses its original
+configuration. An update failure prevents daemon startup. `FailIfCvdOlderThan=7`
+and the application's seven-day metadata check remain enforced.
+
+ECS embeds this exact checked-in launcher in the task definition. The running-task
+checker accepts only that entrypoint and command, with the pinned image and
+private health-checked listener; arbitrary startup overrides are rejected.
+Compose and the real-engine CI gate mount the same launcher read-only. Scan limits are explicit:
 64 MiB per file/stream, 256 MiB expanded data, 1000 files, recursion depth 16 and
 20 seconds engine time. Inputs exceeding limits or containing encrypted data
 are rejected by the configured engine. Two scan threads and non-concurrent
@@ -83,7 +95,7 @@ standard test file. Run that check locally with:
 ```sh
 docker compose --profile security up -d clamav
 pnpm --filter @cdr/storage... build
-node scripts/verify-file-scanner.mjs 180
+node scripts/verify-file-scanner.mjs 300
 ```
 
 The command checks clean-file storage, real EICAR detection, failure when the

@@ -12,6 +12,7 @@ export const importBatchStatusSchema = z.enum(['previewed', 'processing', 'confi
 export type ImportBatchStatus = z.infer<typeof importBatchStatusSchema>;
 
 const safeImportRecordSchema = z.record(
+  z.string(),
   z.union([
     z.string().max(20_000),
     z.number().finite(),

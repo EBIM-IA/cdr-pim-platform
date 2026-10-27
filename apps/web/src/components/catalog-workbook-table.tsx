@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePersistentColumnOrder } from '@/components/column-order';
 import {
@@ -269,6 +269,8 @@ export function CatalogWorkbookTable({
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [columnExpressions, setColumnExpressions] = useState<Record<string, string>>({});
+  const scrollArea = useRef<HTMLDivElement>(null);
+  const pagination = useRef<HTMLDivElement>(null);
 
   const columns = useMemo<WorkbookColumn[]>(
     () => [
@@ -303,6 +305,7 @@ export function CatalogWorkbookTable({
   const columnOrder = usePersistentColumnOrder({
     screenKey: 'products-catalog',
     columnKeys: columns.map((column) => column.key),
+    fixedColumnKeys: ['base:sku'],
   });
   const orderedColumns = columnOrder.orderedColumnKeys.flatMap((key) => {
     const column = columns.find((candidate) => candidate.key === key);
@@ -399,6 +402,26 @@ export function CatalogWorkbookTable({
   );
   const exportColumns = orderedColumns.filter((column) => column.exportable);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    const area = scrollArea.current;
+    if (!area) return;
+    const fit = () => {
+      const footerHeight =
+        document.querySelector('.cdr-footer')?.getBoundingClientRect().height ?? 36;
+      const pageHeight = pagination.current?.getBoundingClientRect().height ?? 0;
+      area.style.maxHeight = `${Math.max(260, window.innerHeight - area.getBoundingClientRect().top - pageHeight - footerHeight - 8)}px`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
+    const main = area.closest('main');
+    if (main) observer?.observe(main);
+    return () => {
+      window.removeEventListener('resize', fit);
+      observer?.disconnect();
+    };
+  });
 
   const makeExportData = (products: readonly CatalogWorkbookProductDto[]): TabularData => ({
     headers: exportColumns.map((column) => column.label),
@@ -561,10 +584,7 @@ export function CatalogWorkbookTable({
             Tramado: no aplica a la plantilla
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="size-3 rounded-sm border border-red-200 bg-red-50"
-            />
+            <span aria-hidden="true" className="cdr-missing-swatch size-3 rounded-sm border" />
             Rosado: atributo obligatorio sin valor
           </span>
         </div>
@@ -654,8 +674,12 @@ export function CatalogWorkbookTable({
         }}
       />
 
-      <div className="scrollbar-thin max-w-full overflow-x-auto">
-        <table className="w-max min-w-full border-collapse text-left text-xs" aria-busy={loading}>
+      <div ref={scrollArea} className="scrollbar-thin max-w-full overflow-auto">
+        <table
+          className="cdr-workbook-table w-max min-w-full border-collapse text-left text-xs"
+          data-column-resize-key="products-workbook"
+          aria-busy={loading}
+        >
           <caption className="sr-only">
             Tabla dinámica del catálogo con atributos de las plantillas activas
           </caption>
@@ -711,7 +735,11 @@ export function CatalogWorkbookTable({
                     setPage(1);
                     table.setSort(column.key, direction);
                   }}
-                  reorder={columnOrder.getColumnControl(column.key, column.label)}
+                  reorder={
+                    column.key === 'base:sku'
+                      ? undefined
+                      : columnOrder.getColumnControl(column.key, column.label)
+                  }
                   className={cn(
                     'max-w-[240px] border-r last:border-r-0',
                     column.key === 'base:sku' && 'sticky left-0 z-20 bg-white',
@@ -732,6 +760,7 @@ export function CatalogWorkbookTable({
                 key={row.id}
                 aria-selected={selectedRowId === row.id}
                 onClick={() => setSelectedRowId(row.id)}
+                onFocusCapture={() => setSelectedRowId(row.id)}
                 className={cn(
                   'group/row hover:bg-orange-50/40',
                   selectedRowId === row.id && 'bg-[#fff1e6]',
@@ -743,6 +772,7 @@ export function CatalogWorkbookTable({
                     return (
                       <td
                         key={column.key}
+                        data-cell-state="not-applicable"
                         className={cn(
                           'max-w-[280px] border-r px-3 py-2.5',
                           column.key === 'base:sku' &&
@@ -813,6 +843,7 @@ export function CatalogWorkbookTable({
                   return (
                     <td
                       key={column.key}
+                      data-cell-state={cell.required && cell.value === null ? 'missing' : undefined}
                       className={cn(
                         'min-w-36 border-r px-2 py-1.5',
                         index > 0 &&
@@ -916,17 +947,17 @@ export function CatalogWorkbookTable({
                               draft: editableDraft(cell.value),
                             });
                           }}
-                          className="group flex min-h-8 w-full items-center justify-between gap-2 rounded px-1 text-left hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                          className="group flex min-h-5 w-full items-center justify-between gap-2 rounded px-1 text-left hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
                           aria-label={`Editar ${attribute.label} de ${row.sku}`}
                         >
                           <span>{displayCell(cell.value)}</span>
                           <Pencil
                             aria-hidden="true"
-                            className="size-3 shrink-0 text-blue-600 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                            className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
                           />
                         </button>
                       ) : (
-                        <span className="block min-h-8 px-1 py-1.5">{displayCell(cell.value)}</span>
+                        <span className="block min-h-5 px-1 py-0.5">{displayCell(cell.value)}</span>
                       )}
                     </td>
                   );
@@ -954,7 +985,10 @@ export function CatalogWorkbookTable({
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
+      <div
+        ref={pagination}
+        className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground"
+      >
         <span>
           {total === 0
             ? '0 productos'

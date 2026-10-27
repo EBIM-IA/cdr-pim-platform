@@ -1,7 +1,7 @@
 'use client';
 
 import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
-import { ChevronRight, Minus, Pencil, Plus, RotateCcw, ToggleLeft } from 'lucide-react';
+import { ChevronRight, Minus, Pencil, Plus, RotateCcw, ToggleLeft, X } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -90,98 +90,148 @@ export function CategoryTreePanel({
             </Button>
           </div>
         </div>
-        <ul className="max-h-[650px] overflow-y-auto py-2" aria-label="Jerarquía de categorías">
-          {visible.map(({ category, depth, leaf }) => {
-            const activeVariants = templatesForCategory(category.id).filter(
-              (template) => template.status === 'active',
-            );
-            const expanded = searching || !collapsed.has(category.id);
-            return (
-              <li
-                key={category.id}
-                className={cn(
-                  'flex min-h-8 items-center gap-1 border-b border-slate-100 pr-3 last:border-0',
-                  showDetail && selected?.category.id === category.id
-                    ? 'bg-orange-50'
-                    : 'hover:bg-slate-50',
-                )}
-                style={{ paddingLeft: `${12 + depth * 22}px` }}
-              >
-                {!leaf ? (
-                  <button
-                    type="button"
-                    className="grid size-7 shrink-0 place-items-center rounded hover:bg-orange-100"
-                    aria-label={`${expanded ? 'Contraer' : 'Expandir'} ${category.name}`}
-                    aria-expanded={expanded}
-                    onClick={() =>
-                      setCollapsed((current) => {
-                        const next = new Set(current);
-                        if (next.has(category.id)) next.delete(category.id);
-                        else next.add(category.id);
-                        return next;
-                      })
-                    }
-                  >
-                    <span className="grid size-3.5 place-items-center rounded-sm border border-slate-400">
-                      {expanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
-                    </span>
-                  </button>
-                ) : (
-                  <span className="size-7 shrink-0" />
-                )}
-                <button
-                  type="button"
-                  aria-label={`Seleccionar categoría ${category.name}`}
-                  aria-pressed={selected?.category.id === category.id}
-                  onClick={() => {
-                    setSelectedId(category.id);
-                    setShowDetail(true);
-                    onInspectCategory?.(category.id);
-                  }}
-                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
+        <div className="overflow-x-auto">
+          <div
+            className="grid min-w-[520px] grid-cols-[minmax(260px,1fr)_144px_64px] gap-3 border-b bg-slate-50 px-4 py-2 text-xs font-semibold text-muted-foreground"
+            aria-hidden="true"
+          >
+            <span>Categoría</span>
+            <span>Plantilla</span>
+            <span className="text-right">SKU</span>
+          </div>
+          <ul
+            className="max-h-[650px] min-w-[520px] overflow-y-auto"
+            aria-label="Jerarquía de categorías"
+          >
+            {visible.map(({ category, depth, leaf }) => {
+              const activeVariants = templatesForCategory(category.id).filter(
+                (template) => template.status === 'active',
+              );
+              const expanded = searching || !collapsed.has(category.id);
+              return (
+                <li
+                  key={category.id}
+                  className={cn(
+                    'grid min-h-9 grid-cols-[minmax(260px,1fr)_144px_64px] items-center gap-3 border-b border-slate-100 px-4 last:border-0',
+                    showDetail && selected?.category.id === category.id
+                      ? 'bg-orange-50'
+                      : 'hover:bg-slate-50',
+                  )}
                 >
                   <span
-                    className={cn(
-                      'min-w-0 flex-1 break-words text-sm',
-                      !category.active && 'text-muted-foreground line-through',
-                    )}
+                    className="flex min-w-0 items-center"
+                    style={{ paddingLeft: `${depth * 24}px` }}
                   >
-                    {category.name}
-                  </span>
-                  {leaf ? (
-                    <span className="ml-3 inline-flex min-w-28 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    {!leaf ? (
+                      <button
+                        type="button"
+                        className="grid size-7 shrink-0 place-items-center rounded hover:bg-orange-100"
+                        aria-label={`${expanded ? 'Contraer' : 'Expandir'} ${category.name}`}
+                        aria-expanded={expanded}
+                        onClick={() =>
+                          setCollapsed((current) => {
+                            const next = new Set(current);
+                            if (next.has(category.id)) next.delete(category.id);
+                            else next.add(category.id);
+                            return next;
+                          })
+                        }
+                      >
+                        <span className="grid size-3.5 place-items-center rounded-sm border border-slate-400">
+                          {expanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
+                        </span>
+                      </button>
+                    ) : (
+                      <span className="size-7 shrink-0" />
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Seleccionar categoría ${category.name}`}
+                      aria-pressed={showDetail && selected?.category.id === category.id}
+                      onClick={() => {
+                        setSelectedId(category.id);
+                        setShowDetail(true);
+                        onInspectCategory?.(category.id);
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
+                    >
                       <span
                         className={cn(
-                          'size-1.5 rounded-full',
-                          activeVariants.length ? 'bg-emerald-600' : 'bg-amber-500',
+                          'min-w-0 flex-1 break-words text-sm',
+                          !category.active && 'text-muted-foreground line-through',
                         )}
-                        aria-hidden="true"
-                      />
-                      {activeVariants.length
-                        ? `${activeVariants.length} plantilla${activeVariants.length > 1 ? 's' : ''}`
-                        : 'Sin plantilla'}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                      >
+                        {category.name}
+                      </span>
+                    </button>
+                  </span>
+                  <span>
+                    {leaf ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                        title={
+                          activeVariants.length > 1
+                            ? `${activeVariants.length} variantes de plantilla activas`
+                            : undefined
+                        }
+                      >
+                        <span
+                          className={cn(
+                            'size-1.5 rounded-full',
+                            activeVariants.length ? 'bg-emerald-600' : 'bg-amber-500',
+                          )}
+                          aria-hidden="true"
+                        />
+                        {activeVariants.length ? 'Con plantilla' : 'Sin plantilla'}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span
+                    className="text-right text-xs tabular-nums text-muted-foreground"
+                    aria-label={`SKU en ${category.name}`}
+                    title={
+                      category.skuCount !== undefined
+                        ? 'Incluye los SKU de sus subcategorías'
+                        : 'Conteo de SKU no disponible'
+                    }
+                  >
+                    {category.skuCount ?? '—'}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </Card>
       {showDetail && selected ? (
-        <Card id="category-detail" className="overflow-hidden">
-          <div className="border-b p-4">
-            <p className="text-xs text-muted-foreground">
-              Nivel {selected.depth + 1} ·{' '}
-              {selected.leaf ? 'Categoría final' : 'Categoría estructural'}
-            </p>
-            <h2 className="mt-1 text-xl font-semibold">{selected.category.name}</h2>
-            <p className="mt-2 break-words text-xs text-muted-foreground">
-              {selected.category.path.replaceAll('/', ' › ')}
-            </p>
+        <Card id="category-detail" className="overflow-hidden" aria-label="Detalle de la categoría">
+          <div className="flex items-start justify-between gap-3 border-b p-4">
+            <div>
+              <p className="text-xs text-muted-foreground">
+                Nivel {selected.depth + 1} ·{' '}
+                {selected.leaf ? 'Categoría final' : 'Categoría estructural'}
+              </p>
+              <h2 className="mt-1 text-xl font-semibold">{selected.category.name}</h2>
+              <p className="mt-2 break-words text-xs text-muted-foreground">
+                {selected.category.path.replaceAll('/', ' › ')}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Ocultar detalle"
+              title="Ocultar detalle"
+              onClick={() => setShowDetail(false)}
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
           </div>
           <div className="space-y-5 p-4">
             <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">SKU</dt>
+                <dd>{selected.category.skuCount ?? 'Sin conteo disponible'}</dd>
+              </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Aplicación</dt>
                 <dd>{selected.category.application ?? 'Sin definir'}</dd>
@@ -203,7 +253,10 @@ export function CategoryTreePanel({
                 variants.length ? (
                   <ul className="space-y-2">
                     {variants.map((template) => (
-                      <li key={template.id} className="rounded-lg border p-3">
+                      <li
+                        key={template.id}
+                        className="border-b border-slate-100 py-2 last:border-0"
+                      >
                         <Link
                           className="text-sm text-primary underline-offset-2 hover:underline"
                           href={`/templates?template=${encodeURIComponent(template.id)}`}
@@ -226,7 +279,7 @@ export function CategoryTreePanel({
                     ))}
                   </ul>
                 ) : (
-                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="text-sm text-muted-foreground">
                     Pendiente de definición. Esta categoría todavía no tiene una plantilla
                     persistida.
                   </p>
@@ -256,30 +309,37 @@ export function CategoryTreePanel({
                 </ul>
               )}
             </section>
-            <div className="flex flex-wrap gap-2 border-t pt-4">
-              <Button size="sm" variant="outline" onClick={() => onEdit(selected.category)}>
-                <Pencil className="size-3.5" />
-                Editar categoría
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={savingId !== null}
-                onClick={() => onSetActive(selected.category, !selected.category.active)}
-              >
-                {selected.category.active ? (
-                  <ToggleLeft className="size-3.5" />
-                ) : (
-                  <RotateCcw className="size-3.5" />
-                )}
-                {selected.category.active ? 'Desactivar' : 'Reactivar'}
-              </Button>
-            </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               Las variantes pertenecen a la categoría final. Cada producto conserva su asignación de
               plantilla.
             </p>
           </div>
+          <footer className="flex flex-wrap gap-2 border-t p-4">
+            <Button size="sm" variant="outline" onClick={() => onEdit(selected.category)}>
+              <Pencil className="size-3.5" />
+              Editar categoría
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={savingId !== null}
+              onClick={() => onSetActive(selected.category, !selected.category.active)}
+            >
+              {selected.category.active ? (
+                <ToggleLeft className="size-3.5" />
+              ) : (
+                <RotateCcw className="size-3.5" />
+              )}
+              {selected.category.active ? 'Desactivar' : 'Reactivar'}
+            </Button>
+            {(selected.category.skuCount ?? 0) > 0 ? (
+              <Button size="sm" asChild>
+                <Link href={`/products?category=${encodeURIComponent(selected.category.id)}`}>
+                  Ver productos
+                </Link>
+              </Button>
+            ) : null}
+          </footer>
         </Card>
       ) : null}
     </div>

@@ -22,7 +22,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "tailwind-merge": "^3.3.1",
-    "zod": "^3.25.76"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cdr/eslint-config": "workspace:*",

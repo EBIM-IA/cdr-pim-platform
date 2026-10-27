@@ -1,9 +1,10 @@
 import { assertUuid, newUuid, ValidationError } from '@cdr/shared';
-import { adminTemplateSchema } from '@cdr/contracts';
+import { adminCatalogCategorySchema, adminTemplateSchema } from '@cdr/contracts';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { seedDemoCatalog } from '../../src/database/demo-seed';
+import { CLIENT_TEMPLATE_MANIFEST } from '../../src/database/client-template-manifest';
 import {
   auditEntries,
   productAttributeValues,
@@ -11,7 +12,10 @@ import {
 } from '../../src/database/schema';
 import { DrizzleCatalogAdministrationRepository } from '../../src/modules/catalog-schema/infrastructure/persistence/drizzle-catalog-administration.repository';
 import { DrizzleDynamicCatalogRepository } from '../../src/modules/catalog-schema/infrastructure/persistence/drizzle-dynamic-catalog.repository';
-import { toAdminTemplateDto } from '../../src/modules/catalog-schema/presentation/catalog-administration.presenter';
+import {
+  toAdminCategoryDto,
+  toAdminTemplateDto,
+} from '../../src/modules/catalog-schema/presentation/catalog-administration.presenter';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
 describe('DrizzleCatalogAdministrationRepository', () => {
@@ -26,7 +30,25 @@ describe('DrizzleCatalogAdministrationRepository', () => {
     await database.truncateAll();
     await seedDemoCatalog(database.db);
   });
-  afterAll(() => database.close());
+  afterAll(() => database?.close());
+
+  it('returns persisted SKU totals per category, including descendants and empty branches', async () => {
+    const categories = await repository.listCategories(true);
+    expect(
+      categories
+        .filter((category) => !category.parentId)
+        .reduce((total, category) => total + (category.skuCount ?? 0), 0),
+    ).toBe(CLIENT_TEMPLATE_MANIFEST.source.productCount);
+    expect(categories.some((category) => category.skuCount === 0)).toBe(true);
+    const leaf = categories.find(
+      (category) =>
+        category.skuCount && !categories.some((child) => child.parentId === category.id),
+    )!;
+    expect(leaf).toBeTruthy();
+    expect(adminCatalogCategorySchema.parse(toAdminCategoryDto(leaf)).skuCount).toBe(leaf.skuCount);
+    const parent = categories.find((category) => category.id === leaf.parentId);
+    if (parent) expect(parent.skuCount).toBeGreaterThanOrEqual(leaf.skuCount!);
+  });
 
   it('exposes required and optional active asset policies on one admin template without inactive or other-template policies', async () => {
     const [selected, other] = await repository.listTemplates();

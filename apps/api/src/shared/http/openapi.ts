@@ -1,19 +1,10 @@
-import type { ZodTypeAny } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z, type ZodType } from 'zod';
 
-/**
- * Bridges `@cdr/contracts` (Zod) into the OpenAPI document, so the published schema can
- * never drift from what the API actually validates and returns.
- */
-
-// The library's own signature is a deeply conditional generic that TypeScript cannot
-// instantiate for our larger schemas (TS2589). We only ever need the plain JSON Schema
-// object out of it, so it is narrowed to that shape once, here.
-const toJsonSchema = zodToJsonSchema as unknown as (
-  schema: ZodTypeAny,
-  options: { target: 'openApi3'; $refStrategy: 'none' },
-) => Record<string, unknown>;
-
-export function openApiSchema(schema: ZodTypeAny): Record<string, unknown> {
-  return toJsonSchema(schema, { target: 'openApi3', $refStrategy: 'none' });
+/** Generates OpenAPI from the same Zod 4 schemas that validate incoming requests. */
+export function openApiSchema(schema: ZodType): Record<string, unknown> {
+  return z.toJSONSchema(schema, {
+    target: 'openapi-3.0',
+    io: 'input',
+    reused: 'inline',
+  });
 }

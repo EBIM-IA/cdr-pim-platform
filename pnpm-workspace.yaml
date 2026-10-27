@@ -24,3 +24,9 @@ overrides:
   fast-uri@>=3.0.0 <4.0.0: 3.1.8
   # GHSA-r3ph-w7gj-g6xm (moderate). @nestjs/swagger 11.4.x depends on js-yaml ^5.4.0.
   js-yaml@>=5.0.0 <6.0.0: 5.4.2
+  # GHSA-27r3-jxmh-p828 (high). Nest 11's Express dependency still allows body-parser
+  # below the fixed release. Keep the compatible 2.x parser at the patched floor.
+  body-parser@>=2.0.0 <2.4.0: 2.4.0
+  # GHSA-q7qp-rjg7-q26m (high). Nest 11 pins the prior multer release; Nest 12 is
+  # a separate migration. Use the fixed compatible 2.x upload parser in Nest 11.
+  multer@>=2.0.0 <2.5.0: 2.5.0

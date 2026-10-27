@@ -82,7 +82,12 @@ export type CreateCodeAffixInput = z.infer<typeof createCodeAffixSchema>;
 
 export const updateCodeAffixSchema = editableCodeAffixFields
   .partial()
-  .extend({ expectedUpdatedAt: z.string().datetime() })
+  .extend({
+    // Defaults belong to creation. An omitted patch field must retain its stored value.
+    boreRule: editableCodeAffixFields.shape.boreRule.unwrap().optional(),
+    priority: editableCodeAffixFields.shape.priority.unwrap().optional(),
+    expectedUpdatedAt: z.string().datetime(),
+  })
   .refine(
     (value) =>
       Object.keys(value).some(

@@ -75,7 +75,7 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
         self.assertEqual(configured["containerDefinitions"][1], original["containerDefinitions"][1])
         self.assertEqual((configured["cpu"], configured["memory"]), ("1024", "6144"))
 
-    def test_keeps_original_entrypoint_and_private_loopback_with_bounded_scanning(self) -> None:
+    def test_refreshes_signatures_before_original_entrypoint_and_keeps_private_bounded_scanning(self) -> None:
         configured = PROTECTION.configure_api_file_protection(task_definition())
         api, scanner = configured["containerDefinitions"][0], configured["containerDefinitions"][-1]
         self.assertEqual(scanner["name"], "clamav")
@@ -85,8 +85,9 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
         ))
         self.assertIs(scanner["essential"], True)
         self.assertEqual((scanner["cpu"], scanner["memory"]), (512, 4096))
-        self.assertNotIn("entryPoint", scanner)
-        self.assertNotIn("command", scanner)
+        self.assertEqual(scanner["entryPoint"], ["/bin/sh", "-ec"])
+        self.assertEqual(scanner["command"], list(PROTECTION.CLAMAV_COMMAND))
+        self.assertEqual(scanner["command"][0], SCRIPT.with_name("start-clamav.sh").read_text())
         self.assertNotIn("portMappings", scanner)
         scanner_env = {item["name"]: item["value"] for item in scanner["environment"]}
         self.assertEqual(scanner_env, PROTECTION.CLAMAV_ENVIRONMENT)
@@ -108,6 +109,54 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
         self.assertEqual(scanner["logConfiguration"]["options"]["awslogs-group"], "/existing/api")
         self.assertEqual(scanner["logConfiguration"]["options"]["awslogs-stream-prefix"], "clamav")
         self.assertEqual(api["logConfiguration"]["options"]["awslogs-stream-prefix"], "api")
+
+    def test_bootstrap_updates_before_init_and_fails_closed_when_update_fails(self) -> None:
+        for update_status in [0, 1, 54]:
+            with self.subTest(update_status=update_status), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                configuration = folder / "freshclam.conf"
+                configuration.write_text("DatabaseMirror database.clamav.net\nTestDatabases yes\nNotifyClamd /etc/clamav/clamd.conf\n")
+                updater = folder / "freshclam"
+                updater.write_text(
+                    f'#!{sys.executable}\n'
+                    'import os, sys\n'
+                    'from pathlib import Path\n'
+                    'configuration = next(item.split("=", 1)[1] for item in sys.argv if item.startswith("--config-file="))\n'
+                    'text = Path(configuration).read_text()\n'
+                    'assert "NotifyClamd" not in text\n'
+                    'assert "TestDatabases yes" in text\n'
+                    'assert sys.argv[1:3] == ["--foreground", "--stdout"]\n'
+                    'Path(os.environ["BOOTSTRAP_CONFIG_CAPTURE"]).write_text(configuration)\n'
+                    'Path(os.environ["BOOTSTRAP_EVENTS"]).write_text("update\\n")\n'
+                    'sys.exit(int(os.environ["BOOTSTRAP_UPDATE_STATUS"]))\n'
+                )
+                updater.chmod(0o700)
+                initializer = folder / "init"
+                initializer.write_text('#!/bin/sh\nprintf "init\\n" >> "$BOOTSTRAP_EVENTS"\n')
+                initializer.chmod(0o700)
+                command = PROTECTION.CLAMAV_COMMAND[0].replace("/etc/clamav/freshclam.conf", str(configuration)).replace("exec /init", 'exec "$BOOTSTRAP_TEST_INIT"')
+                events, capture = folder / "events", folder / "configuration-path"
+                result = subprocess.run(
+                    [*PROTECTION.CLAMAV_ENTRYPOINT, command], capture_output=True, check=False,
+                    env={**os.environ, "PATH": f"{folder}{os.pathsep}{os.environ['PATH']}",
+                         "BOOTSTRAP_EVENTS": str(events), "BOOTSTRAP_CONFIG_CAPTURE": str(capture),
+                         "BOOTSTRAP_UPDATE_STATUS": str(update_status), "BOOTSTRAP_TEST_INIT": str(initializer)},
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, update_status)
+                self.assertEqual(events.read_text(), "update\ninit\n" if update_status == 0 else "update\n")
+                self.assertFalse(Path(capture.read_text()).exists(), "temporary configuration must be removed on success and failure")
+
+    def test_all_runtimes_share_the_bootstrap_and_pinned_image(self) -> None:
+        root = SCRIPT.parent.parent
+        compose = (root / "docker-compose.yml").read_text()
+        workflow = (root / ".github/workflows/ci.yml").read_text()
+        for source in [compose, workflow]:
+            self.assertIn(PROTECTION.CLAMAV_IMAGE, source)
+            self.assertIn("scripts/start-clamav.sh", source)
+            self.assertIn("/usr/local/bin/cdr-start-clamav.sh", source)
+        self.assertIn("--entrypoint /bin/sh", workflow)
+        self.assertIn("entrypoint: ['/bin/sh', '/usr/local/bin/cdr-start-clamav.sh']", compose)
 
     def test_ipv4_health_command_sends_newline_framed_ping_and_requires_exact_pong(self) -> None:
         command = PROTECTION.configure_api_file_protection(task_definition())["containerDefinitions"][-1]["healthCheck"]["command"]
@@ -236,6 +285,8 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
             lambda td: td["containerDefinitions"][-1].update(essential=False),
             lambda td: td["containerDefinitions"][-1].update(command=["sleep", "infinity"]),
             lambda td: td["containerDefinitions"][-1].update(entryPoint=["sh"]),
+            lambda td: td["containerDefinitions"][-1].pop("command"),
+            lambda td: td["containerDefinitions"][-1].pop("entryPoint"),
             lambda td: td["containerDefinitions"][-1].update(portMappings=[{"containerPort": 3310}]),
             lambda td: td["containerDefinitions"][-1].update(memory=2048),
             lambda td: td["containerDefinitions"][-1].update(cpu=256),
@@ -263,6 +314,7 @@ class ConfigureApiFileProtectionTest(unittest.TestCase):
             (-1, "CLAMD_CONF_TCPAddr", "0.0.0.0"),
             (-1, "TZ", "America/Lima"),
             (-1, "FRESHCLAM_CHECKS", "0"),
+            (-1, "CLAMD_CONF_FailIfCvdOlderThan", "8"),
         ]:
             with self.subTest(environment=name):
                 reported = PROTECTION.configure_api_file_protection(task_definition())

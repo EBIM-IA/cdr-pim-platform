@@ -1,5 +1,5 @@
 import { ConflictError, FixedClock, ForbiddenError, newUuid } from '@cdr/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Role, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import {
@@ -15,9 +15,9 @@ const replicaId = newUuid();
 const definitionId = newUuid();
 const now = new Date('2026-10-05T10:00:00.000Z');
 const actor: AuthenticatedActor = {
-  id: 'buyer-1',
-  email: 'compras@casadelruliman.com',
-  roles: [Role.Purchasing],
+  id: 'admin-1',
+  email: 'admin@casadelruliman.com',
+  roles: [Role.Administrator],
 };
 
 function repository(
@@ -64,6 +64,26 @@ function repository(
 }
 
 describe('UpdateProductAttributeUseCase', () => {
+  it.each([Role.Purchasing, Role.Sales, Role.Editor, Role.Viewer])(
+    'rejects a %s update before accessing persistence',
+    async (role) => {
+      const findProductAttributeAssignment = vi.fn();
+      const updateAttribute = vi.fn();
+      const catalog = {
+        findProductAttributeAssignment,
+        updateAttribute,
+      } as unknown as DynamicCatalogRepositoryPort;
+      await expect(
+        new UpdateProductAttributeUseCase(catalog, new FixedClock(now)).execute(
+          { productId, attributeKey: 'diametro_interior', value: 25, expectedVersion: 1 },
+          { ...actor, roles: [role] },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      expect(findProductAttributeAssignment).not.toHaveBeenCalled();
+      expect(updateAttribute).not.toHaveBeenCalled();
+    },
+  );
+
   it('delegates one atomic manual update for the product and its codigoUnificador replicas', async () => {
     const useCase = new UpdateProductAttributeUseCase(
       repository({
