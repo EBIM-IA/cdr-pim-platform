@@ -162,6 +162,30 @@ describe('PublicationWorkspace', () => {
     );
   });
 
+  it('opens documents for the selected product instead of sending an unsupported SKU parameter', async () => {
+    render(<PublicationWorkspace workspace={workspace} view="images" />);
+    expect(
+      screen.getByRole('region', { name: 'Indicadores de migración de imágenes' }),
+    ).toBeVisible();
+    expect(screen.queryByText('45.280')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Ver activos del SKU en PIM' })).toHaveAttribute(
+        'href',
+        '/documents?productId=product-1',
+      ),
+    );
+  });
+
+  it('preserves the selected product when opening commercial enrichment', async () => {
+    render(<PublicationWorkspace workspace={workspace} view="prestashop" />);
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Descripción comercial' })).toHaveAttribute(
+        'href',
+        '/quality?view=commercial&productId=product-1',
+      ),
+    );
+  });
+
   it('omits deselected fields from the consumption preview without hiding media errors', async () => {
     render(<PublicationWorkspace workspace={workspace} view="prestashop" />);
     await waitFor(() => expect(screen.getByText('0 de 0 con valor')).toBeVisible());

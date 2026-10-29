@@ -3,6 +3,7 @@
 import type {
   AdminCatalogCategoryDto,
   AuthenticatedActorDto,
+  AuthCapability,
   CatalogWorkbookProductDto,
   WorkspaceDto,
 } from '@cdr/contracts';
@@ -17,6 +18,7 @@ import { Select } from '@/components/ui/select';
 import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { moduleDefinitions, moduleMenuCapabilities, moduleSlugs } from '@/lib/module-definitions';
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -180,7 +182,7 @@ function ExternalSources() {
           {error}
         </p>
       ) : null}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {sources.map((source) => (
           <Card key={source.key} className="p-4">
             <div className="flex items-center gap-2">
@@ -368,6 +370,15 @@ const permissions = [
   ['Consultar auditoría', 'audit:read'],
 ] as const;
 
+const modulePermissions: readonly { label: string; capability: AuthCapability }[] = [
+  { label: 'Dashboard', capability: 'menu:home:view' },
+  { label: 'Productos', capability: 'menu:products:view' },
+  ...moduleSlugs.map((slug) => ({
+    label: moduleDefinitions[slug].label,
+    capability: moduleMenuCapabilities[slug],
+  })),
+];
+
 export function AdministrationReferenceView({
   workspace,
   view,
@@ -462,7 +473,10 @@ export function AdministrationReferenceView({
       </Card>
       <Panel title="Matriz de permisos por rol">
         <div className="overflow-auto">
-          <table className="w-full min-w-[650px] text-left text-xs">
+          <table
+            aria-label="Matriz de permisos por rol"
+            className="w-full min-w-[650px] text-left text-xs"
+          >
             <thead className="bg-slate-50">
               <tr>
                 <th className="p-3">Permiso</th>
@@ -513,6 +527,53 @@ export function AdministrationReferenceView({
             Editar permisos
           </Button>
         </div>
+      </Panel>
+      <Panel title="Módulos visibles por perfil">
+        <p className="mb-4 text-xs text-muted-foreground">
+          Módulos habilitados para cada rol. La visibilidad de los atributos se configura en
+          Plantillas.
+        </p>
+        <div className="overflow-auto">
+          <table
+            aria-label="Módulos visibles por perfil"
+            className="w-full min-w-[650px] text-left text-xs"
+          >
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="p-3">Módulo</th>
+                {roles.map((role) => (
+                  <th key={role} className="p-3">
+                    {role}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {modulePermissions.map(({ label, capability }) => (
+                <tr key={capability} className="border-t">
+                  <th scope="row" className="p-3 text-left font-medium">
+                    {label}
+                  </th>
+                  {roles.map((role) => {
+                    const grants = matrix?.find((entry) => entry.role === role);
+                    const visible = Boolean(grants?.capabilities.includes(capability));
+                    return (
+                      <td key={role} className="p-3">
+                        <StatusBadge tone={visible ? 'success' : 'neutral'}>
+                          {grants ? (visible ? 'Sí' : 'No') : 'Sin información'}
+                        </StatusBadge>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          La matriz muestra los permisos vigentes. El mantenimiento de accesos por perfil está
+          pendiente de habilitar.
+        </p>
       </Panel>
     </div>
   );

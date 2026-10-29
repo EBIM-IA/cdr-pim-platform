@@ -527,7 +527,9 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
           <a href={`/products/${product.id}`}>Ver ficha</a>
         </Button>
         <Button asChild variant="outline" size="sm">
-          <a href="/quality?view=commercial">Descripción comercial</a>
+          <a href={`/quality?view=commercial&productId=${encodeURIComponent(product.id)}`}>
+            Descripción comercial
+          </a>
         </Button>
       </div>
     </>
@@ -622,6 +624,20 @@ export function PublicationWorkspace({
   if (view === 'images')
     return (
       <div className="space-y-4">
+        <section
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+          aria-label="Indicadores de migración de imágenes"
+        >
+          {['SKU analizados', 'Con imagen', 'Pendientes', 'Errores'].map((label) => (
+            <Card key={label} className="p-4">
+              <small className="text-muted-foreground">{label}</small>
+              <strong className="mt-1 block text-xl text-slate-400">—</strong>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Sin historial de migración disponible
+              </p>
+            </Card>
+          ))}
+        </section>
         <Panel title="Consulta de imágenes por SKU">
           <div className="space-y-3">
             {search}
@@ -639,7 +655,9 @@ export function PublicationWorkspace({
                 <Button asChild size="sm" variant="outline" className="mt-3">
                   <a
                     href={
-                      selected ? `/documents?sku=${encodeURIComponent(selected.sku)}` : '/documents'
+                      selected
+                        ? `/documents?productId=${encodeURIComponent(selected.id)}`
+                        : '/documents'
                     }
                   >
                     Ver activos del SKU en PIM

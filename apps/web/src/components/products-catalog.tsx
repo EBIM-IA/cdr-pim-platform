@@ -6,6 +6,7 @@ import type {
   CatalogWorkbookProductDto,
   CatalogWorkbookColumnDto,
   ProductStatus,
+  ProductAssetDto,
 } from '@cdr/contracts';
 import { ChevronLeft, ChevronRight, Columns3, Search, SlidersHorizontal, X } from 'lucide-react';
 import Link from 'next/link';
@@ -15,7 +16,7 @@ import { CatalogSearch } from '@/components/catalog-search';
 import { PageHeader } from '@/components/page-header';
 import { CatalogWorkbookTable } from '@/components/catalog-workbook-table';
 import { DynamicCatalogSheet } from '@/components/dynamic-catalog-sheet';
-import { ProductArtwork } from '@/components/product-artwork';
+import { ProductThumbnail } from '@/components/product-thumbnail';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
@@ -30,6 +31,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchCatalogCategories, fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { listProductAssetsBatch } from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
 import { cn, formatNumber } from '@/lib/utils';
 
@@ -102,11 +104,13 @@ function CompletenessMeter({ value, sku }: { value: number | null; sku: string }
 
 function ProductCatalogList({
   products,
+  assets,
   showStatus,
   showCompleteness,
   canEdit,
 }: {
   products: Product[];
+  assets: Record<string, ProductAssetDto[]>;
   showStatus: boolean;
   showCompleteness: boolean;
   canEdit: boolean;
@@ -123,11 +127,7 @@ function ProductCatalogList({
               : 'md:grid-cols-[56px_minmax(0,1fr)_auto]',
           )}
         >
-          <ProductArtwork
-            category={product.category}
-            name={product.name}
-            className="aspect-square h-auto min-h-14 rounded-lg"
-          />
+          <ProductThumbnail product={product} assets={assets[product.id]} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Link
@@ -320,6 +320,7 @@ export function ProductsCatalog({
     statuses: [],
   });
   const [result, setResult] = useState<CatalogWorkbookResultDto | null>(null);
+  const [productAssets, setProductAssets] = useState<Record<string, ProductAssetDto[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -462,6 +463,23 @@ export function ProductsCatalog({
     () => result?.items.map((row) => workbookCatalogProduct(row, result.columns)) ?? [],
     [result],
   );
+  useEffect(() => {
+    if (view !== 'catalog' || !products.length) return;
+    const controller = new AbortController();
+    setProductAssets({});
+    void listProductAssetsBatch(
+      products.map((product) => product.id),
+      controller.signal,
+    )
+      .then((rows) => {
+        if (!controller.signal.aborted)
+          setProductAssets(Object.fromEntries(rows.map((row) => [row.productId, row.assets])));
+      })
+      .catch(() => {
+        /* The catalog remains usable with its technical drawings. */
+      });
+    return () => controller.abort();
+  }, [products, revision, view]);
   const total = result?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const categoryOptions = useMemo(
@@ -844,6 +862,7 @@ export function ProductsCatalog({
                 />
               ) : (
                 <ProductCatalogList
+                  assets={productAssets}
                   products={products}
                   showStatus={showProductStatus}
                   showCompleteness={showCompleteness}

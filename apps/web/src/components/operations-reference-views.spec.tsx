@@ -1,5 +1,5 @@
 import type { WorkspaceDto } from '@cdr/contracts';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -18,7 +18,15 @@ const workspace: WorkspaceDto = {
   notices: [],
   actions: [],
   roleCapabilities: [
-    { role: 'ADMINISTRADOR', capabilities: ['catalog:read', 'administration:manage'] },
+    {
+      role: 'ADMINISTRADOR',
+      capabilities: [
+        'catalog:read',
+        'administration:manage',
+        'menu:products:view',
+        'menu:catalogs:view',
+      ],
+    },
     { role: 'COMPRAS', capabilities: ['catalog:read'] },
     { role: 'VENTAS', capabilities: ['catalog:read'] },
   ],
@@ -27,7 +35,16 @@ afterEach(cleanup);
 describe('Reference operations layouts', () => {
   it('renders the actual role matrix from the API without offering a role simulator', () => {
     render(<AdministrationReferenceView workspace={workspace} view="roles" />);
-    expect(screen.getAllByRole('columnheader')).toHaveLength(4);
+    expect(
+      within(screen.getByRole('table', { name: 'Matriz de permisos por rol' })).getAllByRole(
+        'columnheader',
+      ),
+    ).toHaveLength(4);
+    const navigation = screen.getByRole('table', { name: 'Módulos visibles por perfil' });
+    expect(within(navigation).getByRole('row', { name: 'Productos Sí No No' })).toBeVisible();
+    expect(
+      within(navigation).getByRole('row', { name: 'Catálogos de productos Sí No No' }),
+    ).toBeVisible();
     expect(
       screen.getByRole('row', { name: 'Configurar plantillas, usuarios y roles Sí No No' }),
     ).toBeVisible();

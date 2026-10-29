@@ -70,11 +70,14 @@ const list = (items: ProductCatalogDto[] = [catalog]): ProductCatalogListDto => 
   pageSize: 100,
   metrics: {
     catalogs: items.filter((row) => !row.deletedAt).length,
-    current: 1,
-    expiring: 0,
-    expired: 0,
-    scheduled: 0,
-    activeLinks: 0,
+    current: items.filter((row) => !row.deletedAt && ['Vigente', 'Por vencer'].includes(row.status))
+      .length,
+    expiring: items.filter((row) => !row.deletedAt && row.status === 'Por vencer').length,
+    expired: items.filter((row) => !row.deletedAt && row.status === 'Vencido').length,
+    scheduled: items.filter((row) => !row.deletedAt && row.status === 'Programado').length,
+    activeLinks: items
+      .filter((row) => !row.deletedAt && ['Vigente', 'Por vencer'].includes(row.status))
+      .reduce((sum, row) => sum + row.activeLinks, 0),
     deleted: items.filter((row) => row.deletedAt).length,
   },
 });
@@ -108,6 +111,51 @@ afterEach(() => {
 });
 
 describe('ProductCatalogsWorkspace', () => {
+  it('keeps all four real summary indicators visible when there are no catalogs', async () => {
+    api.listAllProductCatalogs.mockResolvedValue(list([]));
+    mount();
+    await screen.findByRole('heading', { name: 'Todavía no hay catálogos' });
+    const indicators = within(screen.getByLabelText('Indicadores de catálogos'));
+    for (const label of ['Catálogos', 'Vigentes', 'Vencidos / programados', 'Enlaces activos'])
+      expect(indicators.getByText(label)).toBeVisible();
+    expect(indicators.getAllByText('0')).toHaveLength(3);
+    expect(indicators.getByText('0 / 0')).toBeVisible();
+    expect(api.listAllProductCatalogs).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows server summary totals rather than counts from the current local table page', async () => {
+    const items = Array.from({ length: 31 }, (_, index) => ({
+      ...catalog,
+      id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      code: `CAT-${index + 1}`,
+      title: `Catálogo ${index + 1}`,
+    }));
+    api.listAllProductCatalogs.mockResolvedValue({
+      ...list(items),
+      metrics: {
+        catalogs: 31,
+        current: 27,
+        expiring: 4,
+        expired: 3,
+        scheduled: 1,
+        activeLinks: 8,
+        deleted: 0,
+      },
+    });
+    mount();
+    await screen.findByRole('button', { name: 'Catálogo 1' });
+    const indicators = within(screen.getByLabelText('Indicadores de catálogos'));
+    expect(indicators.getByText('31')).toBeVisible();
+    expect(indicators.getByText('27')).toBeVisible();
+    expect(indicators.getByText('3 / 1')).toBeVisible();
+    expect(indicators.getByText('8')).toBeVisible();
+    expect(indicators.getByText('4 por vencer en 30 días')).toBeVisible();
+    expect(indicators.getByText('PDF en la búsqueda')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Siguiente' }));
+    expect(indicators.getByText('31')).toBeVisible();
+    expect(api.listAllProductCatalogs).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps consultation and downloads while hiding all mutation and sharing actions for readers', async () => {
     mount(false, false);
     await screen.findByRole('button', { name: catalog.title });

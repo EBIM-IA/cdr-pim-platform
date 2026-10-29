@@ -42,6 +42,15 @@ class MemoryApplicationRepository implements GroupApplicationRepositoryPort {
     return this.item ? [GroupApplication.rehydrate(this.item.toSnapshot())] : [];
   }
 
+  async listForProducts(productIds: readonly ReturnType<typeof assertUuid>[]) {
+    return new Map(
+      productIds.map((id) => [
+        id,
+        this.item ? [GroupApplication.rehydrate(this.item.toSnapshot())] : [],
+      ]),
+    );
+  }
+
   async insertWithAudit(application: GroupApplication, audit: ApplicationAuditWriteContext) {
     this.item = GroupApplication.rehydrate(application.toSnapshot());
     this.audits.push(audit);

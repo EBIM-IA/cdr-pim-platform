@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductsCatalog } from '@/components/products-catalog';
 import type { Product } from '@/lib/types';
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/products',
+}));
+vi.mock('@/lib/product-assets-api', () => ({ listProductAssetsBatch: async () => [] }));
+
 const mocks = vi.hoisted(() => ({
   downloadCsv: vi.fn(),
   downloadXlsx: vi.fn(),

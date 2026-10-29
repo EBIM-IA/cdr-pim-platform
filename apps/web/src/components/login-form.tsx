@@ -2,7 +2,7 @@
 
 import { LoaderCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,12 @@ interface LoginFormProps {
 export function LoginForm({ returnTo }: LoginFormProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -51,7 +56,7 @@ export function LoginForm({ returnTo }: LoginFormProps) {
   };
 
   return (
-    <form className="mt-4" onSubmit={submit}>
+    <form method="post" className="mt-4" onSubmit={submit}>
       <div className="my-4">
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="email">
           Correo electrónico
@@ -64,7 +69,7 @@ export function LoginForm({ returnTo }: LoginFormProps) {
           placeholder="correo@casadelruliman.ec"
           className="h-10 rounded-md text-xs"
           required
-          disabled={pending}
+          disabled={pending || !hydrated}
         />
       </div>
 
@@ -83,7 +88,7 @@ export function LoginForm({ returnTo }: LoginFormProps) {
           placeholder="••••••••"
           className="h-10 rounded-md text-xs"
           required
-          disabled={pending}
+          disabled={pending || !hydrated}
         />
       </div>
 
@@ -95,7 +100,11 @@ export function LoginForm({ returnTo }: LoginFormProps) {
         ) : null}
       </div>
 
-      <Button type="submit" className="mt-2 h-10 w-full rounded-md text-xs" disabled={pending}>
+      <Button
+        type="submit"
+        className="mt-2 h-10 w-full rounded-md text-xs"
+        disabled={pending || !hydrated}
+      >
         {pending ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
         {pending ? 'Validando acceso…' : 'Iniciar sesión'}
       </Button>

@@ -14,3 +14,4 @@ export * from './product-asset';
 export * from './product-catalog';
 export * from './search';
 export * from './workspace';
+export * from './product-naming';

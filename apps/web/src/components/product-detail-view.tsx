@@ -11,6 +11,8 @@ import type {
   ProductAttributeSheetDto,
   ProductAssetDto,
   ProductAssetType,
+  ProductExperienceDto,
+  ProductSalesVariantDto,
 } from '@cdr/contracts';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,6 +33,7 @@ import {
 } from 'lucide-react';
 
 import { ProductArtwork } from '@/components/product-artwork';
+import { ProductGallery } from '@/components/product-gallery';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
@@ -62,8 +65,11 @@ import {
   uploadProductAsset,
 } from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
+import { fetchProductExperience } from '@/lib/product-experience-api';
 import { displayMeasurement, type MeasurementSystem } from '@/lib/units';
 import { cn } from '@/lib/utils';
+
+import styles from './product-detail-view.module.css';
 
 type DetailTab =
   'technical' | 'applications' | 'equivalences' | 'documents' | 'sources' | 'history';
@@ -168,6 +174,56 @@ function EnrichmentDrawer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMode, setShowMode] = useState<'all' | 'required' | 'empty'>('all');
+  const drawerElement = useRef<HTMLElement>(null);
+  const drawerActions = useRef({ onClose, saving });
+
+  useEffect(() => {
+    drawerActions.current = { onClose, saving };
+  }, [onClose, saving]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableElements = () =>
+      [
+        ...(drawerElement.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ) ?? []),
+      ].filter((element) => !element.hidden);
+    const firstInput = drawerElement.current?.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled])',
+    );
+    (firstInput ?? focusableElements()[0])?.focus({ preventScroll: true });
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!drawerActions.current.saving) drawerActions.current.onClose();
+      }
+      if (event.key !== 'Tab') return;
+      const elements = focusableElements();
+      const first = elements[0];
+      const last = elements.at(-1);
+      if (!first || !last) return;
+      if (!drawerElement.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('keydown', handleKey, true);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -249,8 +305,10 @@ function EnrichmentDrawer({
         aria-label="Cerrar edición"
         className="absolute inset-0 cursor-default"
         onClick={onClose}
+        disabled={saving}
       />
       <section
+        ref={drawerElement}
         role="dialog"
         aria-modal="true"
         aria-labelledby="enrichment-title"
@@ -269,7 +327,14 @@ function EnrichmentDrawer({
               unificador.
             </p>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Cerrar"
+            disabled={saving}
+          >
             <X aria-hidden="true" className="size-5" />
           </Button>
         </header>
@@ -471,38 +536,18 @@ function EnrichmentDrawer({
 }
 
 function ProductTechnicalAssets({
-  productId,
-  active,
+  assets,
+  loading,
+  error,
   canManage,
   onManage,
 }: {
-  productId: string;
-  active: boolean;
+  assets: ProductAssetDto[];
+  loading: boolean;
+  error: string | null;
   canManage: boolean;
   onManage: () => void;
 }) {
-  const [assets, setAssets] = useState<ProductAssetDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
-    setLoading(true);
-    setError(false);
-    void listProductAssets({ productId }, controller.signal)
-      .then((result) => {
-        if (!controller.signal.aborted) setAssets(result);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setError(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [active, productId]);
-
   return (
     <Card className="overflow-hidden">
       <h3 className="border-b px-3 py-2 text-sm font-semibold">Documentos y activos</h3>
@@ -554,6 +599,9 @@ function ProductTechnicalAssets({
 function TechnicalPanel({
   product,
   active,
+  assets,
+  assetsLoading,
+  assetsError,
   sheet,
   sheetError,
   unitSystem,
@@ -569,6 +617,9 @@ function TechnicalPanel({
 }: {
   product: Product;
   active: boolean;
+  assets: ProductAssetDto[];
+  assetsLoading: boolean;
+  assetsError: string | null;
   sheet: ProductAttributeSheetDto | null;
   sheetError: string | null;
   unitSystem: MeasurementSystem;
@@ -682,11 +733,6 @@ function TechnicalPanel({
   const characteristics = technical.filter((attribute) => !measurements.includes(attribute));
   const groups = [
     {
-      title: 'Datos base ERP',
-      note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
-      attributes: erp,
-    },
-    {
       title: 'Características',
       note: 'Atributos técnicos de enriquecimiento',
       attributes: characteristics,
@@ -700,6 +746,11 @@ function TechnicalPanel({
       title: 'Información comercial y logística',
       note: 'Atributos de la plantilla',
       attributes: logistics,
+    },
+    {
+      title: 'Datos base ERP',
+      note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
+      attributes: erp,
     },
   ].filter((group) => group.attributes.length > 0);
   const convertibleAttributes = attributes.filter(
@@ -832,23 +883,20 @@ function TechnicalPanel({
   };
 
   return (
-    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_250px] xl:grid-cols-[minmax(180px,.65fr)_minmax(0,1.6fr)_260px]">
-      <div className="min-w-0 lg:col-start-2 lg:row-start-1 xl:col-start-1 xl:row-span-2">
+    <div className={styles.layout}>
+      <div className={styles.visual}>
         <ProductArtwork
           category={sheet?.schema.category.name ?? product.category}
           name={product.name}
           technical
-          className="aspect-[4/3] w-full"
+          className="!aspect-square w-full"
         />
         <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
           Esquema técnico referencial. Consulta el plano del fabricante para verificar las
           dimensiones.
         </p>
       </div>
-      <div
-        ref={editorElement}
-        className="min-w-0 scroll-mt-28 lg:col-start-1 lg:row-span-2 lg:row-start-1 xl:col-start-2"
-      >
+      <div ref={editorElement} className={cn(styles.main, 'scroll-mt-28')}>
         <header className="mb-3 flex flex-col items-start gap-3">
           <div>
             <h2 className="text-lg font-semibold">
@@ -916,19 +964,21 @@ function TechnicalPanel({
           />
         ) : null}
         <div className="space-y-4">
-          {groups.map((group) => (
-            <section key={group.title} className="overflow-hidden rounded-lg border bg-white">
-              <header className="flex flex-wrap items-baseline justify-between gap-1 border-b px-3 py-2">
+          {groups.map((group) => {
+            const heading = (
+              <>
                 <h3 className="text-sm font-semibold">{group.title}</h3>
                 <span className="text-[10px] text-muted-foreground">{group.note}</span>
-              </header>
-              <table className="w-full table-fixed text-left text-sm">
+              </>
+            );
+            const table = (
+              <table className={cn(styles.attributes, 'w-full table-fixed text-left text-sm')}>
                 <caption className="sr-only">{group.title}</caption>
                 <thead className="sr-only">
                   <tr>
-                    <th scope="col">Símbolo</th>
-                    <th scope="col">Valor</th>
                     <th scope="col">Atributo y origen</th>
+                    <th scope="col">Valor</th>
+                    <th scope="col">Abreviatura</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -965,10 +1015,36 @@ function TechnicalPanel({
                             'bg-amber-50',
                         )}
                       >
-                        <td className="w-[10%] px-2 py-2 align-top text-sm text-muted-foreground">
-                          {symbol?.[1]}
-                        </td>
-                        <td className="w-[32%] break-words px-2 py-2 align-top">
+                        <th scope="row" className="px-2 py-2 align-top font-normal">
+                          <span>
+                            {symbol?.[2] ?? attribute.label}
+                            {column?.required ? (
+                              <abbr
+                                title="Obligatorio según plantilla"
+                                className="ml-1 text-red-600 no-underline"
+                              >
+                                *
+                              </abbr>
+                            ) : null}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+                            {showInternalDetails && attribute.source ? (
+                              <span>Fuente: {sourceLabels[attribute.source]}</span>
+                            ) : null}
+                            {showInternalDetails && attribute.authority ? (
+                              <span>Autoridad: {authorityLabels[attribute.authority]}</span>
+                            ) : null}
+                            {showInternalDetails && attribute.includeInTechnicalSheet !== null ? (
+                              <span>
+                                {attribute.includeInTechnicalSheet
+                                  ? 'Ficha técnica'
+                                  : 'Solo detalle'}
+                              </span>
+                            ) : null}
+                            {attribute.unit ? <span>Unidad {attribute.unit}</span> : null}
+                          </div>
+                        </th>
+                        <td className="break-words px-2 py-2 align-top">
                           {editable ? (
                             column.dataType === 'boolean' || column.allowedValues.length > 0 ? (
                               <select
@@ -1037,42 +1113,33 @@ function TechnicalPanel({
                             </>
                           )}
                         </td>
-                        <th scope="row" className="px-2 py-2 align-top font-normal">
-                          <span>
-                            {symbol?.[2] ?? attribute.label}
-                            {column?.required ? (
-                              <abbr
-                                title="Obligatorio según plantilla"
-                                className="ml-1 text-red-600 no-underline"
-                              >
-                                *
-                              </abbr>
-                            ) : null}
-                          </span>
-                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
-                            {showInternalDetails && attribute.source ? (
-                              <span>Fuente: {sourceLabels[attribute.source]}</span>
-                            ) : null}
-                            {showInternalDetails && attribute.authority ? (
-                              <span>Autoridad: {authorityLabels[attribute.authority]}</span>
-                            ) : null}
-                            {showInternalDetails && attribute.includeInTechnicalSheet !== null ? (
-                              <span>
-                                {attribute.includeInTechnicalSheet
-                                  ? 'Ficha técnica'
-                                  : 'Solo detalle'}
-                              </span>
-                            ) : null}
-                            {attribute.unit ? <span>Unidad {attribute.unit}</span> : null}
-                          </div>
-                        </th>
+
+                        <td className="px-2 py-2 align-top text-sm text-muted-foreground">
+                          {symbol?.[1]}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            </section>
-          ))}
+            );
+            return group.title === 'Datos base ERP' ? (
+              <details
+                key={group.title}
+                className={cn(styles.erpFold, 'overflow-hidden rounded-lg border bg-white')}
+              >
+                <summary>{heading}</summary>
+                {table}
+              </details>
+            ) : (
+              <section key={group.title} className="overflow-hidden rounded-lg border bg-white">
+                <header className="flex flex-wrap items-baseline justify-between gap-1 border-b px-3 py-2">
+                  {heading}
+                </header>
+                {table}
+              </section>
+            );
+          })}
         </div>
         {editing ? (
           <div
@@ -1126,13 +1193,11 @@ function TechnicalPanel({
           </div>
         ) : null}
       </div>
-      <aside
-        className="min-w-0 space-y-4 lg:col-start-2 xl:col-start-3 xl:row-start-1"
-        aria-label="Documentos y calidad del SKU"
-      >
+      <aside className={cn(styles.aside, 'space-y-4')} aria-label="Documentos y calidad del SKU">
         <ProductTechnicalAssets
-          productId={product.id}
-          active={active}
+          assets={assets}
+          loading={assetsLoading}
+          error={assetsError}
           canManage={canManageAssets}
           onManage={onManageAssets}
         />
@@ -1199,11 +1264,13 @@ function TechnicalPanel({
 }
 
 function ApplicationsPanel({
+  productId,
   unifiedCode,
   applications,
   loading,
   error,
 }: {
+  productId: string;
   unifiedCode?: string;
   applications: GroupApplicationDto[];
   loading: boolean;
@@ -1241,6 +1308,12 @@ function ApplicationsPanel({
         <CardDescription>
           Relaciones activas heredadas por todos los SKU del código {unifiedCode}.
         </CardDescription>
+        <Link
+          href={`/applications?${new URLSearchParams({ productId, unifiedCode })}`}
+          className="text-xs font-semibold text-primary hover:underline"
+        >
+          Abrir aplicaciones del código unificador
+        </Link>
       </CardHeader>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[850px] text-left text-sm">
@@ -1504,7 +1577,15 @@ function EquivalencesPanel({
   );
 }
 
-function DocumentsPanel({ product, canWrite }: { product: Product; canWrite: boolean }) {
+function DocumentsPanel({
+  product,
+  canWrite,
+  onUploaded,
+}: {
+  product: Product;
+  canWrite: boolean;
+  onUploaded: (asset: ProductAssetDto) => void;
+}) {
   const [assets, setAssets] = useState<ProductAssetDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1542,6 +1623,7 @@ function DocumentsPanel({ product, canWrite }: { product: Product; canWrite: boo
     setUploadNotice(null);
     try {
       const uploaded = await uploadProductAsset({ productId: product.id, type: assetType, file });
+      onUploaded(uploaded);
       setFile(null);
       if (fileInput.current) fileInput.current.value = '';
       setUploadNotice(`${uploaded.filename} quedó asociado a ${product.sku}.`);
@@ -1623,6 +1705,13 @@ function DocumentsPanel({ product, canWrite }: { product: Product; canWrite: boo
               <UploadCloud aria-hidden="true" className="size-4" />
               {uploading ? 'Subiendo…' : 'Subir al SKU'}
             </Button>
+            {assetType === 'FOTO' ? (
+              <p className="text-[11px] leading-5 text-muted-foreground md:col-span-3">
+                Recomendamos fotografías JPG o PNG cuadradas de 800 × 800 o 1000 × 1000 px. También
+                se admite WebP, hasta 20 MB. Un SKU admite varias fotos; se cargan una a la vez y se
+                muestran en la galería del producto.
+              </p>
+            ) : null}
             {uploadNotice ? (
               <p className="text-xs text-emerald-700 md:col-span-3" role="status">
                 {uploadNotice}
@@ -1778,6 +1867,172 @@ function HistoryPanel({
   );
 }
 
+function variantKey(variant: ProductSalesVariantDto): string {
+  return variant.aplicacion?.id ?? variant.tipo;
+}
+
+function variantLabel(variant: ProductSalesVariantDto): string {
+  const application = variant.aplicacion;
+  if (!application) return variant.tipo === 'industrial' ? 'Uso industrial' : 'Uso automotriz';
+  const years = [application.anioDesde, application.anioHasta].filter((year) => year !== null);
+  return [application.marcaVehiculo, application.modelo, years.join('–')].filter(Boolean).join(' ');
+}
+
+function ProductVariantPicker({
+  variants,
+  selected,
+  loading,
+  error,
+  compact = false,
+  onPick,
+  onGeneral,
+  onViewTable,
+}: {
+  variants: ProductSalesVariantDto[];
+  selected: ProductSalesVariantDto | undefined;
+  loading: boolean;
+  error: string | null;
+  compact?: boolean;
+  onPick: (variant: ProductSalesVariantDto) => void;
+  onGeneral: () => void;
+  onViewTable?: () => void;
+}) {
+  const applicationCount = variants.filter((variant) => variant.aplicacion).length;
+  const options = compact
+    ? variants
+        .filter((variant) => !variant.aplicacion)
+        .concat(variants.filter((variant) => variant.aplicacion).slice(0, 4))
+    : variants;
+  const content = (
+    <>
+      <div className={cn('flex flex-wrap items-center gap-2', compact ? '' : 'mb-2')}>
+        <h2
+          className={
+            compact
+              ? 'text-[10px] font-bold uppercase tracking-wide text-muted-foreground'
+              : 'text-sm font-semibold'
+          }
+        >
+          Aplicaciones · {applicationCount}
+        </h2>
+        {!compact && variants.length > 0 ? (
+          <StatusBadge tone="neutral">
+            {new Set(variants.map((variant) => variant.tipo)).size > 1
+              ? 'Automotriz e industrial'
+              : variants[0]?.tipo === 'industrial'
+                ? 'Industrial'
+                : 'Automotriz'}
+          </StatusBadge>
+        ) : null}
+      </div>
+      {loading ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Cargando aplicaciones…
+        </p>
+      ) : null}
+      {error ? (
+        <p role="status" className="text-xs text-amber-800">
+          {error}
+        </p>
+      ) : null}
+      {!loading && !error && variants.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Sin variantes de venta registradas.</p>
+      ) : null}
+      {!compact && options.length > 0 ? (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          {selected
+            ? 'La cabecera muestra el nombre de la opción seleccionada.'
+            : 'Elige una opción para ver su nombre en la cabecera.'}
+        </p>
+      ) : null}
+      <div className={compact ? 'contents' : 'grid max-h-[340px] gap-1.5 overflow-y-auto'}>
+        {options.map((variant) => {
+          const isSelected = !!selected && variantKey(selected) === variantKey(variant);
+          const application = variant.aplicacion;
+          return (
+            <button
+              key={variantKey(variant)}
+              type="button"
+              aria-pressed={isSelected}
+              title={variant.nombreAmigable}
+              onClick={() => (isSelected ? onGeneral() : onPick(variant))}
+              className={cn(
+                'border bg-white text-left transition-colors hover:border-orange-300 hover:bg-orange-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                compact
+                  ? 'rounded-full px-2.5 py-1 text-[11px] font-semibold'
+                  : 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 rounded-lg px-2.5 py-2',
+                variant.tipo === 'industrial' && compact && 'border-dashed',
+                isSelected && 'border-primary bg-orange-50 text-primary',
+              )}
+            >
+              <span className={compact ? '' : 'text-[13px] font-semibold'}>
+                {variantLabel(variant)}
+              </span>
+              {!compact ? (
+                <>
+                  <small className="col-start-1 mt-0.5 text-[11px] text-muted-foreground">
+                    {application
+                      ? [application.motor, application.tipo, application.area, application.subarea]
+                          .filter(Boolean)
+                          .join(' · ')
+                      : variant.tipo === 'industrial'
+                        ? 'Línea industrial del producto'
+                        : 'Sin vehículos registrados'}
+                  </small>
+                  {isSelected ? (
+                    <span className="col-start-2 row-span-2 row-start-1 text-[9px] font-bold uppercase text-primary">
+                      Seleccionada
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      {compact && variants.length > options.length ? (
+        <span className="text-[11px] text-muted-foreground">
+          +{variants.length - options.length} más
+        </span>
+      ) : null}
+      {compact && onViewTable ? (
+        <button
+          type="button"
+          onClick={onViewTable}
+          className="text-[11px] font-semibold text-primary underline-offset-2 hover:underline"
+        >
+          Ver tabla
+        </button>
+      ) : null}
+      {selected ? (
+        <button
+          type="button"
+          onClick={onGeneral}
+          className={cn(
+            'text-[11px] font-semibold text-primary underline-offset-2 hover:underline',
+            !compact && 'mt-3',
+          )}
+        >
+          Ver nombre general
+        </button>
+      ) : null}
+    </>
+  );
+  return compact ? (
+    <div
+      role="group"
+      aria-label="Aplicaciones del SKU"
+      className="mt-2 flex flex-wrap items-center gap-1.5"
+    >
+      {content}
+    </div>
+  ) : (
+    <Card aria-label="Aplicaciones del SKU" className={cn(styles.aside, 'h-fit p-3')}>
+      {content}
+    </Card>
+  );
+}
+
 export function ProductDetailView({
   productId,
   canWriteAssets = false,
@@ -1792,6 +2047,14 @@ export function ProductDetailView({
   showProductStatus?: boolean;
 }) {
   const [product, setProduct] = useState<Product | null>(null);
+  const [experience, setExperience] = useState<ProductExperienceDto | null>(null);
+  const [experienceLoading, setExperienceLoading] = useState(true);
+  const [experienceError, setExperienceError] = useState<string | null>(null);
+  const [selectedVariantKey, setSelectedVariantKey] = useState<string | null>(null);
+  const [darkIdentity, setDarkIdentity] = useState(false);
+  const [assets, setAssets] = useState<ProductAssetDto[]>([]);
+  const [assetsLoading, setAssetsLoading] = useState(true);
+  const [assetsError, setAssetsError] = useState<string | null>(null);
   const [attributeSheet, setAttributeSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [attributeSheetError, setAttributeSheetError] = useState<string | null>(null);
   const [technicalSheet, setTechnicalSheet] = useState<ProductAttributeSheetDto | null>(null);
@@ -1832,6 +2095,79 @@ export function ProductDetailView({
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    const readLocation = () => {
+      const params = new URLSearchParams(window.location.search);
+      const use = params.get('uso');
+      setSelectedVariantKey(
+        params.get('aplicacion') || (use === 'industrial' || use === 'automotriz' ? use : null),
+      );
+      setDarkIdentity(params.get('idbar') === 'b');
+    };
+    readLocation();
+    window.addEventListener('popstate', readLocation);
+    return () => window.removeEventListener('popstate', readLocation);
+  }, [productId]);
+
+  const selectVariant = useCallback((variant: ProductSalesVariantDto | null) => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('aplicacion');
+    params.delete('uso');
+    if (variant?.aplicacion) params.set('aplicacion', variant.aplicacion.id);
+    else if (variant) params.set('uso', variant.tipo);
+    const query = params.toString();
+    window.history.pushState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    );
+    setSelectedVariantKey(variant ? variantKey(variant) : null);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setExperienceLoading(true);
+    setExperience(null);
+    setExperienceError(null);
+    setAssetsLoading(true);
+    setAssets([]);
+    setAssetsError(null);
+    void fetchProductExperience(productId, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setExperience(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setExperienceError('No fue posible consultar los nombres y las variantes del producto.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setExperienceLoading(false);
+      });
+    void listProductAssets({ productId }, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setAssets(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setAssetsError('No fue posible consultar los activos del producto.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAssetsLoading(false);
+      });
+    return () => controller.abort();
+  }, [productId, revision]);
+
+  useEffect(() => {
+    if (
+      (!showCompleteness && activeTab === 'applications') ||
+      (!showProductStatus &&
+        !showCompleteness &&
+        (activeTab === 'sources' || activeTab === 'history'))
+    ) {
+      setActiveTab('technical');
+    }
+  }, [activeTab, showCompleteness, showProductStatus]);
+
+  useEffect(() => {
     try {
       const preference = window.sessionStorage.getItem(UNIT_PREFERENCE_KEY);
       if (preference === 'metric' || preference === 'imperial') setUnitSystem(preference);
@@ -1853,15 +2189,15 @@ export function ProductDetailView({
     if (!attributeSheet) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('edit') !== 'enrichment') return;
-    openEnrichment();
+    setEditOpen(true);
     params.delete('edit');
     const query = params.toString();
     window.history.replaceState(
       window.history.state,
       '',
-      `${window.location.pathname}${query ? `?${query}` : ''}`,
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
     );
-  }, [attributeSheet, openEnrichment]);
+  }, [attributeSheet]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2058,11 +2394,22 @@ export function ProductDetailView({
     }
   };
 
+  const handleAssetUploaded = useCallback((asset: ProductAssetDto) => {
+    setAssets((current) => [
+      ...current.filter(
+        (previous) => previous.id !== asset.id && previous.id !== asset.replacesAssetId,
+      ),
+      asset,
+    ]);
+    setAssetsError(null);
+  }, []);
+
   const panel = useMemo(() => {
     if (!product) return null;
     if (activeTab === 'applications') {
       return (
         <ApplicationsPanel
+          productId={product.id}
           unifiedCode={unifiedCode}
           applications={applications}
           loading={applicationsLoading}
@@ -2085,7 +2432,13 @@ export function ProductDetailView({
       );
     }
     if (activeTab === 'documents') {
-      return <DocumentsPanel product={product} canWrite={canWriteAssets} />;
+      return (
+        <DocumentsPanel
+          product={product}
+          canWrite={canWriteAssets}
+          onUploaded={handleAssetUploaded}
+        />
+      );
     }
     if (activeTab === 'sources') return <SourcesPanel product={product} />;
     if (activeTab === 'history') {
@@ -2111,6 +2464,7 @@ export function ProductDetailView({
     auditLoading,
     auditTotal,
     canWriteAssets,
+    handleAssetUploaded,
     canReassignTemplate,
     showCompleteness,
     changeUnitSystem,
@@ -2169,10 +2523,17 @@ export function ProductDetailView({
       : /^no disponible/iu.test(product.application)
         ? 'Pendiente'
         : product.application);
+  const variants = experience?.variants.filter((variant) => variant.productId === product.id) ?? [];
+  const selectedVariant = variants.find((variant) => variantKey(variant) === selectedVariantKey);
   const heroName =
-    product.name === product.sku
+    selectedVariant?.nombreAmigable ||
+    experience?.nombreGeneral ||
+    (product.name === product.sku
       ? (attributeSheet?.schema.template.name ?? product.name)
-      : product.name;
+      : product.name);
+  const galleryAttributes = attributeSheet
+    ? technicalAttributesFromSheet(attributeSheet)
+    : product.attributes.map((attribute) => ({ ...attribute, value: attribute.rawValue }));
   const heroDescription =
     product.description ??
     sheetValue(/descripcion.?tecnica|descripci[oó]n t[eé]cnica|especificaci[oó]n t[eé]cnica/iu);
@@ -2212,10 +2573,11 @@ export function ProductDetailView({
     (oem) => oem.active && oem.approvalStatus === 'approved',
   ).length;
 
-  const visibleTabs =
-    showProductStatus || showCompleteness
-      ? tabs
-      : tabs.filter((tab) => tab.id !== 'sources' && tab.id !== 'history');
+  const visibleTabs = tabs.filter(
+    (tab) =>
+      (showCompleteness || tab.id !== 'applications') &&
+      (showProductStatus || showCompleteness || (tab.id !== 'sources' && tab.id !== 'history')),
+  );
 
   return (
     <>
@@ -2224,7 +2586,7 @@ export function ProductDetailView({
           {attributeSheet ? (
             <EnrichmentDrawer
               sheet={attributeSheet}
-              open={editOpen && !canEditDirect}
+              open={editOpen}
               onClose={() => setEditOpen(false)}
               onSaved={(replicatedProducts) => {
                 setEditOpen(false);
@@ -2276,37 +2638,29 @@ export function ProductDetailView({
         </div>
       ) : null}
 
-      <section
-        className={cn(
-          'grid min-w-0 items-start gap-5 pb-3 md:grid-cols-[minmax(170px,.55fr)_minmax(0,1.7fr)]',
-          showCompleteness &&
-            'xl:grid-cols-[minmax(180px,.55fr)_minmax(0,1.5fr)_minmax(250px,.8fr)]',
-        )}
-      >
+      <section className={cn(styles.layout, 'pb-3')}>
         <div className="min-w-0">
-          <ProductArtwork
+          <ProductGallery
             category={categoryName}
             name={product.name}
-            technical
-            className="aspect-[4/3] w-full"
+            assets={assets}
+            attributes={galleryAttributes}
+            error={assetsError}
           />
-          <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <span className="block text-[10px] text-muted-foreground">Marca</span>
-              <strong className="text-base">{product.brand}</strong>
-            </div>
-            <span className="text-[10px] text-muted-foreground">
-              Representación técnica · sin fotografía
-            </span>
+          <div className="mt-2">
+            <span className="block text-[10px] text-muted-foreground">Marca</span>
+            <strong className="text-base">{product.brand}</strong>
           </div>
         </div>
         <div className="min-w-0">
           <span className="text-[10px] uppercase tracking-[.06em] text-muted-foreground">
-            Código artículo · identidad ERP
+            Código artículo{' '}
+            <strong className="ml-1 text-sm font-semibold text-cdr-ink">{product.sku}</strong> ·
+            identidad ERP
           </span>
           <div className="flex items-center gap-2">
             <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-cdr-ink">
-              {product.sku}
+              {heroName}
             </h1>
             <span data-page-help-slot />
             <ScreenGuide
@@ -2320,10 +2674,21 @@ export function ProductDetailView({
               dataSource="Catálogo ERP, plantilla activa, aplicaciones, homólogos, documentos e historial del producto."
             />
           </div>
-          <p className="mt-1 text-base font-medium">{heroName}</p>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
             {heroDescription ?? 'Descripción técnica pendiente de completar'}
           </p>
+          {showCompleteness ? (
+            <ProductVariantPicker
+              variants={variants}
+              selected={selectedVariant}
+              loading={experienceLoading}
+              error={experienceError}
+              compact
+              onPick={selectVariant}
+              onGeneral={() => selectVariant(null)}
+              onViewTable={() => setActiveTab('applications')}
+            />
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {showProductStatus ? (
               <StatusBadge tone={statusTone(product.status)}>
@@ -2401,7 +2766,7 @@ export function ProductDetailView({
           ) : null}
         </div>
         {showCompleteness ? (
-          <Card className="h-fit overflow-hidden">
+          <Card className={cn(styles.aside, 'h-fit overflow-hidden')}>
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
               <h2 className="text-sm font-semibold">Control PIM</h2>
               {showProductStatus ? (
@@ -2476,30 +2841,41 @@ export function ProductDetailView({
               </div>
             </div>
           </Card>
-        ) : null}
+        ) : (
+          <ProductVariantPicker
+            variants={variants}
+            selected={selectedVariant}
+            loading={experienceLoading}
+            error={experienceError}
+            onPick={selectVariant}
+            onGeneral={() => selectVariant(null)}
+          />
+        )}
       </section>
 
       <section className="mt-4 min-w-0" aria-label="Detalle complementario">
         <div className="sticky top-12 z-20 -mx-4 md:top-0 border-y bg-white/95 px-4 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-[35px] lg:px-[35px]">
           <dl
-            className="grid grid-cols-3 gap-px border-b bg-slate-200 py-px"
+            className={cn(styles.identity, darkIdentity && styles.darkIdentity)}
             aria-label="Contexto persistente del producto"
           >
             {[
-              ['SKU · Código de Artículo', product.sku],
-              ['Código de Proveedor', product.providerCode ?? 'No disponible'],
+              ['Código de artículo', product.sku],
+              ['Código de proveedor', product.providerCode ?? 'No disponible'],
               ['Marca', product.brand],
+              ['Código unificador', unifiedCode ?? 'Sin código'],
+              ...(selectedVariant
+                ? [
+                    [
+                      selectedVariant.aplicacion ? 'Aplicación' : 'Uso',
+                      variantLabel(selectedVariant),
+                    ],
+                  ]
+                : []),
             ].map(([label, value]) => (
-              <div key={label} className="min-w-0 bg-white px-2 py-1.5 sm:px-3">
-                <dt className="truncate text-[9px] font-bold uppercase tracking-[.05em] text-slate-500">
-                  {label}
-                </dt>
-                <dd
-                  className="truncate text-[11px] font-semibold text-cdr-ink sm:text-xs"
-                  title={value}
-                >
-                  {value}
-                </dd>
+              <div key={label} className={styles.identityField}>
+                <dt>{label}</dt>
+                <dd title={value}>{value}</dd>
               </div>
             ))}
           </dl>
@@ -2571,6 +2947,9 @@ export function ProductDetailView({
             <TechnicalPanel
               product={product}
               active={activeTab === 'technical'}
+              assets={assets}
+              assetsLoading={assetsLoading}
+              assetsError={assetsError}
               sheet={attributeSheet}
               sheetError={attributeSheetError}
               unitSystem={unitSystem}

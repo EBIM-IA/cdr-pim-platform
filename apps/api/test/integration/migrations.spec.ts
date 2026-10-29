@@ -76,6 +76,7 @@ describe('migration runner', () => {
         'product_catalogs',
         'product_embeddings',
         'product_identifiers',
+        'product_name_settings',
         'product_template_assignments',
         'products',
         'template_asset_requirements',
