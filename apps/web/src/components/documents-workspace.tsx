@@ -88,6 +88,8 @@ const BASE_COLUMNS = [
   { key: 'application', label: 'Tipo de aplicación' },
   { key: 'brand', label: 'Marca de artículo' },
 ] as const;
+const PHOTO_GUIDANCE =
+  'Recomendamos fotografías JPG o PNG cuadradas de 800 × 800 o 1000 × 1000 px. También se admite WebP, hasta 20 MB. Un SKU admite varias fotos; se cargan una a la vez y se muestran en la galería del producto.';
 
 export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [products, setProducts] = useState<DocumentProduct[]>([]);
@@ -589,6 +591,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
             certificado .pdf .jpg .png · máx. 20 MB. Los archivos se guardan en el servidor. Filtro
             AX: «&quot;&quot;» muestra los SKU sin ese archivo.
           </p>
+          <p className={styles.footnote}>{PHOTO_GUIDANCE}</p>
         </Card>
       ) : (
         <>
@@ -661,6 +664,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
                   <p className="mb-4 text-xs text-muted-foreground">
                     Fotografías registradas del SKU y plano técnico.
                   </p>
+                  <p className="mb-4 text-xs leading-5 text-muted-foreground">{PHOTO_GUIDANCE}</p>
                   <div className={styles.gallery}>
                     {selectedAssets
                       .filter((asset) => asset.kind === 'image')

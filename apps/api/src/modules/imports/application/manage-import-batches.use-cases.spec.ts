@@ -282,6 +282,7 @@ describe('application imports', () => {
     const imports = new MemoryImportBatchRepository();
     const saved: GroupApplication[] = [];
     const applications: GroupApplicationRepositoryPort = {
+      listForProducts: vi.fn(async () => new Map()),
       findGroupByCode: vi.fn(async (code: string) => ({
         id: groupId,
         code,
@@ -549,6 +550,7 @@ function emptyCategoryImports(): CategoryAttributeImportPort {
 
 function emptyApplications(): GroupApplicationRepositoryPort {
   return {
+    listForProducts: vi.fn(async () => new Map()),
     findGroupByCode: vi.fn(async () => null),
     findById: vi.fn(async () => null),
     list: vi.fn(async () => []),

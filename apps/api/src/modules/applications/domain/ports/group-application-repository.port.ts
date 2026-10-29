@@ -26,6 +26,10 @@ export interface GroupApplicationRepositoryPort {
   ): Promise<{ id: Uuid; code: string; vehicleType: ApplicationVehicleType | null } | null>;
   findById(id: Uuid): Promise<GroupApplication | null>;
   list(criteria: ApplicationCriteria): Promise<GroupApplication[]>;
+  /** Active compatibility rows for a bounded set of products, loaded in one read. */
+  listForProducts(
+    productIds: readonly Uuid[],
+  ): Promise<ReadonlyMap<Uuid, readonly GroupApplication[]>>;
   /** Inserts the aggregate and its immutable audit event in one transaction. */
   insertWithAudit(
     application: GroupApplication,

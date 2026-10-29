@@ -1,12 +1,21 @@
 'use client';
 
 import type { AuditChangeDto, AuditChangeListQuery } from '@cdr/contracts';
-import { ChevronLeft, ChevronRight, Download, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Package,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  UsersRound,
+} from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
-import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -58,7 +67,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [items, setItems] = useState<AuditChangeDto[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +95,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
       setTotal(result.total);
     } catch (requestError) {
       setItems([]);
-      setTotal(0);
+      setTotal(null);
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -109,7 +118,11 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
     setFilters(draft);
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil((total ?? 0) / pageSize));
+  const pageEvents = new Set(items.map((item) => item.auditEntryId)).size;
+  const pageActors = new Set(items.flatMap((item) => (item.actorId ? [item.actorId] : []))).size;
+  const pageSkus = new Set(items.flatMap((item) => (item.sku ? [item.sku] : []))).size;
+  const summaryReady = !loading && total !== null;
 
   const exportCsv = async () => {
     if (exporting) return;
@@ -164,6 +177,57 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
           />
         </>
       ) : null}
+
+      <dl
+        aria-label="Indicadores de auditoría"
+        className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        {[
+          {
+            label: 'Cambios',
+            value: total,
+            note: 'con los filtros aplicados',
+            icon: ShieldCheck,
+            color: 'bg-orange-50 text-primary',
+          },
+          {
+            label: 'Eventos',
+            value: pageEvents,
+            note: 'únicos en esta página',
+            icon: CheckCircle2,
+            color: 'bg-emerald-50 text-emerald-700',
+          },
+          {
+            label: 'Actores',
+            value: pageActors,
+            note: 'identificados en esta página',
+            icon: UsersRound,
+            color: 'bg-amber-50 text-amber-700',
+          },
+          {
+            label: 'SKU afectados',
+            value: pageSkus,
+            note: 'en esta página',
+            icon: Package,
+            color: 'bg-blue-50 text-blue-700',
+          },
+        ].map(({ label, value, note, icon: Icon, color }) => (
+          <Card key={label} className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
+            <span className={`grid size-8 shrink-0 place-items-center rounded-full ${color}`}>
+              <Icon aria-hidden="true" className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <dt className="text-[11px] text-muted-foreground">{label}</dt>
+              <dd className="flex flex-wrap items-baseline gap-x-1.5">
+                <strong className="text-lg leading-tight tabular-nums">
+                  {summaryReady ? value : '—'}
+                </strong>
+                <span className="text-[10px] text-muted-foreground">{note}</span>
+              </dd>
+            </div>
+          </Card>
+        ))}
+      </dl>
 
       <Card className="mb-5 p-5">
         <form onSubmit={submit}>
@@ -259,12 +323,6 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
 
       {loading ? (
         <Skeleton className="h-96 rounded-xl" />
-      ) : items.length === 0 ? (
-        <StatePanel
-          variant="empty"
-          title="Sin cambios registrados"
-          description="No se encontraron eventos para los filtros seleccionados."
-        />
       ) : (
         <Card className="overflow-hidden">
           <div className="flex flex-col justify-between gap-3 border-b p-4 sm:flex-row sm:items-center">
@@ -272,7 +330,9 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
               <ShieldCheck aria-hidden="true" className="size-5 text-primary" />
               <div>
                 <h2 className="font-semibold">Historial de cambios</h2>
-                <p className="text-xs text-muted-foreground">{total} registros encontrados</p>
+                <p className="text-xs text-muted-foreground">
+                  {total ?? '—'} registros encontrados
+                </p>
               </div>
             </div>
             <Select
@@ -306,6 +366,20 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
+                {items.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-10 text-center">
+                      <h3 className="font-semibold">
+                        {error ? 'Historial no disponible' : 'Sin cambios registrados'}
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {error
+                          ? 'Actualiza para volver a consultar los cambios.'
+                          : 'No se encontraron eventos para los filtros seleccionados.'}
+                      </p>
+                    </td>
+                  </tr>
+                ) : null}
                 {items.map((item) => (
                   <tr key={item.id} className="align-top hover:bg-orange-50/40">
                     <td className="whitespace-nowrap px-4 py-3">

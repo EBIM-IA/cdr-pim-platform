@@ -1104,51 +1104,59 @@ export function ProductCatalogsWorkspace({
           {notice}
         </p>
       ) : null}
-      {metrics && metrics.catalogs > 0 ? (
-        <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              label: 'Catálogos',
-              value: metrics.catalogs,
-              note: 'cargados en PDF',
-              icon: FileText,
-              color: 'bg-orange-50 text-primary',
-            },
-            {
-              label: 'Vigentes',
-              value: metrics.current,
-              note: `${metrics.expiring} por vencer en 30 días`,
-              icon: CheckCircle2,
-              color: 'bg-emerald-50 text-emerald-700',
-            },
-            {
-              label: 'Vencidos / programados',
-              value: `${metrics.expired} / ${metrics.scheduled}`,
-              note: 'fuera de vigencia hoy',
-              icon: Clock3,
-              color: 'bg-amber-50 text-amber-700',
-            },
-            {
-              label: 'Enlaces activos',
-              value: metrics.activeLinks,
-              note: 'compartidos y sin vencer',
-              icon: Link2,
-              color: 'bg-blue-50 text-blue-700',
-            },
-          ].map(({ label, value, note: helper, icon: Icon, color }) => (
-            <Card key={label} className="flex items-start gap-3 p-4">
-              <span className={`grid size-10 shrink-0 place-items-center rounded-full ${color}`}>
-                <Icon className="size-5" aria-hidden="true" />
-              </span>
-              <div>
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="my-1 text-2xl font-bold tabular-nums">{value}</dd>
-                <p className="text-[11px] text-muted-foreground">{helper}</p>
-              </div>
-            </Card>
-          ))}
-        </dl>
-      ) : null}
+      <dl
+        aria-label="Indicadores de catálogos"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        {[
+          {
+            label: 'Catálogos',
+            value: metrics?.catalogs,
+            note: 'PDF en la búsqueda',
+            icon: FileText,
+            color: 'bg-orange-50 text-primary',
+          },
+          {
+            label: 'Vigentes',
+            value: metrics?.current,
+            note:
+              metrics && !loading && !loadError
+                ? `${metrics.expiring} por vencer en 30 días`
+                : 'por vencer en 30 días',
+            icon: CheckCircle2,
+            color: 'bg-emerald-50 text-emerald-700',
+          },
+          {
+            label: 'Vencidos / programados',
+            value: metrics ? `${metrics.expired} / ${metrics.scheduled}` : undefined,
+            note: 'fuera de vigencia hoy',
+            icon: Clock3,
+            color: 'bg-amber-50 text-amber-700',
+          },
+          {
+            label: 'Enlaces activos',
+            value: metrics?.activeLinks,
+            note: 'compartidos y sin vencer',
+            icon: Link2,
+            color: 'bg-blue-50 text-blue-700',
+          },
+        ].map(({ label, value, note: helper, icon: Icon, color }) => (
+          <Card key={label} className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
+            <span className={`grid size-8 shrink-0 place-items-center rounded-full ${color}`}>
+              <Icon className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <dt className="text-[11px] text-muted-foreground">{label}</dt>
+              <dd className="flex flex-wrap items-baseline gap-x-1.5">
+                <strong className="text-lg leading-tight tabular-nums">
+                  {loading || loadError ? '—' : (value ?? '—')}
+                </strong>
+                <span className="text-[10px] text-muted-foreground">{helper}</span>
+              </dd>
+            </div>
+          </Card>
+        ))}
+      </dl>
       <Card className="min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>

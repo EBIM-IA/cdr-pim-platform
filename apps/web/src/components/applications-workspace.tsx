@@ -30,7 +30,6 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { downloadCsv, downloadXlsx } from '@/lib/tabular-export';
 import { applicationMatches, findApplicationUnifiedCodes } from '@/lib/application-search';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -215,14 +214,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [view, setView] = useState<'context' | 'all'>('all');
-  const [selectedCode, setSelectedCode] = useState('');
+  const [unifiedCodeFilter, setUnifiedCodeFilter] = useState('');
+  const [returnProductId, setReturnProductId] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('unifiedCode');
-    if (params.get('view') === 'context' || code) setView('context');
-    if (code) setSelectedCode(code);
+    if (code) setUnifiedCodeFilter(code);
+    setReturnProductId(params.get('productId') ?? '');
   }, []);
 
   const load = useCallback(async () => {
@@ -243,9 +242,13 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   useEffect(() => void load(), [load]);
 
+  const scopedItems = useMemo(
+    () => items.filter((item) => !unifiedCodeFilter || item.unifiedCode === unifiedCodeFilter),
+    [items, unifiedCodeFilter],
+  );
   const directMatches = useMemo(
-    () => items.filter((item) => applicationMatches(query, item)),
-    [items, query],
+    () => scopedItems.filter((item) => applicationMatches(query, item)),
+    [scopedItems, query],
   );
   useEffect(() => {
     if (!query || directMatches.length || loading) return;
@@ -253,7 +256,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     setProductSearch({ query, codes: new Set(), loading: true, error: null });
     void findApplicationUnifiedCodes(
       query,
-      items.map((item) => item.unifiedCode),
+      scopedItems.map((item) => item.unifiedCode),
       controller.signal,
     )
       .then((codes) => {
@@ -273,12 +276,12 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           });
       });
     return () => controller.abort();
-  }, [directMatches.length, items, loading, query, searchRevision]);
+  }, [directMatches.length, scopedItems, loading, query, searchRevision]);
   const filtered =
     directMatches.length || !query
       ? directMatches
       : productSearch.query === query
-        ? items.filter((item) => productSearch.codes.has(item.unifiedCode))
+        ? scopedItems.filter((item) => productSearch.codes.has(item.unifiedCode))
         : [];
   const searchingProducts = Boolean(
     query && !directMatches.length && productSearch.query === query && productSearch.loading,
@@ -290,9 +293,14 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     () => [...new Set(items.map((item) => item.unifiedCode))].sort(),
     [items],
   );
-  const effectiveCode = selectedCode || unifiedCodes[0] || '';
-  const contextRows = filtered.filter((item) => item.unifiedCode === effectiveCode);
-  const tableRows = view === 'context' ? contextRows : filtered;
+  const tableRows = filtered;
+  const clearUnifiedCodeFilter = () => {
+    setUnifiedCodeFilter('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('unifiedCode');
+    if (url.searchParams.get('view') === 'context') url.searchParams.delete('view');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+  };
   const applicationTable = useExcelTableRows({
     rows: tableRows,
     columns: applicationTableColumns,
@@ -502,20 +510,32 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             Buscar
           </Button>
         </form>
-        {query ? (
+        {query || unifiedCodeFilter ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>Filtros activos</span>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-full border bg-slate-50 px-2 py-1"
-              aria-label={`Quitar búsqueda ${query}`}
-              onClick={() => {
-                setQuery('');
-                setQueryInput('');
-              }}
-            >
-              “{query}” <X className="size-3" aria-hidden="true" />
-            </button>
+            {unifiedCodeFilter ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full border bg-slate-50 px-2 py-1"
+                aria-label={`Quitar filtro de código unificador ${unifiedCodeFilter}`}
+                onClick={clearUnifiedCodeFilter}
+              >
+                Código unificador: {unifiedCodeFilter} <X className="size-3" aria-hidden="true" />
+              </button>
+            ) : null}
+            {query ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full border bg-slate-50 px-2 py-1"
+                aria-label={`Quitar búsqueda ${query}`}
+                onClick={() => {
+                  setQuery('');
+                  setQueryInput('');
+                }}
+              >
+                “{query}” <X className="size-3" aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
         ) : null}
         <p className="sr-only" aria-live="polite">
@@ -529,26 +549,17 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         className="sticky top-0 z-20 -mx-1 mb-2 flex flex-wrap items-center gap-1.5 bg-white/95 px-1 py-1.5 backdrop-blur [&_button]:h-[30px] [&_button]:min-h-[30px] [&_button]:text-xs [&_a]:min-h-[30px] [&_a]:text-xs"
         aria-label="Acciones generales de aplicaciones"
       >
-        <nav className="mr-2 flex flex-wrap gap-1.5" aria-label="Vistas de aplicaciones">
-          <button
-            type="button"
-            aria-current={view === 'all' ? 'page' : undefined}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 ${view === 'all' ? 'border-primary bg-orange-50 text-primary shadow-[inset_0_-2px_0_var(--color-primary)]' : 'border-border text-muted-foreground'}`}
-            onClick={() => setView('all')}
-          >
-            Todas las aplicaciones · tabla{' '}
-            <span className="rounded-md bg-orange-50 px-2 py-0.5">{items.length}</span>
-          </button>
-          <button
-            type="button"
-            aria-current={view === 'context' ? 'page' : undefined}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 ${view === 'context' ? 'border-primary bg-orange-50 text-primary shadow-[inset_0_-2px_0_var(--color-primary)]' : 'border-border text-muted-foreground'}`}
-            onClick={() => setView('context')}
-          >
-            Código unificador en contexto{' '}
-            <span className="rounded-md bg-orange-50 px-2 py-0.5">{contextRows.length}</span>
-          </button>
-        </nav>
+        <h2 className="mr-2 text-xs font-semibold text-cdr-ink">
+          Todas las aplicaciones · tabla{' '}
+          <span className="rounded-md bg-orange-50 px-2 py-0.5">{items.length}</span>
+        </h2>
+        {returnProductId ? (
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/products/${encodeURIComponent(returnProductId)}?tab=applications`}>
+              Volver a ficha
+            </Link>
+          </Button>
+        ) : null}
         {canWrite ? (
           <>
             <Button
@@ -557,7 +568,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               aria-label="Agregar fila"
               onClick={() => {
                 closeForm();
-                setForm({ ...emptyForm, unifiedCode: view === 'context' ? effectiveCode : '' });
+                setForm({ ...emptyForm, unifiedCode: unifiedCodeFilter });
                 setShowForm(true);
               }}
             >
@@ -595,7 +606,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                 rows: exportRows,
                 sheetName: 'Aplicaciones',
               },
-              view === 'context' ? `aplicaciones-${effectiveCode}` : 'aplicaciones-filtradas',
+              unifiedCodeFilter ? `aplicaciones-${unifiedCodeFilter}` : 'aplicaciones-filtradas',
             )
           }
         >
@@ -830,28 +841,6 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           </p>
         </Card>
       )}
-      {view === 'context' ? (
-        <Card className="mt-3 grid gap-4 p-4 sm:grid-cols-2">
-          <div>
-            <h2 className="text-sm font-semibold">Aplicaciones heredadas</h2>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Los SKU de un mismo código unificador comparten sus aplicaciones. Cada registro
-              conserva su información y trazabilidad.
-            </p>
-          </div>
-          <Select
-            label="Código unificador"
-            value={effectiveCode}
-            onChange={(event) => setSelectedCode(event.target.value)}
-          >
-            {unifiedCodes.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </Select>
-        </Card>
-      ) : null}
       <details className="mt-3 text-xs text-muted-foreground">
         <summary className="cursor-pointer">Más opciones</summary>
         <div className="mt-2 flex flex-wrap items-center gap-3">

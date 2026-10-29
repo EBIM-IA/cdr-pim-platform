@@ -65,13 +65,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('applications reference layout', () => {
-  it('puts compact tabs and operations before the editable matrix without unrelated KPI cards', async () => {
+  it('puts one compact table and operations before the editable matrix without contextual tabs', async () => {
     render(<ApplicationsWorkspace canWrite />);
     const table = await screen.findByRole('table');
-    expect(screen.getByRole('button', { name: /Todas las aplicaciones/ })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    expect(screen.getByRole('heading', { name: /Todas las aplicaciones/ })).toBeVisible();
+    expect(
+      screen.queryByRole('navigation', { name: 'Vistas de aplicaciones' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Código unificador en contexto')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Agregar fila' })).toHaveTextContent('Nuevo');
     expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeVisible();
     expect(screen.queryByLabelText('Resumen')).not.toBeInTheDocument();
@@ -82,6 +83,35 @@ describe('applications reference layout', () => {
     expect(headings[2]).toContain('Marca Vehículo');
     expect(headings[3]).toContain('Modelo');
     expect(screen.getByText(/Clic en una celda o empieza a escribir/)).toBeInTheDocument();
+  });
+
+  it('keeps URL group context as a removable table filter, with a return to the real product sheet', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/applications?view=context&unifiedCode=UNI-6205&productId=product-1',
+    );
+    vi.mocked(listApplications).mockResolvedValue([first, { ...second, unifiedCode: 'UNI-OTHER' }]);
+    render(<ApplicationsWorkspace canWrite />);
+    await screen.findByRole('table');
+    expect(screen.getByText('TOYOTA')).toBeVisible();
+    expect(screen.queryByText('NISSAN')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Volver a ficha' })).toHaveAttribute(
+      'href',
+      '/products/product-1?tab=applications',
+    );
+    expect(screen.queryByLabelText('Código unificador')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    expect(vi.mocked(downloadXlsx).mock.calls[0]![0].rows).toHaveLength(1);
+    expect(vi.mocked(downloadXlsx).mock.calls[0]![1]).toBe('aplicaciones-UNI-6205');
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar fila' }));
+    expect(screen.getByLabelText('Nuevo código unificador de aplicación')).toHaveValue('UNI-6205');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar nueva aplicación' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quitar filtro de código unificador UNI-6205' }),
+    );
+    expect(screen.getByText('NISSAN')).toBeVisible();
+    expect(window.location.search).toBe('?productId=product-1');
   });
 
   it('combines column filtering with export and preserves the current visible column order', async () => {

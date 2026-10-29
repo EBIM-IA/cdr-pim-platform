@@ -176,6 +176,63 @@ describe('DocumentsWorkspace', () => {
     await waitFor(() => expect(mocks.fetchDocumentsCatalog).toHaveBeenCalledTimes(2));
   });
 
+  it('keeps the first photograph when adding a second JPG or PNG for the same SKU', async () => {
+    const firstPhoto: ProductAssetDto = {
+      ...asset,
+      id: '77777777-7777-4777-8777-777777777777',
+      kind: 'image',
+      type: 'FOTO',
+      filename: 'producto-frente.jpg',
+      mimeType: 'image/jpeg',
+      position: 1,
+    };
+    const secondPhoto: ProductAssetDto = {
+      ...firstPhoto,
+      id: '88888888-8888-4888-8888-888888888888',
+      filename: 'producto-lateral.png',
+      mimeType: 'image/png',
+      position: 2,
+    };
+    mocks.uploadProductAsset.mockResolvedValueOnce(firstPhoto).mockResolvedValueOnce(secondPhoto);
+    mocks.fetchDocumentsCatalog
+      .mockResolvedValueOnce(allCatalog())
+      .mockResolvedValueOnce({ products: [product], assets: { [product.id]: [asset, firstPhoto] } })
+      .mockResolvedValueOnce({
+        products: [product],
+        assets: { [product.id]: [asset, firstPhoto, secondPhoto] },
+      });
+    render(<DocumentsWorkspace canWrite />);
+    const label = `Cargar Fotografía de ${product.sku}`;
+    const firstFile = new File(['first photo'], firstPhoto.filename, { type: firstPhoto.mimeType });
+    fireEvent.change(await screen.findByLabelText(label), { target: { files: [firstFile] } });
+    expect(
+      await screen.findByRole('link', { name: `Descargar ${firstPhoto.filename}` }),
+    ).toBeVisible();
+    await waitFor(() => expect(screen.getByLabelText(label)).toBeEnabled());
+    const secondFile = new File(['second photo'], secondPhoto.filename, {
+      type: secondPhoto.mimeType,
+    });
+    fireEvent.change(screen.getByLabelText(label), { target: { files: [secondFile] } });
+    expect(
+      await screen.findByRole('link', { name: `Descargar ${secondPhoto.filename}` }),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: `Descargar ${firstPhoto.filename}` })).toBeVisible();
+    expect(mocks.uploadProductAsset).toHaveBeenNthCalledWith(1, {
+      productId: product.id,
+      type: 'FOTO',
+      file: firstFile,
+    });
+    expect(mocks.uploadProductAsset).toHaveBeenNthCalledWith(2, {
+      productId: product.id,
+      type: 'FOTO',
+      file: secondFile,
+    });
+    expect(screen.getByLabelText(label)).toHaveAttribute(
+      'accept',
+      expect.stringContaining('.webp'),
+    );
+  });
+
   it('uploads a dropped optional document using its own SKU and type', async () => {
     render(<DocumentsWorkspace canWrite />);
     await screen.findByText(asset.filename);

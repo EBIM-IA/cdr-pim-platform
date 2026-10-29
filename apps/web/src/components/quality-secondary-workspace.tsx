@@ -19,7 +19,6 @@ import {
   ClipboardCopy,
   Database,
   ExternalLink,
-  FileCheck2,
   FileSearch,
   GitCompareArrows,
   Layers3,
@@ -49,7 +48,7 @@ import { Input } from '@/components/ui/input';
 import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { extractAssetCandidates, generateCommercialProposal } from '@/lib/ai-api';
 import { listAdminCategories } from '@/lib/catalog-admin-api';
-import { fetchProducts } from '@/lib/catalog-api';
+import { fetchProduct, fetchProducts } from '@/lib/catalog-api';
 import { fetchProductAttributeSheet, patchProductAttributes } from '@/lib/dynamic-catalog-api';
 import { listProductAssets, productAssetDownloadUrl } from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
@@ -194,6 +193,25 @@ function ProductSelector({
     if (!disabled) loadProducts('');
     return () => requestRef.current?.abort();
   }, [disabled, loadProducts]);
+
+  useEffect(() => {
+    const requestedId = new URLSearchParams(window.location.search).get('productId');
+    if (disabled || !requestedId) return;
+    const controller = new AbortController();
+    void fetchProduct(requestedId, controller.signal)
+      .then((product) => {
+        if (!controller.signal.aborted) onSelect(product);
+      })
+      .catch((requestError: unknown) => {
+        if (!controller.signal.aborted)
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'No fue posible cargar el SKU solicitado.',
+          );
+      });
+    return () => controller.abort();
+  }, [disabled, onSelect]);
 
   const options = selected
     ? [selected, ...products.filter((product) => product.id !== selected.id)]
@@ -562,7 +580,13 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
             </div>
           )}
           <Button asChild variant="outline" className="mt-4 w-full">
-            <Link href="/documents">Ir a imágenes y documentos</Link>
+            <Link
+              href={
+                product ? `/documents?productId=${encodeURIComponent(product.id)}` : '/documents'
+              }
+            >
+              Ir a imágenes y documentos
+            </Link>
           </Button>
         </Card>
 
@@ -1295,6 +1319,22 @@ function ReviewWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   );
 }
 
+const ERP_SOURCE_FIELDS = [
+  ['Código artículo', 'codigoArticulo', 'Identidad estable del SKU; nace en ERP.'],
+  ['Código de proveedor', 'codigoProveedor', 'Puede repetirse entre SKU.'],
+  ['Código unificador', 'codigoUnificador', 'Agrupa SKU equivalentes; no los fusiona.'],
+  ['Categoría principal', 'categoriaN1', 'Nivel 1 del árbol de categorías del ERP.'],
+  ['Categoría segundo nivel', 'categoriaN2', 'Nivel 2 del árbol de categorías del ERP.'],
+  ['Categoría tercer nivel', 'categoriaN3', 'Nivel 3; repite el nivel 2 si la rama termina allí.'],
+  ['Tipo de aplicación', 'tipoAplicacion', ''],
+  ['Marca de artículo', 'marca', ''],
+  ['Frecuencia', 'frecuencia', ''],
+  ['Ecommerce', 'ecommerce', 'Publicación del SKU en la tienda en línea.'],
+  ['Bloqueado / venta', 'bloqueadoVenta', ''],
+  ['Bloqueado / compra', 'bloqueadoCompra', ''],
+  ['Especificación técnica · observación', 'especificacionTecnica', ''],
+] as const;
+
 function SourcesWorkspace({
   workspace,
   conflict = false,
@@ -1381,52 +1421,159 @@ function SourcesWorkspace({
             : `${configuredCategories.length} configuradas · ${pendingCount} pendientes`}
         </StatusBadge>
       </Card>
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      {conflict ? (
+        <Card className="p-5">
           <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-full bg-blue-100 text-blue-700">
-              {conflict ? (
-                <ShieldAlert className="size-5" aria-hidden="true" />
-              ) : (
-                <Layers3 className="size-5" aria-hidden="true" />
-              )}
-            </span>
-            <div>
-              <h3 className="font-semibold text-cdr-ink">
-                {conflict ? 'Candidatos por fuente' : 'Prioridad de fuentes por categoría'}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                ERP aporta identidad y datos base; no compite con las fuentes de enriquecimiento.
+            <ShieldAlert className="size-5 text-blue-700" aria-hidden="true" />
+            <h3 className="font-semibold text-cdr-ink">Candidatos por fuente</h3>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            ERP aporta identidad y datos base; no compite con las fuentes de enriquecimiento.
+          </p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {Object.values(SOURCE_LABELS).map((label) => (
+              <div key={label} className="rounded-xl border bg-slate-50 p-4">
+                <strong className="text-sm text-slate-400">{label}</strong>
+                <p className="mt-2 text-xs text-muted-foreground">Sin candidato disponible</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : (
+        <div
+          className="grid items-start gap-4 lg:grid-cols-2"
+          aria-label="Datos ERP y fuentes de enriquecimiento"
+        >
+          <Card className="overflow-hidden">
+            <div className="border-b px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Database className="size-4 text-blue-700" aria-hidden="true" />
+                <h3 className="text-sm font-semibold">Datos base ERP · Sismetic / AX</h3>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Llegan por PUSH y se muestran en solo lectura. No forman parte de la prioridad de
+                enriquecimiento.
               </p>
             </div>
-          </div>
-          <StatusBadge tone={selectedSources.length > 0 ? 'success' : 'warning'}>
-            {selectedSources.length > 0 ? 'Configuración persistida' : 'Configuración pendiente'}
-          </StatusBadge>
-        </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }, (_, index) => {
-            const configured = selectedSources[index];
-            return (
-              <div key={index} className="rounded-xl border bg-slate-50 p-4">
-                <small className="text-muted-foreground">
-                  Prioridad {index + 1} · {index === 0 ? 'Preferida' : `Alternativa ${index}`}
-                </small>
-                <strong
-                  className={`mt-3 block text-sm ${configured ? 'text-cdr-ink' : 'text-slate-400'}`}
-                >
-                  {configured ? SOURCE_LABELS[configured.source] : 'Sin fuente configurada'}
-                </strong>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {configured
-                    ? `${selectedCategory?.application ?? 'Aplicación pendiente'} · alcance de enriquecimiento`
-                    : 'Prioridad pendiente de confirmación del cliente'}
+            <dl className="divide-y px-4">
+              {ERP_SOURCE_FIELDS.map(([label, key, note]) => (
+                <div key={key} className="flex items-center justify-between gap-3 py-2.5">
+                  <dt className="min-w-0">
+                    <strong className="block text-xs">{label}</strong>
+                    <small className="block text-[10px] text-muted-foreground">
+                      {key}
+                      {note ? ` · ${note}` : ''}
+                    </small>
+                  </dt>
+                  <dd>
+                    <StatusBadge tone="info">Solo lectura</StatusBadge>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+          <Card className="overflow-hidden">
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-cdr-ink">
+                  Prioridad de fuentes por categoría
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fuentes de enriquecimiento ·{' '}
+                  {selectedCategory?.name ?? 'Selecciona una categoría'}
                 </p>
               </div>
-            );
-          })}
+              <StatusBadge tone={selectedSources.length > 0 ? 'success' : 'warning'}>
+                {selectedSources.length > 0
+                  ? 'Configuración persistida'
+                  : 'Configuración pendiente'}
+              </StatusBadge>
+            </div>
+            <div className="p-4">
+              {selectedSources.length ? (
+                <>
+                  <ol
+                    className="grid grid-cols-2 gap-2 xl:grid-cols-4"
+                    aria-label="Orden de fuentes"
+                  >
+                    {selectedSources.map((source) => (
+                      <li
+                        key={source.source}
+                        className="flex items-center gap-2 rounded-md border p-2"
+                      >
+                        <b className="grid size-6 shrink-0 place-items-center rounded bg-orange-50 text-xs text-primary">
+                          {source.rank}
+                        </b>
+                        <span className="min-w-0 text-xs">
+                          <strong className="block">{SOURCE_LABELS[source.source]}</strong>
+                          <small className="text-muted-foreground">
+                            {source.rank === 1 ? 'Preferida' : 'Alternativa'}
+                          </small>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="mt-4 overflow-x-auto">
+                    <table
+                      className="w-full min-w-[420px] text-left text-xs"
+                      aria-label="Fuentes de la categoría seleccionada"
+                    >
+                      <thead className="border-b bg-slate-50 text-muted-foreground">
+                        <tr>
+                          {['Prioridad', 'Fuente', 'Modo', 'Vigencia', 'Acción'].map((label) => (
+                            <th key={label} className="px-2 py-2.5 font-semibold">
+                              {label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedSources.map((source) => (
+                          <tr key={source.source} className="border-b last:border-0">
+                            <td className="px-2 py-2.5">{source.rank}</td>
+                            <th scope="row" className="px-2 py-2.5 font-medium">
+                              {SOURCE_LABELS[source.source]}
+                            </th>
+                            <td className="px-2 py-2.5">
+                              {source.rank === 1 ? 'Preferida' : 'Alternativa'}
+                            </td>
+                            <td className="px-2 py-2.5">
+                              <StatusBadge tone={selectedCategory?.active ? 'success' : 'neutral'}>
+                                {selectedCategory?.active ? 'Activa' : 'Inactiva'}
+                              </StatusBadge>
+                            </td>
+                            <td className="px-2 py-2.5">
+                              <Button size="sm" variant="outline" disabled>
+                                Editar
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-dashed p-6 text-center">
+                  <strong className="text-sm">Sin fuente configurada</strong>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Prioridad pendiente de confirmación del cliente.
+                  </p>
+                </div>
+              )}
+              <p className="mt-4 rounded-lg bg-blue-50 p-3 text-xs leading-relaxed text-blue-950">
+                El orden mostrado proviene de BUSQUEDA. Las categorías sin valores permanecen
+                pendientes; no se completa su precedencia por inferencia.
+              </p>
+              <div className="mt-3 flex justify-end">
+                <Button size="sm" variant="outline" disabled>
+                  Guardar reglas
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
-      </Card>
+      )}
 
       {conflict ? (
         <Card className="p-5">
@@ -1459,34 +1606,6 @@ function SourcesWorkspace({
         </Card>
       ) : (
         <>
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Card className="p-5">
-              <div className="flex items-center gap-3">
-                <Database className="size-5 text-blue-700" aria-hidden="true" />
-                <h3 className="font-semibold text-cdr-ink">Datos base ERP</h3>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                Llegan por PUSH y son de solo lectura. La matriz de enriquecimiento no debe
-                sobrescribir la identidad recibida de Sismetic / AX.
-              </p>
-              <StatusBadge tone="info" className="mt-4">
-                Solo lectura
-              </StatusBadge>
-            </Card>
-            <Card className="p-5">
-              <div className="flex items-center gap-3">
-                <FileCheck2 className="size-5 text-primary" aria-hidden="true" />
-                <h3 className="font-semibold text-cdr-ink">Fuentes de enriquecimiento</h3>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                El orden mostrado proviene de BUSQUEDA. Las categorías sin valores permanecen
-                explícitamente pendientes; no se completa su precedencia por inferencia.
-              </p>
-              <Button variant="outline" className="mt-4" disabled>
-                Guardar reglas
-              </Button>
-            </Card>
-          </div>
           <Card className="overflow-hidden">
             <div className="border-b p-5">
               <h3 className="font-semibold text-cdr-ink">Matriz de prioridades por plantilla</h3>

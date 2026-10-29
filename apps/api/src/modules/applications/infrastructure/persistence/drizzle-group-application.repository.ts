@@ -106,7 +106,8 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
           equivalenceGroupMembers,
           eq(equivalenceGroupMembers.groupId, equivalenceGroups.id),
         )
-        .where(and(...conditions, eq(equivalenceGroupMembers.productId, criteria.productId)));
+        .where(and(...conditions, eq(equivalenceGroupMembers.productId, criteria.productId)))
+        .orderBy(groupApplications.createdAt, groupApplications.id);
       return rows.map((row) => this.toDomain(row.application, row.unifiedCode));
     }
 
@@ -114,8 +115,37 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
       .select({ application: groupApplications, unifiedCode: equivalenceGroups.code })
       .from(groupApplications)
       .innerJoin(equivalenceGroups, eq(groupApplications.groupId, equivalenceGroups.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(groupApplications.createdAt, groupApplications.id);
     return rows.map((row) => this.toDomain(row.application, row.unifiedCode));
+  }
+
+  async listForProducts(
+    productIds: readonly Uuid[],
+  ): Promise<ReadonlyMap<Uuid, readonly GroupApplication[]>> {
+    const ids = [...new Set(productIds)];
+    if (!ids.length) return new Map();
+    const rows = await this.db
+      .select({
+        productId: equivalenceGroupMembers.productId,
+        application: groupApplications,
+        unifiedCode: equivalenceGroups.code,
+      })
+      .from(equivalenceGroupMembers)
+      .innerJoin(equivalenceGroups, eq(equivalenceGroupMembers.groupId, equivalenceGroups.id))
+      .innerJoin(groupApplications, eq(groupApplications.groupId, equivalenceGroups.id))
+      .where(
+        and(inArray(equivalenceGroupMembers.productId, ids), eq(groupApplications.active, true)),
+      )
+      .orderBy(groupApplications.createdAt, groupApplications.id);
+    const result = new Map<Uuid, GroupApplication[]>();
+    for (const row of rows) {
+      const id = row.productId as Uuid;
+      const applications = result.get(id) ?? [];
+      applications.push(this.toDomain(row.application, row.unifiedCode));
+      result.set(id, applications);
+    }
+    return result;
   }
 
   async insertWithAudit(

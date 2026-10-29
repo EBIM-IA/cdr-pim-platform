@@ -81,7 +81,25 @@ function normalizeAxFilterText(value: string): string {
 }
 
 function normalizedAxColumnSql(expression: SQL): SQL<string> {
-  return sql<string>`TRANSLATE(LOWER(COALESCE((${expression})::text, '')), 'áéíóúüñ', 'aeiouun')`;
+  // SQL_ASCII databases treat TRANSLATE's UTF-8 literals as individual bytes, corrupting
+  // accented words (Diseño -> diseao). Literal replacements work in both SQL_ASCII and
+  // UTF8; replace capitals before LOWER because the C locale cannot lowercase them.
+  let normalized = sql<string>`COALESCE((${expression})::text, '')`;
+  for (const [accented, plain] of [
+    ['á', 'a'],
+    ['é', 'e'],
+    ['í', 'i'],
+    ['ó', 'o'],
+    ['ú', 'u'],
+    ['ü', 'u'],
+    ['ñ', 'n'],
+  ] as const) {
+    for (const letter of [accented, accented.toUpperCase()]) {
+      // These SQL literals come exclusively from the fixed alphabet above, never user input.
+      normalized = sql<string>`REPLACE(${normalized}, ${sql.raw(`'${letter}'`)}, ${sql.raw(`'${plain}'`)})`;
+    }
+  }
+  return sql<string>`LOWER(${normalized})`;
 }
 
 function compareAxColumnSql(

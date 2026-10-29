@@ -183,6 +183,20 @@ describe('DrizzleDynamicCatalogRepository', () => {
     }
   });
 
+  it('matches accented capitals and lowercase text independently of database encoding and C collation', async () => {
+    await database.db
+      .update(products)
+      .set({ brand: 'ÁÉÍÓÚ Ü Ñ DISEÑO' })
+      .where(eq(products.sku, 'D1672'));
+    const scope = { roles: ['ADMINISTRADOR'], page: 1, pageSize: 25, filters: [] };
+    for (const q of ['d1672 aeiou u n diseno', 'D1672 ÁÉÍÓÚ Ü Ñ DISEÑO']) {
+      expect(await repository.listWorkbook({ ...scope, q }), q).toMatchObject({
+        total: 1,
+        items: [{ sku: 'D1672' }],
+      });
+    }
+  });
+
   it('discovers active categories and filters every schema by role access', async () => {
     const categories = await repository.listActiveCategories(['COMPRAS']);
     expect(categories).toHaveLength(52);

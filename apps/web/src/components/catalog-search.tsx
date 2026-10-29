@@ -1,11 +1,12 @@
 'use client';
 
-import type { CatalogWorkbookResultDto } from '@cdr/contracts';
+import type { ProductVariantSearchDto } from '@cdr/contracts';
 import { Search, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { searchProductVariants } from '@/lib/product-experience-api';
 import { cn } from '@/lib/utils';
 
 type SearchChoice = {
@@ -13,14 +14,15 @@ type SearchChoice = {
   value: string;
   label: string;
   detail: string;
+  href?: string;
+  type?: 'automotriz' | 'industrial';
 };
 
-/** Suggestions come from the same authorized, paginated projection as the catalog. */
+/** Each SKU suggestion selects a sales variant; Enter retains ordinary catalog filtering. */
 export function CatalogSearch({
   value,
   onChange,
   onSearch,
-  showDescription = true,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -28,22 +30,25 @@ export function CatalogSearch({
   showDescription?: boolean;
 }) {
   const id = useId();
+  const router = useRouter();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  const [result, setResult] = useState<{ query: string; data: CatalogWorkbookResultDto } | null>(
+  const [result, setResult] = useState<{ query: string; data: ProductVariantSearchDto } | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const query = value.trim();
 
   useEffect(() => {
     if (!open || query.length < 2) return;
     const controller = new AbortController();
     setLoading(true);
+    setFailed(false);
     const timer = window.setTimeout(() => {
-      void fetchCatalogWorkbook({ q: query, filter: [], page: 1, pageSize: 6 }, controller.signal)
+      void searchProductVariants(query, controller.signal)
         .then((data) => {
           if (!controller.signal.aborted) {
             setResult({ query, data });
@@ -51,7 +56,10 @@ export function CatalogSearch({
           }
         })
         .catch(() => {
-          if (!controller.signal.aborted) setResult(null);
+          if (!controller.signal.aborted) {
+            setResult(null);
+            setFailed(true);
+          }
         })
         .finally(() => {
           if (!controller.signal.aborted) setLoading(false);
@@ -77,16 +85,11 @@ export function CatalogSearch({
       kind: 'query',
       value: query,
       label: `Buscar «${query}»`,
-      detail: data ? `${data.total} productos` : 'Buscar en el catálogo',
+      detail: data ? `${data.totalProducts} productos` : 'Buscar en el catálogo',
     },
   ];
   if (data) {
-    const categories = new Map(
-      data.items.flatMap((item) =>
-        item.category ? [[item.category.id, item.category.name] as const] : [],
-      ),
-    );
-    for (const [categoryId, name] of [...categories].slice(0, 3)) {
+    for (const { id: categoryId, name } of data.categories) {
       choices.push({
         kind: 'category',
         value: categoryId,
@@ -94,9 +97,7 @@ export function CatalogSearch({
         detail: 'Categoría · filtrar resultados',
       });
     }
-    for (const brand of [
-      ...new Set(data.items.flatMap((item) => (item.brand ? [item.brand] : []))),
-    ].slice(0, 3)) {
+    for (const brand of data.brands) {
       choices.push({
         kind: 'brand',
         value: brand,
@@ -107,21 +108,26 @@ export function CatalogSearch({
     for (const item of data.items) {
       choices.push({
         kind: 'sku',
-        value: item.sku,
-        label: item.sku,
-        detail: [showDescription ? item.name : '', item.brand].filter(Boolean).join(' · '),
+        value: item.ficha,
+        label: item.nombreAmigable,
+        detail: [item.codigoArticulo, item.marca].filter(Boolean).join(' · '),
+        href: item.ficha,
+        type: item.tipo,
       });
     }
   }
   const choose = (choice: SearchChoice) => {
-    onSearch(
-      choice.kind === 'sku' ? choice.value : query,
-      choice.kind === 'category'
-        ? { categoryId: choice.value }
-        : choice.kind === 'brand'
-          ? { brand: choice.value }
-          : undefined,
-    );
+    if (choice.kind === 'sku' && choice.href) {
+      router.push(choice.href);
+    } else
+      onSearch(
+        query,
+        choice.kind === 'category'
+          ? { categoryId: choice.value }
+          : choice.kind === 'brand'
+            ? { brand: choice.value }
+            : undefined,
+      );
     setOpen(false);
     setActive(-1);
   };
@@ -208,7 +214,11 @@ export function CatalogSearch({
         {expanded ? (
           <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-96 overflow-auto rounded-md border bg-white shadow-lg">
             <p className="border-b px-3 py-2 text-[11px] text-muted-foreground" role="status">
-              {loading ? 'Buscando sugerencias…' : 'Sugerencias del catálogo · todas las palabras'}
+              {loading
+                ? 'Buscando sugerencias…'
+                : failed
+                  ? 'No pudimos cargar las sugerencias. Puedes buscar en el catálogo.'
+                  : 'Variantes de venta · categoría y marca'}
             </p>
             <div id={`${id}-options`} role="listbox" aria-label="Sugerencias de búsqueda">
               {choices.map((choice, index) => (
@@ -226,11 +236,23 @@ export function CatalogSearch({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(choice)}
                 >
-                  <strong className="block text-xs">{choice.label}</strong>
+                  <span className="flex items-start justify-between gap-2">
+                    <strong className="block text-xs">{choice.label}</strong>
+                    {choice.type ? (
+                      <span className="shrink-0 rounded bg-orange-50 px-1.5 py-0.5 text-[10px] capitalize text-orange-800">
+                        {choice.type}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block text-[11px] text-muted-foreground">{choice.detail}</span>
                 </button>
               ))}
             </div>
+            {data?.truncated ? (
+              <p className="px-3 py-2 text-[10px] text-muted-foreground">
+                Hay más coincidencias. Afina la búsqueda o pulsa Enter para ver el listado.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   extractAssetCandidates: vi.fn(),
   generateCommercialProposal: vi.fn(),
   fetchProducts: vi.fn(),
+  fetchProduct: vi.fn(),
   fetchProductAttributeSheet: vi.fn(),
   patchProductAttributes: vi.fn(),
   listProductAssets: vi.fn(),
@@ -21,7 +22,10 @@ vi.mock('@/lib/ai-api', () => ({
   extractAssetCandidates: mocks.extractAssetCandidates,
   generateCommercialProposal: mocks.generateCommercialProposal,
 }));
-vi.mock('@/lib/catalog-api', () => ({ fetchProducts: mocks.fetchProducts }));
+vi.mock('@/lib/catalog-api', () => ({
+  fetchProducts: mocks.fetchProducts,
+  fetchProduct: mocks.fetchProduct,
+}));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchProductAttributeSheet: mocks.fetchProductAttributeSheet,
   patchProductAttributes: mocks.patchProductAttributes,
@@ -193,6 +197,8 @@ describe('QualitySecondaryWorkspace', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/quality');
+    mocks.fetchProduct.mockResolvedValue(product);
     mocks.fetchProducts.mockResolvedValue({
       items: [product],
       total: 1,
@@ -254,6 +260,38 @@ describe('QualitySecondaryWorkspace', () => {
     expect(screen.getByText('Kit de distribución')).toBeInTheDocument();
     expect(screen.getByText('Configuración persistida')).toBeInTheDocument();
     expect(screen.getAllByText('Pendiente').length).toBeGreaterThan(0);
+  });
+
+  it('opens the requested SKU from publication or a sheet even outside the first search page', async () => {
+    window.history.replaceState({}, '', `/quality?view=commercial&productId=${product.id}`);
+    mocks.fetchProducts.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 25,
+      totalPages: 0,
+    });
+    render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Producto real del catálogo')).toHaveValue(product.id),
+    );
+    expect(mocks.fetchProduct).toHaveBeenCalledWith(product.id, expect.any(AbortSignal));
+    expect(screen.getByRole('link', { name: 'Abrir ficha técnica' })).toHaveAttribute(
+      'href',
+      `/products/${product.id}`,
+    );
+    expect(screen.getByRole('button', { name: 'Generar propuesta' })).toBeEnabled();
+  });
+
+  it('keeps the same SKU when opening its extraction documents', async () => {
+    window.history.replaceState({}, '', `/quality?view=extraction&productId=${product.id}`);
+    render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Ir a imágenes y documentos' })).toHaveAttribute(
+        'href',
+        `/documents?productId=${product.id}`,
+      ),
+    );
   });
 
   it('generates and copies an explicitly unpersisted commercial proposal for a real product', async () => {

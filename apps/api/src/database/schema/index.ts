@@ -1,3 +1,4 @@
+import { productNameSettings } from '../../modules/catalog-schema/infrastructure/persistence/product-name-settings.tables';
 import {
   fileCleanupCandidates,
   fileInventoryCursors,
@@ -52,6 +53,7 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  productNameSettings,
   fileCleanupCandidates,
   fileInventoryCursors,
   fileMaintenanceLeases,
@@ -84,6 +86,7 @@ export const schema = {
 };
 
 export {
+  productNameSettings,
   fileCleanupCandidates,
   fileInventoryCursors,
   fileMaintenanceLeases,

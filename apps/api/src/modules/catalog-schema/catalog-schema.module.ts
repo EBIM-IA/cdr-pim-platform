@@ -1,4 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ApplicationsModule } from '../applications/applications.module';
+import { CatalogModule } from '../catalog/catalog.module';
+import { ProductNamingUseCases } from './application/product-naming.use-cases';
+import { PRODUCT_NAME_SETTINGS } from './domain/ports/product-name-settings.port';
+import { DrizzleProductNameSettings } from './infrastructure/persistence/drizzle-product-name-settings';
+import { ProductNamingController } from './presentation/product-naming.controller';
 
 import {
   GetAdminTemplateUseCase,
@@ -27,8 +33,11 @@ import { DynamicCatalogController } from './presentation/dynamic-catalog.control
 import { CatalogAdministrationController } from './presentation/catalog-administration.controller';
 
 @Module({
-  controllers: [DynamicCatalogController, CatalogAdministrationController],
+  imports: [ApplicationsModule, CatalogModule],
+  controllers: [DynamicCatalogController, CatalogAdministrationController, ProductNamingController],
   providers: [
+    ProductNamingUseCases,
+    { provide: PRODUCT_NAME_SETTINGS, useClass: DrizzleProductNameSettings },
     { provide: DYNAMIC_CATALOG_REPOSITORY, useClass: DrizzleDynamicCatalogRepository },
     {
       provide: PRODUCT_TEMPLATE_ASSIGNMENT_REPOSITORY,

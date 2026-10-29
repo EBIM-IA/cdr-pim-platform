@@ -198,13 +198,9 @@ describe('catálogo secundario aprobado', () => {
     render(<ApplicationsWorkspace canWrite />);
 
     expect(await screen.findAllByText('UNI-6205')).not.toHaveLength(0);
-    expect(screen.getByRole('button', { name: /Todas las aplicaciones/ })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Código unificador en contexto/ }));
-    expect(screen.getByText('Aplicaciones heredadas')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /Todas las aplicaciones/ }));
+    expect(screen.getByRole('heading', { name: /Todas las aplicaciones/ })).toBeVisible();
+    expect(screen.queryByText('Código unificador en contexto')).not.toBeInTheDocument();
+    expect(screen.queryByText('Aplicaciones heredadas')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Filtro de columna Tipo')).toBeVisible();
     expect(screen.getByLabelText('Filtro de columna Marca Vehículo')).toBeVisible();
     fireEvent.change(screen.getByLabelText('Buscar aplicaciones'), {

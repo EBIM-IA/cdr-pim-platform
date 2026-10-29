@@ -102,6 +102,25 @@ describe('ReportsWorkspace', () => {
     await waitFor(() => expect(mocks.downloadWorkbookXlsx).toHaveBeenCalled());
     expect(mocks.downloadWorkbookXlsx.mock.calls[0]?.[0]).toHaveLength(7);
   });
+  it('preserves the search-report indicators and two-panel hierarchy without invented telemetry', async () => {
+    mocks.view = 'view=searches';
+    render(<ReportsWorkspace actorId="admin" capabilities={capabilities} />);
+    expect(screen.getByRole('heading', { name: 'Reporte de búsquedas' })).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Indicadores de búsquedas' })).getAllByText('—'),
+    ).toHaveLength(4);
+    expect(screen.getByRole('heading', { name: 'Términos frecuentes' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Consultas sin resultado' })).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: 'Posible causa' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Abrir búsqueda' })).toHaveAttribute(
+      'href',
+      '/products?view=search',
+    );
+    expect(screen.queryByText('18.420')).not.toBeInTheDocument();
+    expect(screen.queryByText('94,8%')).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.fetchWorkspace).toHaveBeenCalled());
+  });
+
   it('applies category filters to the API and preserves visible columns and filters in both exports', async () => {
     mocks.view = 'view=products-by-category';
     render(<ReportsWorkspace actorId="admin" canManageFormats capabilities={capabilities} />);

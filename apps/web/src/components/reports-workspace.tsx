@@ -687,25 +687,67 @@ export function ReportsWorkspace({
         </>
       ) : null}
       {view === 'searches' ? (
-        <section className={styles.tableCard}>
-          <div className={styles.tableHeading}>
-            <h2>Consultas frecuentes, fallidas y sin resultados</h2>
-            <p>
-              {summary?.reportIndicators?.find((item) => item.key === 'searches')?.detail ??
-                'El sistema todavía no registra telemetría de consultas para construir este reporte.'}
-            </p>
-          </div>
-          <div className={styles.empty}>
-            No hay métricas de búsquedas registradas. Las búsquedas del catálogo siguen disponibles.
+        <div className="space-y-4">
+          <section
+            className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+            aria-label="Indicadores de búsquedas"
+          >
+            {['Consultas', 'Con resultados', 'Sin resultados', 'Conversacionales'].map((label) => (
+              <article key={label} className={`${styles.tableCard} p-4`}>
+                <small className="text-muted-foreground">{label}</small>
+                <strong className="mt-2 block text-2xl text-slate-400">—</strong>
+                <p className="mt-1 text-xs text-muted-foreground">Sin telemetría registrada</p>
+              </article>
+            ))}
+          </section>
+          <p className="text-xs text-muted-foreground">
+            {summary?.reportIndicators?.find((item) => item.key === 'searches')?.detail ??
+              'El sistema todavía no registra telemetría de consultas para construir este reporte.'}
+          </p>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <section className={styles.tableCard} aria-labelledby="frequent-searches-title">
+              <div className={styles.tableHeading}>
+                <h2 id="frequent-searches-title">Términos frecuentes</h2>
+                <p>Frecuencia de consultas registradas en el buscador.</p>
+              </div>
+              <div className={styles.empty}>
+                No hay métricas de búsquedas registradas. Las búsquedas del catálogo siguen
+                disponibles.
+              </div>
+            </section>
+            <section className={styles.tableCard} aria-labelledby="unsuccessful-searches-title">
+              <div className={styles.tableHeading}>
+                <h2 id="unsuccessful-searches-title">Consultas sin resultado</h2>
+                <p>Consultas para revisar códigos, aplicaciones, categorías o sinónimos.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] text-left text-xs">
+                  <thead className="border-b bg-slate-50 text-muted-foreground">
+                    <tr>
+                      {['Consulta', 'Veces', 'Posible causa', 'Acción'].map((heading) => (
+                        <th key={heading} className="px-4 py-3 font-semibold">
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                        Sin consultas registradas para analizar.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
           {capabilities.includes('menu:products:view') ? (
-            <div className="p-4">
-              <Button asChild variant="dark">
-                <Link href="/products?view=search">Abrir búsqueda</Link>
-              </Button>
-            </div>
+            <Button asChild variant="dark">
+              <Link href="/products?view=search">Abrir búsqueda</Link>
+            </Button>
           ) : null}
-        </section>
+        </div>
       ) : null}
       {definition ? (
         <>
