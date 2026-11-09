@@ -1,4 +1,7 @@
+import { ECOMMERCE_DESCRIPTION } from './domain/ports/ecommerce-description.port';
+import { DrizzleEcommerceDescription } from './infrastructure/persistence/drizzle-ecommerce-description';
 import { Module } from '@nestjs/common';
+import { PRODUCT_EXPERIENCE } from './domain/ports/product-experience.port';
 import { ApplicationsModule } from '../applications/applications.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { ProductNamingUseCases } from './application/product-naming.use-cases';
@@ -36,7 +39,9 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
   imports: [ApplicationsModule, CatalogModule],
   controllers: [DynamicCatalogController, CatalogAdministrationController, ProductNamingController],
   providers: [
+    { provide: ECOMMERCE_DESCRIPTION, useClass: DrizzleEcommerceDescription },
     ProductNamingUseCases,
+    { provide: PRODUCT_EXPERIENCE, useExisting: ProductNamingUseCases },
     { provide: PRODUCT_NAME_SETTINGS, useClass: DrizzleProductNameSettings },
     { provide: DYNAMIC_CATALOG_REPOSITORY, useClass: DrizzleDynamicCatalogRepository },
     {
@@ -62,6 +67,11 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     UpdateCatalogCategoryUseCase,
     UpdateTemplateAttributeUseCase,
   ],
-  exports: [DYNAMIC_CATALOG_REPOSITORY, CATEGORY_ATTRIBUTE_IMPORT],
+  exports: [
+    DYNAMIC_CATALOG_REPOSITORY,
+    CATEGORY_ATTRIBUTE_IMPORT,
+    PRODUCT_EXPERIENCE,
+    ECOMMERCE_DESCRIPTION,
+  ],
 })
 export class CatalogSchemaModule {}

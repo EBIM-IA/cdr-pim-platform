@@ -27,6 +27,8 @@ import {
   type ProductAssetSelector,
   type ProductAssetUploadMetadata,
   productAssetBulkModeSchema,
+  reorderProductAssetsSchema,
+  type ReorderProductAssetsInput,
   productAssetBatchQuerySchema,
   productAssetSelectorSchema,
   productAssetUploadMetadataSchema,
@@ -46,6 +48,7 @@ import {
   ListProductAssetsUseCase,
   ProcessProductAssetArchiveUseCase,
   UploadProductAssetUseCase,
+  ReorderProductAssetsUseCase,
 } from '../application/manage-product-assets.use-cases';
 import { toProductAssetBulkResultDto, toProductAssetDto } from './product-asset.presenter';
 
@@ -68,6 +71,7 @@ export class ProductAssetsController {
     private readonly downloadAsset: DownloadProductAssetUseCase,
     private readonly deleteAsset: DeleteProductAssetUseCase,
     private readonly processArchive: ProcessProductAssetArchiveUseCase,
+    private readonly reorderAssets: ReorderProductAssetsUseCase,
   ) {}
 
   @Get('batch')
@@ -95,7 +99,7 @@ export class ProductAssetsController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: PRODUCT_ASSET_MAX_BYTES, files: 1, fields: 4, fieldSize: 512 },
+      limits: { fileSize: PRODUCT_ASSET_MAX_BYTES, files: 1, fields: 5, fieldSize: 512 },
     }),
   )
   async upload(
@@ -110,6 +114,8 @@ export class ProductAssetsController {
         {
           selector: selectorFromBody(body),
           type: body.type,
+          position: body.position,
+          replacesAssetId: body.replacesAssetId,
           filename: file.originalname,
           declaredMimeType: file.mimetype,
           content: file.buffer,
@@ -117,6 +123,16 @@ export class ProductAssetsController {
         actor,
       ),
     );
+  }
+
+  @Post('order')
+  @HttpCode(200)
+  @RequireCapabilities(Capability.CatalogWrite)
+  async reorder(
+    @Body(new ZodValidationPipe(reorderProductAssetsSchema)) body: ReorderProductAssetsInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<ProductAssetListDto> {
+    return (await this.reorderAssets.execute(body, actor)).map(toProductAssetDto);
   }
 
   @Post('bulk')

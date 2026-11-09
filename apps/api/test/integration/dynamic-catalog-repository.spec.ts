@@ -557,7 +557,7 @@ describe('DrizzleDynamicCatalogRepository', () => {
     const exclusive = all.columns.find((column) => column.key === 'material_exclusivo_prueba');
     expect(exclusive).toMatchObject({
       applicableTemplateIds: [assignment!.templateId],
-      permissions: { edit: false, export: true },
+      permissions: { edit: false, export: false },
     });
     expect(all.items.find((item) => item.id === product!.id)?.attributes).toMatchObject({
       material_exclusivo_prueba: {

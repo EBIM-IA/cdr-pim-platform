@@ -599,26 +599,30 @@ export function CatalogWorkbookTable({
             <RefreshCw aria-hidden="true" className={cn('size-3.5', loading && 'animate-spin')} />
             Actualizar
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading || exporting || total === 0}
-            onClick={() => void exportFilteredView('csv')}
-            title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
-          >
-            <Download aria-hidden="true" className="size-4" />
-            CSV · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading || exporting || total === 0}
-            onClick={() => void exportFilteredView('xlsx')}
-            title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
-          >
-            <FileSpreadsheet aria-hidden="true" className="size-4" />
-            XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
-          </Button>
+          {canEdit ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading || exporting || total === 0}
+                onClick={() => void exportFilteredView('csv')}
+                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+              >
+                <Download aria-hidden="true" className="size-4" />
+                CSV · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading || exporting || total === 0}
+                onClick={() => void exportFilteredView('xlsx')}
+                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+              >
+                <FileSpreadsheet aria-hidden="true" className="size-4" />
+                XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
+              </Button>
+            </>
+          ) : null}
           <Button
             type="button"
             variant="outline"

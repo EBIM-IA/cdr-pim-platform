@@ -6,6 +6,8 @@ export interface ProductGallerySlide {
   readonly id: string;
   readonly label: string;
   readonly src?: string;
+  readonly document?: boolean;
+  readonly asset?: ProductAssetDto;
 }
 /** Raster URLs only: never execute schemes or load arbitrary active SVG/HTML as gallery media. */
 export function productImageUrl(value: string): string | undefined {
@@ -31,46 +33,42 @@ export function productImageUrl(value: string): string | undefined {
 export function productGallerySlides(
   assets: readonly ProductAssetDto[],
   attributes: readonly { key: string; label: string; value: unknown }[],
+  type: 'FOTO' | 'PLANO' = 'FOTO',
 ): ProductGallerySlide[] {
-  const raster = assets.filter((asset) => /^(?:image\/(?:jpeg|png|webp))$/iu.test(asset.mimeType));
-  const photos = raster
-    .filter((asset) => asset.type === 'FOTO')
+  const uploaded = assets
+    .filter((asset) => asset.type === type)
     .sort((a, b) => (a.position ?? 999) - (b.position ?? 999));
-  const plans = raster.filter((asset) => asset.type === 'PLANO');
-  const registered = (pattern: RegExp) =>
-    attributes
-      .filter((attribute) => pattern.test(`${attribute.key} ${attribute.label}`))
-      .flatMap((attribute) =>
-        typeof attribute.value === 'string'
-          ? attribute.value.split('|').flatMap((raw) => {
-              const src = productImageUrl(raw);
-              return src
-                ? [
-                    {
-                      id: src,
-                      src,
-                      label: /plano/iu.test(attribute.label)
-                        ? 'Plano del producto'
-                        : 'Fotografía del producto',
-                    },
-                  ]
-                : [];
-            })
-          : [],
-      );
-  const fromAsset = (asset: ProductAssetDto): ProductGallerySlide => ({
-    id: asset.id,
-    label: asset.filename,
-    src: productAssetDownloadUrl(asset.id),
-  });
-  const slides = [
-    ...photos.map(fromAsset),
-    ...registered(/fotograf|photo|foto/iu),
-    ...plans.map(fromAsset),
-    ...registered(/plano|drawing/iu),
+  const pattern = type === 'FOTO' ? /fotograf|photo|foto/iu : /plano|drawing/iu;
+  const registered = attributes
+    .filter((attribute) => pattern.test(`${attribute.key} ${attribute.label}`))
+    .flatMap((attribute) =>
+      typeof attribute.value === 'string'
+        ? attribute.value.split('|').flatMap((raw) => {
+            const src = productImageUrl(raw);
+            return src
+              ? [
+                  {
+                    id: src,
+                    src,
+                    label: type === 'FOTO' ? 'Fotografía del fabricante' : 'Plano del fabricante',
+                  },
+                ]
+              : [];
+          })
+        : [],
+    );
+  const slides: ProductGallerySlide[] = [
+    ...uploaded.map((asset) => ({
+      id: asset.id,
+      label: asset.filename,
+      src: productAssetDownloadUrl(asset.id),
+      asset,
+      document: !/^image\/(?:jpeg|png|webp)$/iu.test(asset.mimeType),
+    })),
+    ...registered,
   ];
-  return [
-    ...new Map(slides.map((slide) => [slide.src, slide])).values(),
-    { id: 'technical-drawing', label: 'Esquema técnico referencial' },
-  ];
+  const unique = [...new Map(slides.map((slide) => [slide.src, slide])).values()];
+  return type === 'PLANO' || !unique.length
+    ? [...unique, { id: 'technical-drawing', label: 'Esquema técnico referencial' }]
+    : unique;
 }

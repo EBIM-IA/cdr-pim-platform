@@ -15,7 +15,13 @@ export interface ProductAssetRepositoryPort {
   listByProductIds(productIds: readonly Uuid[]): Promise<ProductAsset[]>;
   findById(id: Uuid): Promise<ProductAsset | null>;
   findActiveSlot(slot: AssetSlot): Promise<ProductAsset | null>;
-  nextPhotoPosition(productId: Uuid): Promise<number>;
+  nextGalleryPosition(productId: Uuid, type?: 'FOTO' | 'PLANO'): Promise<number>;
+  reorder(
+    productId: Uuid,
+    type: 'FOTO' | 'PLANO',
+    ids: readonly Uuid[],
+    audit: (before: readonly string[]) => AuditEntry,
+  ): Promise<void>;
   /** Atomically retires the current slot (if any) and stores its replacement. */
   saveReplacing(
     asset: ProductAsset,
@@ -23,6 +29,8 @@ export interface ProductAssetRepositoryPort {
     now: Date,
     audit: (saved: ProductAsset, replaced: ProductAsset | null) => AuditEntry,
     assertObjectAvailable?: () => Promise<void>,
+    allowReplace?: boolean,
+    expectedAssetId?: Uuid,
   ): Promise<{ saved: ProductAsset; replaced: ProductAsset | null }>;
   softDelete(
     id: Uuid,

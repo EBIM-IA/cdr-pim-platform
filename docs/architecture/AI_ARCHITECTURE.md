@@ -157,3 +157,11 @@ because retrofitting provenance onto attribute data later is painful.
 - **Prompt versioning.** Prompts are inline constants. When generation becomes a real
   feature, they need to be versioned and stored with their output.
 - **Relevance evaluation.** The fake proves the plumbing, not the search quality.
+
+## Persisted ecommerce descriptions
+
+`GET/POST /api/v1/ecommerce-descriptions/:productId` reads or maintains one description per sales variant. Mutation requires administration and AI capabilities and uses the `ai` throttle profile. The configured text-generation port creates a pending proposal; editing and approval are explicit human actions. The structured output is bounded and numeric claims are checked against supplied facts.
+
+Generation uses the intersection of publishable attributes visible to Purchasing and Sales. The persisted record carries source keys and a source fingerprint. Read paths recompute that fingerprint using authorized current values, and consultation actors receive only approved, current copy. Product experience and variant search return that copy as `descripcionEcommerce`, or `null`, without invoking a model. Private fields never enter the shared generation context.
+
+The catalog-schema module owns versioned JSON persistence and commits description updates with their audit events. Approved or edited text has its before/after values in the protected audit; prompts and private source documents remain outside audit storage. The AI module consumes the published experience and persistence ports. This workflow does not enable a new model vendor or automatic catalog-wide generation. Nightly batches and distributed spending quotas remain separate operational work.

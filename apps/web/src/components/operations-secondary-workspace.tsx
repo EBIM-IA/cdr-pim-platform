@@ -45,6 +45,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { SettingsParameterCatalog } from '@/components/settings-parameter-catalog';
+import { EcommerceDescriptionsWorkspace } from '@/components/ecommerce-descriptions-workspace';
 import { ProductNameSettings } from '@/components/product-name-settings';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -897,6 +898,7 @@ function SearchReportSurface({
 
 const settingsCatalogs = [
   'Nombre amigable del producto',
+  'Descripción para e-commerce',
   'Prefijos y sufijos',
   'Unidades de medida',
   'Materiales',
@@ -1132,7 +1134,9 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                     ? `${rules.length} reglas persistidas`
                     : item === 'Nombre amigable del producto'
                       ? 'Fórmulas Automotriz e Industrial'
-                      : 'Pendiente'}
+                      : item === 'Descripción para e-commerce'
+                        ? 'Generación y revisión por variante'
+                        : 'Pendiente'}
                 </small>
               </span>
               <SlidersHorizontal className="size-4 shrink-0" aria-hidden="true" />
@@ -1140,7 +1144,9 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
           ))}
         </div>
       </Card>
-      {catalog === 'Nombre amigable del producto' ? (
+      {catalog === 'Descripción para e-commerce' ? (
+        <EcommerceDescriptionsWorkspace />
+      ) : catalog === 'Nombre amigable del producto' ? (
         <ProductNameSettings />
       ) : catalog !== 'Prefijos y sufijos' ? (
         <SettingsParameterCatalog catalog={catalog} />

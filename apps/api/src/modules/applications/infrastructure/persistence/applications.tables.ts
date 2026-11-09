@@ -23,6 +23,7 @@ export const groupApplications = pgTable(
     engine: text('engine'),
     notes: text('notes'),
     active: boolean('active').notNull().default(true),
+    verificationStatus: text('verification_status').notNull().default('pending'),
     source: text('source').notNull().default('manual'),
     importBatchId: uuid('import_batch_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

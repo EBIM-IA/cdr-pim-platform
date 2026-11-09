@@ -126,7 +126,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       case 'templates':
         return this.readTemplates();
       case 'applications':
-        return this.readApplications();
+        return this.readApplications(actor);
       case 'equivalences':
         return this.readEquivalences();
       case 'documents':
@@ -419,7 +419,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
-  private async readApplications(): Promise<WorkspaceDto> {
+  private async readApplications(actor: AuthenticatedActor): Promise<WorkspaceDto> {
+    const canManage = capabilitiesForActor(actor).includes('applications:write');
     const [groups, applications, counts] = await Promise.all([
       this.groupSummary(),
       this.sql<
@@ -461,6 +462,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           ga.source
         FROM group_applications ga
         JOIN equivalence_groups eg ON eg.id = ga.equivalence_group_id
+        WHERE ${canManage} OR (ga.active AND ga.verification_status = 'verified')
         ORDER BY ga.updated_at DESC, eg.code
         LIMIT 100
       `,
@@ -468,6 +470,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         SELECT COUNT(*)::int AS total,
                COUNT(*) FILTER (WHERE active = true)::int AS active
         FROM group_applications
+        WHERE ${canManage} OR (active AND verification_status = 'verified')
       `,
     ]);
     const summary = counts[0] ?? { total: 0, active: 0 };

@@ -84,9 +84,74 @@ describe('product asset repository unit of work', () => {
 
     expect(await repository.findById(asset.toSnapshot().id)).not.toBeNull();
   });
+  it('reorders photos and plans atomically and rejects foreign or incomplete gallery lists', async () => {
+    const first = makeAsset('FOTO', 1),
+      second = makeAsset('FOTO', 2),
+      plan = makeAsset('PLANO', 1);
+    for (const asset of [first, second, plan])
+      await repository.saveReplacing(asset, 'admin', now, (saved) =>
+        auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+      );
+    const ids = [second.toSnapshot().id, first.toSnapshot().id];
+    await repository.reorder(productId, 'FOTO', ids, () =>
+      auditEntry(newUuid(), productId, 'updated'),
+    );
+    const photos = (await repository.listByProductId(productId))
+      .filter((asset) => asset.toSnapshot().type === 'FOTO')
+      .map((asset) => asset.toSnapshot());
+    expect(photos.map((asset) => asset.id)).toEqual(ids);
+    expect(photos.map((asset) => asset.position)).toEqual([1, 2]);
+    expect((await repository.findById(plan.toSnapshot().id))?.toSnapshot().position).toBe(1);
+    await expect(
+      repository.reorder(productId, 'FOTO', [first.toSnapshot().id], () =>
+        auditEntry(newUuid(), productId, 'updated'),
+      ),
+    ).rejects.toThrow('galería cambió');
+    await expect(
+      repository.reorder(productId, 'FOTO', [first.toSnapshot().id, plan.toSnapshot().id], () =>
+        auditEntry(newUuid(), productId, 'updated'),
+      ),
+    ).rejects.toThrow('galería cambió');
+    expect((await repository.findById(second.toSnapshot().id))?.toSnapshot().position).toBe(1);
+    const replacement = makeAsset('FOTO', 1);
+    await expect(
+      repository.saveReplacing(
+        replacement,
+        'admin',
+        now,
+        (saved) => auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+        undefined,
+        true,
+        first.toSnapshot().id,
+      ),
+    ).rejects.toThrow('El archivo visible cambió');
+  });
+  it('refuses to overwrite an occupied slot during a concurrent append', async () => {
+    const first = makeAsset('FOTO', 1),
+      concurrent = makeAsset('FOTO', 1);
+    await repository.saveReplacing(first, 'admin', now, (saved) =>
+      auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+    );
+    await expect(
+      repository.saveReplacing(
+        concurrent,
+        'admin',
+        now,
+        (saved) => auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+        undefined,
+        false,
+      ),
+    ).rejects.toThrow('Otro archivo');
+    expect(
+      (await repository.listByProductId(productId)).map((asset) => asset.toSnapshot().id),
+    ).toEqual([first.toSnapshot().id]);
+  });
 });
 
-function makeAsset(type: 'FT' | 'MSDS'): ProductAsset {
+function makeAsset(
+  type: 'FT' | 'MSDS' | 'FOTO' | 'PLANO',
+  position: number | null = null,
+): ProductAsset {
   const id = newUuid();
   return ProductAsset.create({
     id,
@@ -99,7 +164,7 @@ function makeAsset(type: 'FT' | 'MSDS'): ProductAsset {
     mimeType: 'application/pdf',
     size: 100,
     checksum: 'test-checksum',
-    position: null,
+    position,
     source: 'manual',
     uploadedBy: 'buyer-1',
     uploadedAt: now,

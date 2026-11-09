@@ -103,8 +103,8 @@ describe('PostgresWorkspaceReadModel', () => {
     `;
     await database.sql`
       INSERT INTO group_applications (
-        id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source
-      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'AUTOMOTRIZ', 'Toyota', 'Corolla', 2014, 2018, true, 'manual')
+        id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source, verification_status
+      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'AUTOMOTRIZ', 'Toyota', 'Corolla', 2014, 2018, true, 'manual', 'verified')
     `;
     await database.sql`
       INSERT INTO external_homologs (

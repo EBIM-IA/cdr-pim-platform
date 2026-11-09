@@ -77,7 +77,11 @@ export const productAssetSelectorSchema = z
 export type ProductAssetSelector = z.infer<typeof productAssetSelectorSchema>;
 
 export const productAssetUploadMetadataSchema = productAssetSelectorSchema.and(
-  z.object({ type: productAssetTypeSchema }),
+  z.object({
+    type: productAssetTypeSchema,
+    position: z.coerce.number().int().min(1).max(10_000).optional(),
+    replacesAssetId: uuidSchema.optional(),
+  }),
 );
 export type ProductAssetUploadMetadata = z.infer<typeof productAssetUploadMetadataSchema>;
 
@@ -110,3 +114,16 @@ export const deleteProductAssetResultSchema = z.object({
   deleted: z.literal(true),
 });
 export type DeleteProductAssetResultDto = z.infer<typeof deleteProductAssetResultSchema>;
+
+export const reorderProductAssetsSchema = z
+  .object({
+    productId: uuidSchema,
+    type: z.enum(['FOTO', 'PLANO']),
+    assetIds: z
+      .array(uuidSchema)
+      .min(1)
+      .max(1000)
+      .refine((ids) => new Set(ids).size === ids.length, 'Los archivos no pueden repetirse.'),
+  })
+  .strict();
+export type ReorderProductAssetsInput = z.infer<typeof reorderProductAssetsSchema>;

@@ -1,3 +1,4 @@
+import { ecommerceDescriptions } from '../../modules/catalog-schema/infrastructure/persistence/ecommerce-descriptions.tables';
 import { productNameSettings } from '../../modules/catalog-schema/infrastructure/persistence/product-name-settings.tables';
 import {
   fileCleanupCandidates,
@@ -53,6 +54,7 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  ecommerceDescriptions,
   productNameSettings,
   fileCleanupCandidates,
   fileInventoryCursors,

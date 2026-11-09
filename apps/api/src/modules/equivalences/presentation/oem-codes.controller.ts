@@ -18,7 +18,11 @@ import {
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  Capability,
+  actorHasCapability,
+  type AuthenticatedActor,
+} from '../../identity/domain/entities/role';
 import {
   CreateGroupOemCodeUseCase,
   DeactivateGroupOemCodeUseCase,
@@ -43,8 +47,14 @@ export class OemCodesController {
   @Get('oem')
   async list(
     @Query(new ZodValidationPipe(oemCodeListQuerySchema)) query: OemCodeListQuery,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<GroupOemCodeDto[]> {
-    return (await this.listOem.execute(query)).map(toDto);
+    const canManage = actorHasCapability(actor, Capability.EquivalencesWrite);
+    return (
+      await this.listOem.execute({ ...query, includeInactive: canManage && query.includeInactive })
+    )
+      .map(toDto)
+      .filter((row) => canManage || (row.active && row.approvalStatus === 'approved'));
   }
 
   @Post('oem')

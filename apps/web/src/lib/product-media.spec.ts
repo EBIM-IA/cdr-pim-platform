@@ -7,7 +7,7 @@ const asset = (id: string, type: 'FOTO' | 'PLANO', mimeType = 'image/jpeg', posi
   ({ id, type, mimeType, position, filename: `${id}.jpg` }) as ProductAssetDto;
 
 describe('product gallery media', () => {
-  it('orders photographs by position, registered photographs, plans, then the technical drawing', () => {
+  it('keeps the photograph carousel separate from plans and the technical drawing', () => {
     const slides = productGallerySlides(
       [
         asset('plan', 'PLANO'),
@@ -29,10 +29,15 @@ describe('product gallery media', () => {
       'second',
       'https://manufacturer.example/a.jpg',
       'https://manufacturer.example/b.png',
-      'plan',
-      'technical-drawing',
     ]);
-    expect(slides.at(-1)?.src).toBeUndefined();
+    expect(slides.every((slide) => slide.src)).toBe(true);
+    const plans = productGallerySlides(
+      [asset('plan', 'PLANO'), asset('pdf', 'PLANO', 'application/pdf', 2)],
+      [],
+      'PLANO',
+    );
+    expect(plans.map((slide) => slide.id)).toEqual(['plan', 'pdf', 'technical-drawing']);
+    expect(plans[1]?.document).toBe(true);
   });
   it.each([
     'javascript:alert(1)',

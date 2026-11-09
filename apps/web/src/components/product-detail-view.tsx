@@ -26,13 +26,12 @@ import {
   LockKeyhole,
   PackageCheck,
   Pencil,
-  Ruler,
   Save,
   UploadCloud,
   X,
 } from 'lucide-react';
 
-import { ProductArtwork } from '@/components/product-artwork';
+import { EcommerceDescriptionCard } from '@/components/ecommerce-description-card';
 import { ProductGallery } from '@/components/product-gallery';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -548,6 +547,11 @@ function ProductTechnicalAssets({
   canManage: boolean;
   onManage: () => void;
 }) {
+  const documents = assets.filter(
+    (asset) =>
+      asset.type !== 'FOTO' &&
+      !(asset.type === 'PLANO' && /^image\/(?:jpeg|png|webp)$/iu.test(asset.mimeType)),
+  );
   return (
     <Card className="overflow-hidden">
       <h3 className="border-b px-3 py-2 text-sm font-semibold">Documentos y activos</h3>
@@ -558,11 +562,11 @@ function ProductTechnicalAssets({
           </p>
         ) : error ? (
           <p className="text-xs text-muted-foreground">No fue posible consultar los activos.</p>
-        ) : assets.length === 0 ? (
+        ) : documents.length === 0 ? (
           <p className="text-xs text-muted-foreground">Sin archivos registrados para este SKU.</p>
         ) : (
           <ul className="divide-y">
-            {assets.map((asset) => (
+            {documents.map((asset) => (
               <li key={asset.id} className="flex min-w-0 items-start gap-2 py-2 first:pt-0">
                 <FileText
                   aria-hidden="true"
@@ -614,6 +618,10 @@ function TechnicalPanel({
   onDirtyChange,
   onSaved,
   onManageAssets,
+  onAssetsChange,
+  salesVariant,
+  onCommerceSaved,
+  friendlyName,
 }: {
   product: Product;
   active: boolean;
@@ -632,6 +640,10 @@ function TechnicalPanel({
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (replicatedProducts: number) => void;
   onManageAssets: () => void;
+  onAssetsChange: (assets: ProductAssetDto[]) => void;
+  salesVariant?: ProductSalesVariantDto;
+  onCommerceSaved: () => void;
+  friendlyName: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -733,14 +745,14 @@ function TechnicalPanel({
   const characteristics = technical.filter((attribute) => !measurements.includes(attribute));
   const groups = [
     {
-      title: 'Características',
-      note: 'Atributos técnicos de enriquecimiento',
-      attributes: characteristics,
-    },
-    {
       title: 'Medidas y datos de rendimiento',
       note: 'Valores según la plantilla del producto',
       attributes: measurements,
+    },
+    {
+      title: 'Características',
+      note: 'Atributos técnicos de enriquecimiento',
+      attributes: characteristics,
     },
     {
       title: 'Información comercial y logística',
@@ -750,7 +762,7 @@ function TechnicalPanel({
     {
       title: 'Datos base ERP',
       note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
-      attributes: erp,
+      attributes: showCompleteness ? erp : [],
     },
   ].filter((group) => group.attributes.length > 0);
   const convertibleAttributes = attributes.filter(
@@ -885,19 +897,20 @@ function TechnicalPanel({
   return (
     <div className={styles.layout}>
       <div className={styles.visual}>
-        <ProductArtwork
+        <ProductGallery
           category={sheet?.schema.category.name ?? product.category}
           name={product.name}
-          technical
-          className="!aspect-square w-full"
+          productId={product.id}
+          type="PLANO"
+          assets={assets}
+          attributes={attributes.map((attribute) => ({ ...attribute, value: attribute.rawValue }))}
+          error={assetsError}
+          canManage={canManageAssets}
+          onAssetsChange={onAssetsChange}
         />
-        <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-          Esquema técnico referencial. Consulta el plano del fabricante para verificar las
-          dimensiones.
-        </p>
       </div>
       <div ref={editorElement} className={cn(styles.main, 'scroll-mt-28')}>
-        <header className="mb-3 flex flex-col items-start gap-3">
+        <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">
               Especificaciones · {sheet?.schema.template.name ?? product.category}
@@ -913,41 +926,33 @@ function TechnicalPanel({
             </div>
           </div>
           {convertibleAttributes > 0 ? (
-            <div className="w-full max-w-md rounded-lg border bg-slate-50 p-2.5">
-              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                <Ruler aria-hidden="true" className="size-4" />
-                Sistema de unidades
-              </div>
-              <div
-                className="flex rounded-md border bg-slate-50 p-0.5"
-                role="group"
-                aria-label="Ver medidas en"
-              >
-                {(
-                  [
-                    ['metric', 'Métrico'],
-                    ['imperial', 'Imperial'],
-                  ] as const
-                ).map(([system, label]) => (
-                  <button
-                    key={system}
-                    type="button"
-                    aria-pressed={unitSystem === system}
-                    onClick={() => onUnitSystemChange(system)}
-                    className={cn(
-                      'rounded px-3 py-1 text-xs',
-                      unitSystem === system
-                        ? 'bg-white text-foreground shadow-sm'
-                        : 'text-muted-foreground',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-2 max-w-60 text-[10px] leading-4 text-muted-foreground">
-                {convertibleAttributes} valores convertibles. El valor registrado no se modifica.
-              </p>
+            <div
+              role="group"
+              aria-label="Ver medidas en"
+              title={`${convertibleAttributes} valores convertibles. El valor registrado no se modifica.`}
+              className="flex shrink-0 rounded-md border bg-slate-50 p-0.5"
+            >
+              {(
+                [
+                  ['metric', 'Métrico'],
+                  ['imperial', 'Imperial'],
+                ] as const
+              ).map(([system, label]) => (
+                <button
+                  key={system}
+                  type="button"
+                  aria-pressed={unitSystem === system}
+                  onClick={() => onUnitSystemChange(system)}
+                  className={cn(
+                    'rounded px-3 py-1 text-xs',
+                    unitSystem === system
+                      ? 'bg-white text-foreground shadow-sm'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           ) : null}
         </header>
@@ -955,6 +960,15 @@ function TechnicalPanel({
           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             {sheetError} Se muestran los identificadores de la ficha base.
           </p>
+        ) : null}
+        {salesVariant ? (
+          <EcommerceDescriptionCard
+            key={`${salesVariant.tipo}:${salesVariant.aplicacion?.id ?? 'industrial'}`}
+            variant={salesVariant}
+            canManage={showCompleteness}
+            onSaved={onCommerceSaved}
+            friendlyName={friendlyName}
+          />
         ) : null}
         {groups.length === 0 ? (
           <StatePanel
@@ -2602,6 +2616,8 @@ export function ProductDetailView({
           {technicalSheet ? (
             <TechnicalSheetPreview
               open={technicalSheetOpen}
+              assets={assets}
+              commercialCopy={(selectedVariant ?? variants[0])?.descripcionEcommerce}
               product={product}
               sheet={technicalSheet}
               unitSystem={unitSystem}
@@ -2646,6 +2662,9 @@ export function ProductDetailView({
             assets={assets}
             attributes={galleryAttributes}
             error={assetsError}
+            productId={product.id}
+            canManage={canWriteAssets}
+            onAssetsChange={setAssets}
           />
           <div className="mt-2">
             <span className="block text-[10px] text-muted-foreground">Marca</span>
@@ -2653,14 +2672,13 @@ export function ProductDetailView({
           </div>
         </div>
         <div className="min-w-0">
-          <span className="text-[10px] uppercase tracking-[.06em] text-muted-foreground">
-            Código artículo{' '}
-            <strong className="ml-1 text-sm font-semibold text-cdr-ink">{product.sku}</strong> ·
-            identidad ERP
-          </span>
           <div className="flex items-center gap-2">
-            <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-cdr-ink">
-              {heroName}
+            <h1 className="mt-1 break-words text-2xl font-bold tracking-tight text-cdr-ink">
+              {product.sku} :{' '}
+              {selectedVariant?.codigoProveedor ||
+                product.providerCode ||
+                sheetValue(/codigo.?proveedor|c[oó]digo de proveedor/iu) ||
+                'Pendiente'}
             </h1>
             <span data-page-help-slot />
             <ScreenGuide
@@ -2674,6 +2692,11 @@ export function ProductDetailView({
               dataSource="Catálogo ERP, plantilla activa, aplicaciones, homólogos, documentos e historial del producto."
             />
           </div>
+          {!showCompleteness ? (
+            <p className="mt-1 break-words text-lg font-bold leading-tight text-cdr-ink">
+              {heroName}
+            </p>
+          ) : null}
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
             {heroDescription ?? 'Descripción técnica pendiente de completar'}
           </p>
@@ -2960,6 +2983,10 @@ export function ProductDetailView({
               showCompleteness={showCompleteness}
               showInternalDetails={showProductStatus || showCompleteness}
               canManageAssets={canWriteAssets}
+              onAssetsChange={setAssets}
+              salesVariant={selectedVariant ?? variants[0]}
+              onCommerceSaved={reload}
+              friendlyName={heroName}
               onManageAssets={() => setActiveTab('documents')}
               onSaved={(replicatedProducts) => {
                 setSaveNotice(

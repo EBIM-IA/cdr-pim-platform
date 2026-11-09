@@ -37,7 +37,11 @@ function normalizeSpanishUppercase(value: string): string {
 export class DrizzleApplicationSearchReadModel implements ApplicationSearchReadModelPort {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  async findActiveProductIds(query: string, limit: number): Promise<readonly Uuid[]> {
+  async findActiveProductIds(
+    query: string,
+    limit: number,
+    verifiedOnly = false,
+  ): Promise<readonly Uuid[]> {
     const term = query.trim();
     if (!term) return [];
     const pattern = `%${escapeLike(normalizeSpanishUppercase(term))}%`;
@@ -65,7 +69,13 @@ export class DrizzleApplicationSearchReadModel implements ApplicationSearchReadM
         equivalenceGroupMembers,
         eq(equivalenceGroupMembers.groupId, groupApplications.groupId),
       )
-      .where(and(eq(groupApplications.active, true), applicationMatch))
+      .where(
+        and(
+          eq(groupApplications.active, true),
+          verifiedOnly ? eq(groupApplications.verificationStatus, 'verified') : undefined,
+          applicationMatch,
+        ),
+      )
       .orderBy(equivalenceGroupMembers.productId)
       .limit(limit);
 

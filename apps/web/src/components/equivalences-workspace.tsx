@@ -1081,18 +1081,20 @@ export function EquivalencesWorkspace({
                   Importar
                 </Button>
               ) : null}
-              <Button
-                variant="outline"
-                disabled={
-                  view === 'groups'
-                    ? !assignmentTable.visibleRows.length
-                    : !relationTable.visibleRows.length
-                }
-                onClick={() => exportTable()}
-              >
-                <Download />
-                Exportar Excel
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="outline"
+                  disabled={
+                    view === 'groups'
+                      ? !assignmentTable.visibleRows.length
+                      : !relationTable.visibleRows.length
+                  }
+                  onClick={() => exportTable()}
+                >
+                  <Download />
+                  Exportar Excel
+                </Button>
+              ) : null}
               {canWrite ? (
                 <Button variant="ghost" onClick={() => exportTable(true)}>
                   Plantilla

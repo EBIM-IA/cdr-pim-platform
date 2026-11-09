@@ -109,6 +109,14 @@ const product = {
   attributes: [],
 };
 
+async function selectCatalogProduct() {
+  const select = await screen.findByLabelText<HTMLSelectElement>('Producto real del catálogo');
+  await waitFor(() =>
+    expect([...select.options].some((option) => option.value === product.id)).toBe(true),
+  );
+  fireEvent.change(select, { target: { value: product.id } });
+}
+
 const numberColumn = {
   id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   key: 'diametro',
@@ -302,9 +310,7 @@ describe('QualitySecondaryWorkspace', () => {
     });
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
 
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.change(screen.getByLabelText('Canal'), { target: { value: 'b2b' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
 
@@ -326,9 +332,7 @@ describe('QualitySecondaryWorkspace', () => {
   it('extracts only visible editable keys and atomically applies a human-selected candidate', async () => {
     render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
 
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     expect(await screen.findByText('ficha-tecnica.pdf')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Extraer candidatos' }));
 
@@ -359,9 +363,7 @@ describe('QualitySecondaryWorkspace', () => {
 
   it('shows real document evidence and discards a candidate locally without changing the catalog', async () => {
     render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     await screen.findByText(asset.filename);
     fireEvent.click(screen.getByRole('button', { name: 'Extraer candidatos' }));
     await screen.findByText('Confianza 91%');
@@ -384,9 +386,7 @@ describe('QualitySecondaryWorkspace', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
     await screen.findByText('Propuesta comercial verificable.');
     fireEvent.click(screen.getByRole('button', { name: 'Editar propuesta' }));
@@ -417,9 +417,7 @@ describe('QualitySecondaryWorkspace', () => {
         }),
     );
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Generando propuesta…');

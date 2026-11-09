@@ -1,10 +1,10 @@
 'use client';
 
-import type { ProductAttributeSheetDto } from '@cdr/contracts';
+import type { ProductAttributeSheetDto, ProductAssetDto } from '@cdr/contracts';
 import { Download, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ProductArtwork } from '@/components/product-artwork';
+import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
 import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
 import type { Product } from '@/lib/types';
@@ -16,6 +16,8 @@ interface TechnicalSheetPreviewProps {
   readonly sheet: ProductAttributeSheetDto;
   readonly unitSystem: MeasurementSystem;
   readonly onClose: () => void;
+  readonly assets?: readonly ProductAssetDto[];
+  readonly commercialCopy?: { titulo: string; descripcion: string } | null;
 }
 
 function printableValue(
@@ -90,6 +92,8 @@ export function TechnicalSheetPreview({
   sheet,
   unitSystem,
   onClose,
+  assets = [],
+  commercialCopy,
 }: TechnicalSheetPreviewProps) {
   const [printError, setPrintError] = useState<string | null>(null);
   const closePreview = useCallback(() => {
@@ -225,7 +229,9 @@ export function TechnicalSheetPreview({
                 <p className="sheet-kicker text-[10px] font-extrabold uppercase tracking-[.1em] text-primary">
                   Ficha técnica comercial
                 </p>
-                <h1 className="mt-1 text-2xl font-bold leading-tight">{product.name}</h1>
+                <h1 className="mt-1 text-2xl font-bold leading-tight">
+                  {commercialCopy?.titulo ?? product.name}
+                </h1>
                 <p className="sheet-code mt-1 font-mono text-xs text-muted-foreground">
                   Código artículo {product.sku}
                 </p>
@@ -234,11 +240,15 @@ export function TechnicalSheetPreview({
 
             <div className="sheet-summary mt-5 grid gap-6 sm:grid-cols-[190px_1fr]">
               <div className="sheet-art overflow-hidden rounded-xl bg-[#f4f5f6] text-slate-600">
-                <ProductArtwork category={sheet.schema.category.name} name={product.name} />
+                <ProductThumbnail
+                  product={{ ...product, category: sheet.schema.category.name }}
+                  assets={assets}
+                />
               </div>
               <div>
                 <p className="sheet-description text-sm leading-6 text-muted-foreground">
-                  {product.description ??
+                  {commercialCopy?.descripcion ??
+                    product.description ??
                     'Producto del catálogo maestro CDR. Consulte las especificaciones vigentes antes de seleccionar su aplicación.'}
                 </p>
                 <dl className="sheet-base mt-4 grid grid-cols-2 gap-x-6 gap-y-3">

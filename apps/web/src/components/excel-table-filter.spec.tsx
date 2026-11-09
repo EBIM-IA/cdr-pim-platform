@@ -195,7 +195,7 @@ describe('ExcelTableHeader', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Quitar filtros y orden de columna' }));
-    expect(screen.getByText(/Sin filtros de columna/u)).toBeVisible();
+    expect(screen.queryByText(/Sin filtros de columna/u)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quitar filtros y orden de columna' })).toBeNull();
   });
 });

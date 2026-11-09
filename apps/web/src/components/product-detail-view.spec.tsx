@@ -22,6 +22,11 @@ import { listProductAssets, uploadProductAsset } from '@/lib/product-assets-api'
 
 import { ProductDetailView } from './product-detail-view';
 
+vi.mock('@/lib/ecommerce-api', () => ({
+  fetchEcommerceDescription: vi.fn(async () => null),
+  saveEcommerceDescription: vi.fn(),
+}));
+
 vi.mock('@/lib/catalog-api', () => ({
   CatalogApiError: class CatalogApiError extends Error {
     constructor(
@@ -316,7 +321,10 @@ describe('ProductDetailView operational data', () => {
       const view = render(<ProductDetailView productId={product.id} {...props} />);
       const rendered = within(view.container);
       expect(
-        await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 }),
+        await rendered.findByRole('heading', {
+          name: `${product.sku} : ${product.providerCode}`,
+          level: 1,
+        }),
       ).toBeInTheDocument();
       const picker = rendered.getByLabelText('Aplicaciones del SKU');
       expect(picker).toBeInTheDocument();
@@ -325,10 +333,15 @@ describe('ProductDetailView operational data', () => {
       ).toBeInTheDocument();
       expect(within(picker).getByRole('button', { name: /Uso industrial/ })).toBeInTheDocument();
       if (role === 'ADMINISTRADOR') {
+        expect(await rendered.findByText(experience.nombreGeneral)).toBeVisible();
+        expect(
+          rendered.getByRole('region', { name: 'Descripción para e-commerce' }),
+        ).toHaveTextContent(experience.nombreGeneral);
         expect(rendered.getByRole('heading', { name: 'Control PIM' })).toBeInTheDocument();
         expect(rendered.getByRole('tab', { name: 'Aplicaciones' })).toBeInTheDocument();
         expect(picker).toHaveAttribute('role', 'group');
       } else {
+        expect(rendered.getByText(experience.nombreGeneral)).toBeVisible();
         expect(rendered.queryByRole('heading', { name: 'Control PIM' })).not.toBeInTheDocument();
         expect(rendered.queryByRole('tab', { name: 'Aplicaciones' })).not.toBeInTheDocument();
         expect(picker.tagName).toBe('DIV');
@@ -347,7 +360,7 @@ describe('ProductDetailView operational data', () => {
     const rendered = within(view.container);
     expect(
       await rendered.findByRole('heading', {
-        name: experience.variants[0]!.nombreAmigable,
+        name: `${product.sku} : ${product.providerCode}`,
         level: 1,
       }),
     ).toBeInTheDocument();
@@ -358,7 +371,7 @@ describe('ProductDetailView operational data', () => {
 
     fireEvent.click(rendered.getByRole('button', { name: /Uso industrial/ }));
     expect(
-      rendered.getByRole('heading', { name: experience.variants[2]!.nombreAmigable, level: 1 }),
+      rendered.getByRole('heading', { name: `${product.sku} : ${product.providerCode}`, level: 1 }),
     ).toBeInTheDocument();
     expect(window.location.search).toContain('uso=industrial');
     expect(window.location.search).not.toContain('aplicacion=');
@@ -369,7 +382,7 @@ describe('ProductDetailView operational data', () => {
 
     fireEvent.click(rendered.getByRole('button', { name: 'Ver nombre general' }));
     expect(
-      rendered.getByRole('heading', { name: experience.nombreGeneral, level: 1 }),
+      rendered.getByRole('heading', { name: `${product.sku} : ${product.providerCode}`, level: 1 }),
     ).toBeInTheDocument();
     expect(window.location.search).not.toMatch(/uso=|aplicacion=/u);
     expect(window.location.search).toContain('idbar=b');
@@ -379,7 +392,10 @@ describe('ProductDetailView operational data', () => {
   it('updates a selected application on browser navigation and ignores unavailable variant IDs', async () => {
     const view = render(<ProductDetailView productId={product.id} showCompleteness />);
     const rendered = within(view.container);
-    await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 });
+    await rendered.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
     fireEvent.click(rendered.getByRole('button', { name: 'Toyota Hilux 2016–2024' }));
     expect(window.location.search).toBe(`?aplicacion=${applicationId}`);
     expect(rendered.getByRole('button', { name: 'Toyota Hilux 2016–2024' })).toHaveAttribute(
@@ -390,12 +406,12 @@ describe('ProductDetailView operational data', () => {
     window.history.replaceState({}, '', `/products/${product.id}?uso=industrial`);
     fireEvent.popState(window);
     expect(
-      rendered.getByRole('heading', { name: experience.variants[2]!.nombreAmigable, level: 1 }),
+      rendered.getByRole('heading', { name: `${product.sku} : ${product.providerCode}`, level: 1 }),
     ).toBeInTheDocument();
     window.history.replaceState({}, '', `/products/${product.id}?aplicacion=unavailable&idbar=b`);
     fireEvent.popState(window);
     expect(
-      rendered.getByRole('heading', { name: experience.nombreGeneral, level: 1 }),
+      rendered.getByRole('heading', { name: `${product.sku} : ${product.providerCode}`, level: 1 }),
     ).toBeInTheDocument();
     expect(rendered.getByLabelText('Contexto persistente del producto').className).toContain(
       'darkIdentity',
@@ -452,15 +468,24 @@ describe('ProductDetailView operational data', () => {
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent),
     ).toEqual(['Atributo y origen', 'Valor', 'Abreviatura']);
-    const fold = rendered
-      .getByText('Datos base ERP', { selector: 'summary h3' })
-      .closest('details')!;
-    expect(fold).not.toHaveAttribute('open');
-    expect(fold.parentElement?.lastElementChild).toBe(fold);
-    expect(fold.querySelector('table')).not.toBeVisible();
-    fireEvent.click(within(fold).getByText('Datos base ERP', { selector: 'h3' }));
-    expect(fold.querySelector('table')).toBeVisible();
-    expect(within(fold).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(rendered.getAllByRole('table')[0]).toHaveAccessibleName(
+      'Medidas y datos de rendimiento',
+    );
+    if (props.showCompleteness) {
+      const fold = rendered
+        .getByText('Datos base ERP', { selector: 'summary h3' })
+        .closest('details')!;
+      expect(fold).not.toHaveAttribute('open');
+      expect(fold.parentElement?.lastElementChild).toBe(fold);
+      expect(fold.querySelector('table')).not.toBeVisible();
+      fireEvent.click(within(fold).getByText('Datos base ERP', { selector: 'h3' }));
+      expect(fold.querySelector('table')).toBeVisible();
+      expect(within(fold).queryByRole('textbox')).not.toBeInTheDocument();
+    } else {
+      expect(
+        rendered.queryByText('Datos base ERP', { selector: 'summary h3' }),
+      ).not.toBeInTheDocument();
+    }
   });
 
   it('uses real product photographs in the gallery before the final technical drawing', async () => {
@@ -489,18 +514,21 @@ describe('ProductDetailView operational data', () => {
     expect(
       within(gallery).getByRole('img', { name: `${product.name} · pastilla.jpg` }),
     ).toHaveAttribute('src', `/api/product-assets/${assetId}/download`);
-    fireEvent.click(within(gallery).getByRole('button', { name: 'Imagen siguiente' }));
-    expect(within(gallery).getByText('Esquema técnico referencial · 2/2')).toBeInTheDocument();
     expect(
-      within(gallery).queryByRole('img', { name: `${product.name} · pastilla.jpg` }),
+      within(gallery).queryByRole('button', { name: 'Imagen siguiente' }),
     ).not.toBeInTheDocument();
+    const plans = rendered.getByRole('region', { name: 'Galería de planos' });
+    expect(within(plans).getByText(/Esquema técnico referencial/)).toBeInTheDocument();
   });
 
   it('keeps the registered product name usable when the names service fails', async () => {
     vi.mocked(fetchProductExperience).mockRejectedValue(new Error('unavailable'));
     render(<ProductDetailView productId={product.id} />);
     expect(
-      await screen.findByRole('heading', { name: product.name, level: 1 }),
+      await screen.findByRole('heading', {
+        name: `${product.sku} : ${product.providerCode}`,
+        level: 1,
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByText('No fue posible consultar los nombres y las variantes del producto.'),
@@ -530,7 +558,10 @@ describe('ProductDetailView operational data', () => {
       <ProductDetailView productId={product.id} canWriteAssets showCompleteness />,
     );
     const rendered = within(view.container);
-    await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 });
+    await rendered.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
     fireEvent.click(rendered.getByRole('tab', { name: 'Imágenes y Documentos' }));
     fireEvent.change(await rendered.findByRole('combobox', { name: 'Tipo de activo' }), {
       target: { value: 'FOTO' },
@@ -544,9 +575,14 @@ describe('ProductDetailView operational data', () => {
     ).toHaveAttribute('src', `/api/product-assets/${asset.id}/download`);
     expect(uploadProductAsset).toHaveBeenCalledWith({ productId: product.id, type: 'FOTO', file });
     fireEvent.click(rendered.getByRole('tab', { name: 'Información técnica' }));
-    expect(rendered.getByLabelText('Documentos y calidad del SKU')).toHaveTextContent(
+    expect(rendered.getByLabelText('Documentos y calidad del SKU')).not.toHaveTextContent(
       asset.filename,
     );
+    expect(
+      within(rendered.getByRole('region', { name: 'Galería del producto' })).getByRole('img', {
+        name: `${product.name} · ${asset.filename}`,
+      }),
+    ).toBeVisible();
   });
 
   it('loads the sheet, relations and audit, then renders real tab content', async () => {
@@ -600,7 +636,10 @@ describe('ProductDetailView operational data', () => {
     render(<ProductDetailView productId={product.id} />);
 
     expect(
-      await screen.findByRole('heading', { name: experience.nombreGeneral, level: 1 }),
+      await screen.findByRole('heading', {
+        name: `${product.sku} : ${product.providerCode}`,
+        level: 1,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText('SKU')).toBeInTheDocument();
     expect(screen.queryByText('No pudimos mostrar esta ficha')).not.toBeInTheDocument();
@@ -617,7 +656,10 @@ describe('ProductDetailView operational data', () => {
 
     const rendered = within(view.container);
     expect(
-      await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 }),
+      await rendered.findByRole('heading', {
+        name: `${product.sku} : ${product.providerCode}`,
+        level: 1,
+      }),
     ).toBeInTheDocument();
     expect(rendered.queryByText('Publicado')).not.toBeInTheDocument();
     expect(rendered.queryByText('Regla pendiente')).not.toBeInTheDocument();
@@ -640,7 +682,10 @@ describe('ProductDetailView operational data', () => {
     const view = render(<ProductDetailView productId={product.id} />);
     const rendered = within(view.container);
 
-    await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 });
+    await rendered.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
     fireEvent.click(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' }));
 
     const dialog = rendered.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
@@ -1150,7 +1195,10 @@ describe('ProductDetailView operational data', () => {
     vi.mocked(fetchProductAttributeSheet).mockResolvedValue({ ...sheet, completeness: null });
     const view = render(<ProductDetailView productId={product.id} showCompleteness />);
     const rendered = within(view.container);
-    await rendered.findByRole('heading', { name: experience.nombreGeneral, level: 1 });
+    await rendered.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
 
     expect(
       rendered.queryByRole('progressbar', { name: `Completitud de ${product.sku}` }),

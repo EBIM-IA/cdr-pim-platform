@@ -300,13 +300,8 @@ describe('CatalogWorkbookTable', () => {
     expect(screen.queryByRole('columnheader', { name: 'Plantilla' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /Estado/u })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /CSV · 2 filas$/u }));
-    await waitFor(() => {
-      const headers = mocks.downloadCsv.mock.calls.at(-1)?.[0].headers as string[];
-      expect(headers).not.toContain('Descripción');
-      expect(headers).not.toContain('Plantilla');
-      expect(headers).not.toContain('Estado · completitud');
-    });
+    expect(screen.queryByRole('button', { name: /CSV|XLSX/u })).not.toBeInTheDocument();
+    expect(mocks.downloadCsv).not.toHaveBeenCalled();
   });
 
   it('uses optimistic concurrency, treats a blank as no-op and a dash as clear', async () => {

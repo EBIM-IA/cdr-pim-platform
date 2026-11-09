@@ -44,6 +44,58 @@ describe('group relationships and imports persistence', () => {
 
   afterAll(() => database.close());
 
+  it('keeps unverified compatibility out of consultation and reopens review after a change', async () => {
+    const repository = new DrizzleGroupApplicationRepository(database.db);
+    const search = new DrizzleApplicationSearchReadModel(database.db);
+    const application = GroupApplication.create(
+      { groupId, unifiedCode: 'D1672', vehicleType: 'AUTOMOTRIZ', make: 'Toyota', model: 'Hilux' },
+      now,
+    );
+    await repository.insertWithAudit(application, {
+      action: 'created',
+      actorId: 'admin',
+      correlationId: 'verification-create',
+      occurredAt: now,
+    });
+    expect(
+      await repository.list({ productId, includeInactive: false, verifiedOnly: true }),
+    ).toEqual([]);
+    expect(await search.findActiveProductIds('Hilux', 10, true)).toEqual([]);
+    expect((await repository.listForProducts([productId], true)).get(productId)).toBeUndefined();
+    const approvedAt = new Date(now.getTime() + 1000);
+    application.update({ verificationStatus: 'verified' }, approvedAt);
+    const approved = await repository.updateWithAudit(application, now, {
+      action: 'updated',
+      actorId: 'admin',
+      correlationId: 'verification-approve',
+      occurredAt: approvedAt,
+    });
+    expect(approved.kind).toBe('updated');
+    if (approved.kind !== 'updated') throw new Error('Approval did not persist');
+    expect(
+      await repository.list({ productId, includeInactive: false, verifiedOnly: true }),
+    ).toHaveLength(1);
+    expect(await search.findActiveProductIds('Hilux', 10, true)).toEqual([productId]);
+    const changedAt = new Date(now.getTime() + 2000);
+    const confirmedVersion = approved.value.toSnapshot().updatedAt;
+    approved.value.update({ model: 'Corolla' }, changedAt);
+    const edited = await repository.updateWithAudit(approved.value, confirmedVersion, {
+      action: 'updated',
+      actorId: 'admin',
+      correlationId: 'verification-edit',
+      occurredAt: changedAt,
+    });
+    expect(edited.kind).toBe('updated');
+    expect(approved.value.toSnapshot().verificationStatus).toBe('pending');
+    expect(
+      await repository.list({ productId, includeInactive: false, verifiedOnly: true }),
+    ).toEqual([]);
+    const changes = await database.sql<
+      { count: number }[]
+    >`SELECT count(*)::int AS count FROM audit_change_items WHERE field_name = 'verificationStatus'`;
+    expect(changes[0]?.count).toBe(3);
+  });
+
   it('resolves applications inherited by a product through its unified-code group', async () => {
     const repository = new DrizzleGroupApplicationRepository(database.db);
     await repository.insertWithAudit(

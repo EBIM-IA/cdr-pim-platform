@@ -103,7 +103,11 @@ export class ListProductCatalogsUseCase implements ProductCatalogQueryPort {
     if (query.includeDeleted && !actorHasCapability(actor, Capability.ProductCatalogsWrite))
       throw new ForbiddenError('Only catalog editors can view deleted catalogs');
     const now = this.clock.now(),
-      result = await this.repository.list({ ...query, now });
+      result = await this.repository.list({
+        ...query,
+        now,
+        currentOnly: !actorHasCapability(actor, Capability.ProductCatalogsWrite),
+      });
     return {
       items: result.items.map((record) => projectProductCatalog(record, now)),
       total: result.total,
@@ -132,6 +136,10 @@ export class GetProductCatalogUseCase {
       (record.catalog.deletedAt && !actorHasCapability(actor, Capability.ProductCatalogsWrite))
     )
       throw new NotFoundError('ProductCatalog', id);
+    if (!actorHasCapability(actor, Capability.ProductCatalogsWrite))
+      throw new ForbiddenError(
+        'El detalle administrativo de catálogos está reservado a Administración.',
+      );
     const history = await this.auditReader.listChanges({
       page: 1,
       pageSize: 100,
@@ -432,11 +440,20 @@ export class DownloadProductCatalogUseCase {
   constructor(
     @Inject(PRODUCT_CATALOG_REPOSITORY) private readonly repository: ProductCatalogRepositoryPort,
     @Inject(CATALOG_BINARY_STORAGE) private readonly storage: CatalogBinaryStoragePort,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
-  async execute(id: string): Promise<{ catalog: ProductCatalog; content: Uint8Array }> {
+  async execute(
+    id: string,
+    actor: AuthenticatedActor,
+  ): Promise<{ catalog: ProductCatalog; content: Uint8Array }> {
     const record = await this.repository.find(assertUuid(id, 'catalogId'));
     if (!record) throw new NotFoundError('ProductCatalog', id);
     available(record);
+    if (
+      !actorHasCapability(actor, Capability.ProductCatalogsWrite) &&
+      !['Vigente', 'Por vencer'].includes(catalogValidity(record.catalog, this.clock.now()))
+    )
+      throw new NotFoundError('ProductCatalog', id);
     return { catalog: record.catalog, content: await this.storage.get(record.catalog.objectKey) };
   }
 }

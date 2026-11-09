@@ -33,6 +33,7 @@ import {
   ExcelTableHeader,
   useExcelTableRows,
 } from '@/components/excel-table-filter';
+import { PdfCatalogCover } from '@/components/pdf-catalog-cover';
 import { StatusBadge, type BadgeTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -837,6 +838,11 @@ export function ProductCatalogsWorkspace({
   workspace?: WorkspaceDto;
   onReload?: () => void;
 }) {
+  const [view, setView] = useState<'grid' | 'table'>(canManage ? 'table' : 'grid');
+  const visibleColumns = columns.filter(
+    (column) =>
+      canManage || !['status', 'links', 'createdAt', 'updatedBy', 'updatedAt'].includes(column.key),
+  );
   const [query, setQuery] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
   const [result, setResult] = useState<ProductCatalogListDto | null>(null);
@@ -878,9 +884,11 @@ export function ProductCatalogsWorkspace({
   const rows = useMemo(
     () =>
       (result?.items ?? []).filter(
-        (row) => scope === 'all' || (scope === 'deleted' ? Boolean(row.deletedAt) : !row.deletedAt),
+        (row) =>
+          (canManage || ['Vigente', 'Por vencer'].includes(row.status)) &&
+          (scope === 'all' || (scope === 'deleted' ? Boolean(row.deletedAt) : !row.deletedAt)),
       ),
-    [result, scope],
+    [result, scope, canManage],
   );
   const table = useExcelTableRows({ rows, columns: tableColumns });
   useEffect(() => {
@@ -1053,16 +1061,20 @@ export function ProductCatalogsWorkspace({
             Restaurar
           </Button>
         ) : null}
-        <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-border sm:block" />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!table.visibleRows.length || disabled}
-          onClick={exportRows}
-        >
-          <Download className="size-3.5" aria-hidden="true" />
-          Exportar Excel
-        </Button>
+        {canManage ? (
+          <>
+            <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-border sm:block" />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!table.visibleRows.length || disabled}
+              onClick={exportRows}
+            >
+              <Download className="size-3.5" aria-hidden="true" />
+              Exportar Excel
+            </Button>
+          </>
+        ) : null}
         <label className="relative min-w-60 flex-1 sm:ml-auto">
           <span className="sr-only">Buscar catálogos</span>
           <Search
@@ -1104,59 +1116,61 @@ export function ProductCatalogsWorkspace({
           {notice}
         </p>
       ) : null}
-      <dl
-        aria-label="Indicadores de catálogos"
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        {[
-          {
-            label: 'Catálogos',
-            value: metrics?.catalogs,
-            note: 'PDF en la búsqueda',
-            icon: FileText,
-            color: 'bg-orange-50 text-primary',
-          },
-          {
-            label: 'Vigentes',
-            value: metrics?.current,
-            note:
-              metrics && !loading && !loadError
-                ? `${metrics.expiring} por vencer en 30 días`
-                : 'por vencer en 30 días',
-            icon: CheckCircle2,
-            color: 'bg-emerald-50 text-emerald-700',
-          },
-          {
-            label: 'Vencidos / programados',
-            value: metrics ? `${metrics.expired} / ${metrics.scheduled}` : undefined,
-            note: 'fuera de vigencia hoy',
-            icon: Clock3,
-            color: 'bg-amber-50 text-amber-700',
-          },
-          {
-            label: 'Enlaces activos',
-            value: metrics?.activeLinks,
-            note: 'compartidos y sin vencer',
-            icon: Link2,
-            color: 'bg-blue-50 text-blue-700',
-          },
-        ].map(({ label, value, note: helper, icon: Icon, color }) => (
-          <Card key={label} className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
-            <span className={`grid size-8 shrink-0 place-items-center rounded-full ${color}`}>
-              <Icon className="size-4" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <dt className="text-[11px] text-muted-foreground">{label}</dt>
-              <dd className="flex flex-wrap items-baseline gap-x-1.5">
-                <strong className="text-lg leading-tight tabular-nums">
-                  {loading || loadError ? '—' : (value ?? '—')}
-                </strong>
-                <span className="text-[10px] text-muted-foreground">{helper}</span>
-              </dd>
-            </div>
-          </Card>
-        ))}
-      </dl>
+      {canManage ? (
+        <dl
+          aria-label="Indicadores de catálogos"
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        >
+          {[
+            {
+              label: 'Catálogos',
+              value: metrics?.catalogs,
+              note: 'PDF en la búsqueda',
+              icon: FileText,
+              color: 'bg-orange-50 text-primary',
+            },
+            {
+              label: 'Vigentes',
+              value: metrics?.current,
+              note:
+                metrics && !loading && !loadError
+                  ? `${metrics.expiring} por vencer en 30 días`
+                  : 'por vencer en 30 días',
+              icon: CheckCircle2,
+              color: 'bg-emerald-50 text-emerald-700',
+            },
+            {
+              label: 'Vencidos / programados',
+              value: metrics ? `${metrics.expired} / ${metrics.scheduled}` : undefined,
+              note: 'fuera de vigencia hoy',
+              icon: Clock3,
+              color: 'bg-amber-50 text-amber-700',
+            },
+            {
+              label: 'Enlaces activos',
+              value: metrics?.activeLinks,
+              note: 'compartidos y sin vencer',
+              icon: Link2,
+              color: 'bg-blue-50 text-blue-700',
+            },
+          ].map(({ label, value, note: helper, icon: Icon, color }) => (
+            <Card key={label} className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
+              <span className={`grid size-8 shrink-0 place-items-center rounded-full ${color}`}>
+                <Icon className="size-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <dt className="text-[11px] text-muted-foreground">{label}</dt>
+                <dd className="flex flex-wrap items-baseline gap-x-1.5">
+                  <strong className="text-lg leading-tight tabular-nums">
+                    {loading || loadError ? '—' : (value ?? '—')}
+                  </strong>
+                  <span className="text-[10px] text-muted-foreground">{helper}</span>
+                </dd>
+              </div>
+            </Card>
+          ))}
+        </dl>
+      ) : null}
       <Card className="min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
@@ -1165,11 +1179,29 @@ export function ProductCatalogsWorkspace({
               {table.visibleRows.length !== rows.length ? ` de ${rows.length}` : ''}
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Clic en el título para ver el detalle, compartir y su historial. Marca un catálogo
-              para las acciones de la barra.
+              {canManage
+                ? 'Clic en el título para ver el detalle, compartir y su historial. Marca un catálogo para las acciones de la barra.'
+                : 'Catálogos vigentes y por vencer. Consulta o descarga sus archivos PDF.'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="group"
+              aria-label="Vista de catálogos"
+              className="flex rounded-md border p-0.5"
+            >
+              {(['grid', 'table'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={view === mode}
+                  onClick={() => setView(mode)}
+                  className={`rounded px-3 py-1 text-xs ${view === mode ? 'bg-orange-50 font-semibold text-primary' : ''}`}
+                >
+                  {mode === 'grid' ? 'Cuadrícula' : 'Tabla'}
+                </button>
+              ))}
+            </div>
             {canManage ? (
               <label className="flex items-center gap-2 text-xs">
                 Mostrar
@@ -1216,108 +1248,194 @@ export function ProductCatalogsWorkspace({
               onClear={clear}
             />
             {table.visibleRows.length ? (
-              <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de catálogos PDF">
-                <table className="w-full min-w-[1580px] border-collapse text-left text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="sticky left-0 z-10 w-10 bg-slate-50">
-                        <input
-                          type="checkbox"
-                          aria-label="Seleccionar todos los visibles"
-                          checked={allSelected}
-                          onChange={(event) =>
-                            setSelected((current) => {
-                              const next = new Set(current);
-                              for (const row of pageRows) {
-                                if (event.target.checked) next.add(row.id);
-                                else next.delete(row.id);
-                              }
-                              return next;
-                            })
-                          }
-                        />
-                      </th>
-                      {columns.map((column) => (
-                        <ExcelTableHeader
-                          key={column.key}
-                          columnKey={column.key}
-                          label={column.label}
-                          options={table.getValueOptions(column.key)}
-                          selectedValues={table.filters[column.key]}
-                          sortDirection={
-                            table.sort?.key === column.key ? table.sort.direction : undefined
-                          }
-                          onFilterChange={(values) => table.setColumnFilter(column.key, values)}
-                          onSort={(direction) => table.setSort(column.key, direction)}
-                        />
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((row) => (
-                      <tr
-                        key={row.id}
-                        className={selected.has(row.id) ? 'bg-orange-50' : 'hover:bg-slate-50/60'}
+              view === 'grid' ? (
+                <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {pageRows.map((row) => (
+                    <article
+                      key={row.id}
+                      className="min-w-0 overflow-hidden rounded-lg border bg-white"
+                    >
+                      <a
+                        className="relative block aspect-[3/4] overflow-hidden border-b bg-slate-100"
+                        href={productCatalogDownloadUrl(row.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Abrir PDF ${row.title}`}
                       >
-                        <td
-                          className={`sticky left-0 ${selected.has(row.id) ? 'bg-orange-50' : 'bg-white'}`}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={`Seleccionar ${row.title}`}
-                            checked={selected.has(row.id)}
-                            onChange={(event) => select(row.id, event.target.checked)}
+                        <PdfCatalogCover
+                          url={productCatalogDownloadUrl(row.id)}
+                          title={row.title}
+                        />
+                      </a>
+                      <div className="space-y-3 p-4">
+                        {canManage ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                aria-label={`Seleccionar ${row.title}`}
+                                checked={selected.has(row.id)}
+                                onChange={(event) => select(row.id, event.target.checked)}
+                              />
+                              {row.code}
+                            </label>
+                            <StatusBadge tone={statusTones[row.status] ?? 'neutral'}>
+                              {row.status}
+                            </StatusBadge>
+                          </div>
+                        ) : null}
+                        <h3 className="break-words text-sm font-semibold">
+                          {canManage ? (
+                            <button
+                              type="button"
+                              className="text-left text-primary hover:underline"
+                              onClick={() => setDetail({ catalog: row, focusShare: false })}
+                            >
+                              {row.title}
+                            </button>
+                          ) : (
+                            row.title
+                          )}
+                        </h3>
+                        <p className="line-clamp-3 text-xs leading-5 text-muted-foreground">
+                          {row.description}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {row.validUntil
+                            ? `Vigente hasta ${dateLabel(row.validUntil)}`
+                            : 'Sin vencimiento'}{' '}
+                          · {fileSize(row.fileSize)}
+                        </p>
+                        {!row.deletedAt ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button asChild size="sm" variant="outline">
+                              <a
+                                href={productCatalogDownloadUrl(row.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Ver PDF
+                              </a>
+                            </Button>
+                            <Button asChild size="sm" variant="ghost">
+                              <a href={productCatalogDownloadUrl(row.id, 'attachment')}>
+                                Descargar
+                              </a>
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="overflow-x-auto" tabIndex={0} aria-label="Tabla de catálogos PDF">
+                  <table className="w-full min-w-[1580px] border-collapse text-left text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {canManage ? (
+                          <th className="sticky left-0 z-10 w-10 bg-slate-50">
+                            <input
+                              type="checkbox"
+                              aria-label="Seleccionar todos los visibles"
+                              checked={allSelected}
+                              onChange={(event) =>
+                                setSelected((current) => {
+                                  const next = new Set(current);
+                                  for (const row of pageRows) {
+                                    if (event.target.checked) next.add(row.id);
+                                    else next.delete(row.id);
+                                  }
+                                  return next;
+                                })
+                              }
+                            />
+                          </th>
+                        ) : null}
+                        {visibleColumns.map((column) => (
+                          <ExcelTableHeader
+                            key={column.key}
+                            columnKey={column.key}
+                            label={column.label}
+                            options={table.getValueOptions(column.key)}
+                            selectedValues={table.filters[column.key]}
+                            sortDirection={
+                              table.sort?.key === column.key ? table.sort.direction : undefined
+                            }
+                            onFilterChange={(values) => table.setColumnFilter(column.key, values)}
+                            onSort={(direction) => table.setSort(column.key, direction)}
                           />
-                        </td>
-                        {columns.map((column) => (
-                          <td key={column.key} className="max-w-64 align-top">
-                            {column.key === 'title' ? (
-                              <button
-                                className="text-left font-semibold text-primary hover:underline"
-                                onClick={() => setDetail({ catalog: row, focusShare: false })}
-                              >
-                                {row.title}
-                              </button>
-                            ) : column.key === 'code' ? (
-                              <code>{row.code}</code>
-                            ) : column.key === 'status' ? (
-                              <StatusBadge tone={statusTones[row.status] ?? 'neutral'}>
-                                {row.status}
-                              </StatusBadge>
-                            ) : column.key === 'fileName' ? (
-                              <>
-                                <a
-                                  className="flex items-center gap-1 text-primary hover:underline"
-                                  href={productCatalogDownloadUrl(row.id)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  aria-disabled={Boolean(row.deletedAt)}
-                                  onClick={(event) => {
-                                    if (row.deletedAt) event.preventDefault();
-                                  }}
-                                >
-                                  <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-                                  <span className="truncate">{row.fileName}</span>
-                                </a>
-                                <small className="text-muted-foreground">
-                                  {fileSize(row.fileSize)}
-                                </small>
-                              </>
-                            ) : (
-                              <span
-                                className="block truncate"
-                                title={displayValue(row, column.key)}
-                              >
-                                {displayValue(row, column.key)}
-                              </span>
-                            )}
-                          </td>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {pageRows.map((row) => (
+                        <tr
+                          key={row.id}
+                          className={selected.has(row.id) ? 'bg-orange-50' : 'hover:bg-slate-50/60'}
+                        >
+                          {canManage ? (
+                            <td
+                              className={`sticky left-0 ${selected.has(row.id) ? 'bg-orange-50' : 'bg-white'}`}
+                            >
+                              <input
+                                type="checkbox"
+                                aria-label={`Seleccionar ${row.title}`}
+                                checked={selected.has(row.id)}
+                                onChange={(event) => select(row.id, event.target.checked)}
+                              />
+                            </td>
+                          ) : null}
+                          {visibleColumns.map((column) => (
+                            <td key={column.key} className="max-w-64 align-top">
+                              {column.key === 'title' && canManage ? (
+                                <button
+                                  className="text-left font-semibold text-primary hover:underline"
+                                  onClick={() => setDetail({ catalog: row, focusShare: false })}
+                                >
+                                  {row.title}
+                                </button>
+                              ) : column.key === 'code' ? (
+                                <code>{row.code}</code>
+                              ) : column.key === 'status' ? (
+                                <StatusBadge tone={statusTones[row.status] ?? 'neutral'}>
+                                  {row.status}
+                                </StatusBadge>
+                              ) : column.key === 'fileName' ? (
+                                <>
+                                  <a
+                                    className="flex items-center gap-1 text-primary hover:underline"
+                                    href={productCatalogDownloadUrl(row.id)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    aria-disabled={Boolean(row.deletedAt)}
+                                    onClick={(event) => {
+                                      if (row.deletedAt) event.preventDefault();
+                                    }}
+                                  >
+                                    <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                                    <span className="truncate">{row.fileName}</span>
+                                  </a>
+                                  <small className="text-muted-foreground">
+                                    {fileSize(row.fileSize)}
+                                  </small>
+                                </>
+                              ) : (
+                                <span
+                                  className="block truncate"
+                                  title={displayValue(row, column.key)}
+                                >
+                                  {displayValue(row, column.key)}
+                                </span>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
             ) : (
               <div className="grid justify-items-center gap-3 px-5 py-12 text-center">
                 <span className="grid size-14 place-items-center rounded-full bg-orange-50 text-primary">

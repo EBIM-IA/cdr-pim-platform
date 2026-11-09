@@ -24,7 +24,7 @@ describe('catalog attribute consultation permissions', () => {
     (...roles) => {
       expect(
         catalogAttributePermissionsForRoles({ edit: true, import: true, export: true }, roles),
-      ).toEqual({ edit: false, import: false, export: true });
+      ).toEqual({ edit: false, import: false, export: false });
     },
   );
 

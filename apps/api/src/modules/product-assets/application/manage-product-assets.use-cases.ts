@@ -52,6 +52,7 @@ export interface ProductAssetUpload {
   readonly content: Uint8Array;
   readonly source?: ProductAssetSource;
   readonly position?: number;
+  readonly replacesAssetId?: string;
 }
 
 export interface ProductAssetDownload {
@@ -145,13 +146,25 @@ export class UploadProductAssetUseCase {
   ): Promise<ProductAsset> {
     const file = validateAssetFile(input);
     const position =
-      input.type === 'FOTO'
-        ? (input.position ?? (await this.assets.nextPhotoPosition(product.id)))
+      input.type === 'FOTO' || input.type === 'PLANO'
+        ? (input.position ??
+          (input.type === 'PLANO' && input.source === 'bulk'
+            ? 1
+            : await this.assets.nextGalleryPosition(product.id, input.type)))
         : null;
     if (position !== null && (!Number.isInteger(position) || position < 1 || position > 10_000)) {
       throw new ValidationError('Photo position must be an integer between 1 and 10000');
     }
-    return this.persist(product, input.type, file, input.source ?? 'manual', position, actor);
+    return this.persist(
+      product,
+      input.type,
+      file,
+      input.source ?? 'manual',
+      position,
+      actor,
+      input.position !== undefined || input.source === 'bulk' || position === null,
+      input.replacesAssetId ? assertUuid(input.replacesAssetId, 'replacesAssetId') : undefined,
+    );
   }
 
   private async persist(
@@ -161,6 +174,8 @@ export class UploadProductAssetUseCase {
     source: ProductAssetSource,
     position: number | null,
     actor: AuthenticatedActor,
+    allowReplace: boolean,
+    expectedAssetId?: Uuid,
   ): Promise<ProductAsset> {
     const id = newUuid();
     const objectKey = buildProductAssetKey({
@@ -223,6 +238,8 @@ export class UploadProductAssetUseCase {
       async () => {
         if (!(await this.storage.exists(stored.key))) throw new NotFoundError('StoredAsset', id);
       },
+      allowReplace,
+      expectedAssetId,
     );
     return saved;
   }
@@ -284,6 +301,7 @@ interface PlannedEntry {
   readonly product: Product;
   readonly type: ProductAssetType;
   readonly position?: number;
+  readonly replacesAssetId?: string;
   readonly existing: ProductAsset | null;
 }
 
@@ -328,10 +346,10 @@ export class ProcessProductAssetArchiveUseCase {
       try {
         const reference = referenceForEntry(entry.path, manifest);
         const product = await cachedProduct(reference.sku, productCache, this.products);
-        let position = reference.position;
+        let position = reference.type === 'PLANO' ? 1 : reference.position;
         if (reference.type === 'FOTO' && position === undefined) {
           const current =
-            nextPhoto.get(product.id) ?? (await this.assets.nextPhotoPosition(product.id));
+            nextPhoto.get(product.id) ?? (await this.assets.nextGalleryPosition(product.id));
           position = current;
           nextPhoto.set(product.id, current + 1);
         }
@@ -592,4 +610,34 @@ function safeArchiveName(value: string): string {
     throw new ValidationError('The bulk upload must be a .zip file');
   }
   return name;
+}
+
+@Injectable()
+export class ReorderProductAssetsUseCase {
+  constructor(
+    @Inject(PRODUCT_ASSET_REPOSITORY) private readonly assets: ProductAssetRepositoryPort,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+  async execute(
+    input: { productId: string; type: 'FOTO' | 'PLANO'; assetIds: string[] },
+    actor: AuthenticatedActor,
+  ): Promise<ProductAsset[]> {
+    const productId = assertUuid(input.productId, 'productId');
+    const ids = input.assetIds.map((id) => assertUuid(id, 'assetId'));
+    if (!ids.length || new Set(ids).size !== ids.length)
+      throw new ValidationError('La galería requiere archivos distintos.');
+    await this.assets.reorder(productId, input.type, ids, (before) =>
+      createAuditEntry({
+        resourceType: 'product',
+        resourceId: productId,
+        action: 'updated',
+        actorId: actor.id,
+        source: 'api:product-gallery-order',
+        correlationId: getCorrelationId() ?? newUuid(),
+        occurredAt: this.clock.now(),
+        changes: { galleryOrder: { before, after: ids }, assetType: { after: input.type } },
+      }),
+    );
+    return this.assets.listByProductId(productId);
+  }
 }

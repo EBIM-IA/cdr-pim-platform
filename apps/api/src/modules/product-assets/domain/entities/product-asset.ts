@@ -65,11 +65,11 @@ export class ProductAsset {
       readonly replacesAssetId?: Uuid | null;
     },
   ): ProductAsset {
-    if (input.type === 'FOTO' && (!input.position || input.position < 1)) {
+    if (['FOTO', 'PLANO'].includes(input.type) && (!input.position || input.position < 1)) {
       throw new ValidationError('A product photo requires a positive position');
     }
-    if (input.type !== 'FOTO' && input.position !== null) {
-      throw new ValidationError('Only product photos may have a position');
+    if (!['FOTO', 'PLANO'].includes(input.type) && input.position !== null) {
+      throw new ValidationError('Only product photos and plans may have a position');
     }
     return new ProductAsset({
       ...input,

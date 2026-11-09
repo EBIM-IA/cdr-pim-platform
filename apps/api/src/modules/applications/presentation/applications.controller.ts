@@ -17,7 +17,11 @@ import { openApiSchema } from '../../../shared/http/openapi';
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  Capability,
+  actorHasCapability,
+  type AuthenticatedActor,
+} from '../../identity/domain/entities/role';
 import {
   CreateGroupApplicationUseCase,
   DeactivateGroupApplicationUseCase,
@@ -41,8 +45,17 @@ export class ApplicationsController {
   @ApiOperation({ summary: 'List applications owned by a unified-code group' })
   async list(
     @Query(new ZodValidationPipe(applicationListQuerySchema)) query: ApplicationListQuery,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<GroupApplicationDto[]> {
-    return (await this.listApplications.execute(query)).map(toDto);
+    const canManage = actorHasCapability(actor, Capability.ApplicationsWrite);
+    return (
+      await this.listApplications.execute({
+        ...query,
+        includeInactive: canManage && query.includeInactive,
+      })
+    )
+      .map(toDto)
+      .filter((row) => canManage || (row.active && row.verificationStatus === 'verified'));
   }
 
   @Post()

@@ -9,6 +9,7 @@ export interface ApplicationCriteria {
   readonly unifiedCode?: string;
   readonly productId?: Uuid;
   readonly includeInactive: boolean;
+  readonly verifiedOnly?: boolean;
 }
 
 export interface ApplicationAuditWriteContext extends AuditWriteContext {
@@ -29,6 +30,7 @@ export interface GroupApplicationRepositoryPort {
   /** Active compatibility rows for a bounded set of products, loaded in one read. */
   listForProducts(
     productIds: readonly Uuid[],
+    verifiedOnly?: boolean,
   ): Promise<ReadonlyMap<Uuid, readonly GroupApplication[]>>;
   /** Inserts the aggregate and its immutable audit event in one transaction. */
   insertWithAudit(

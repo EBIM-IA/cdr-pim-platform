@@ -10,6 +10,7 @@ import {
   ListProductAssetsUseCase,
   ProcessProductAssetArchiveUseCase,
   UploadProductAssetUseCase,
+  ReorderProductAssetsUseCase,
 } from './application/manage-product-assets.use-cases';
 import {
   ARCHIVE_READER,
@@ -32,6 +33,7 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
     ListProductAssetsUseCase,
     ListProductAssetBatchUseCase,
     UploadProductAssetUseCase,
+    ReorderProductAssetsUseCase,
     DownloadProductAssetUseCase,
     DeleteProductAssetUseCase,
     ProcessProductAssetArchiveUseCase,

@@ -159,7 +159,7 @@ describe('applications reference layout', () => {
     expect(screen.queryByRole('link', { name: 'Importar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Plantilla' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Agregar fila' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Exportar Excel' })).not.toBeInTheDocument();
   });
 
   it('combines vehicle terms across columns and clears its active search without a catalog lookup', async () => {
@@ -179,7 +179,7 @@ describe('applications reference layout', () => {
   it('finds applications through real product unified codes when the query is a SKU', async () => {
     vi.mocked(listApplications).mockResolvedValue([first, { ...second, unifiedCode: 'UNI-OTHER' }]);
     vi.mocked(findApplicationUnifiedCodes).mockResolvedValue(new Set(['UNI-6205']));
-    render(<ApplicationsWorkspace canWrite={false} />);
+    render(<ApplicationsWorkspace canWrite />);
     await screen.findByRole('table');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar aplicaciones' }), {
       target: { value: '6205-2RS1 SKF' },
@@ -202,7 +202,7 @@ describe('applications reference layout', () => {
     vi.mocked(findApplicationUnifiedCodes)
       .mockRejectedValueOnce(new Error('La consulta del catálogo falló.'))
       .mockResolvedValueOnce(new Set(['UNI-6205']));
-    render(<ApplicationsWorkspace canWrite={false} />);
+    render(<ApplicationsWorkspace canWrite />);
     await screen.findByRole('table');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar aplicaciones' }), {
       target: { value: 'SKU-SKF' },

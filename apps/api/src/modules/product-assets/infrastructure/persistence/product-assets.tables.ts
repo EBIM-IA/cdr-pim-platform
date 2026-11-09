@@ -43,10 +43,10 @@ export const productAssets = pgTable(
       .where(sql`${table.deletedAt} IS NULL`),
     uniqueIndex('product_assets_singleton_active_key')
       .on(table.productId, table.typeCode)
-      .where(sql`${table.deletedAt} IS NULL AND ${table.typeCode} <> 'FOTO'`),
+      .where(sql`${table.deletedAt} IS NULL AND ${table.typeCode} NOT IN ('FOTO', 'PLANO')`),
     uniqueIndex('product_assets_photo_position_active_key')
-      .on(table.productId, table.position)
-      .where(sql`${table.deletedAt} IS NULL AND ${table.typeCode} = 'FOTO'`),
+      .on(table.productId, table.typeCode, table.position)
+      .where(sql`${table.deletedAt} IS NULL AND ${table.typeCode} IN ('FOTO', 'PLANO')`),
   ],
 );
 

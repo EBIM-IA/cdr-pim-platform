@@ -78,18 +78,68 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
     return row ? this.toDomain(row.asset, row.sku) : null;
   }
 
-  async nextPhotoPosition(productId: Uuid): Promise<number> {
+  async nextGalleryPosition(productId: Uuid, type: 'FOTO' | 'PLANO' = 'FOTO'): Promise<number> {
     const [row] = await this.database
       .select({ position: max(productAssets.position) })
       .from(productAssets)
       .where(
         and(
           eq(productAssets.productId, productId),
-          eq(productAssets.typeCode, 'FOTO'),
+          eq(productAssets.typeCode, type),
           isNull(productAssets.deletedAt),
         ),
       );
     return (row?.position ?? 0) + 1;
+  }
+
+  async reorder(
+    productId: Uuid,
+    type: 'FOTO' | 'PLANO',
+    ids: readonly Uuid[],
+    audit: (before: readonly string[]) => AuditEntry,
+  ): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction
+        .select({ id: products.id })
+        .from(products)
+        .where(eq(products.id, productId))
+        .for('update');
+      const rows = await transaction
+        .select()
+        .from(productAssets)
+        .where(
+          and(
+            eq(productAssets.productId, productId),
+            eq(productAssets.typeCode, type),
+            isNull(productAssets.deletedAt),
+          ),
+        )
+        .orderBy(asc(productAssets.position));
+      if (
+        rows.length !== ids.length ||
+        new Set(ids).size !== ids.length ||
+        rows.some((row) => !ids.includes(row.id as Uuid))
+      ) {
+        throw new ConflictError(
+          'La galería cambió. Actualiza la ficha antes de ordenar sus archivos.',
+        );
+      }
+      // Free occupied positions inside this transaction before assigning the final permutation.
+      const offset = Math.max(0, ...rows.map((row) => row.position ?? 0)) + ids.length + 1;
+      for (let index = 0; index < ids.length; index++) {
+        await transaction
+          .update(productAssets)
+          .set({ position: offset + index })
+          .where(eq(productAssets.id, ids[index]!));
+      }
+      for (let index = 0; index < ids.length; index++) {
+        await transaction
+          .update(productAssets)
+          .set({ position: index + 1 })
+          .where(eq(productAssets.id, ids[index]!));
+      }
+      await recordAssetAuditWithin(transaction, audit(rows.map((row) => row.id)));
+    });
   }
 
   async saveReplacing(
@@ -98,6 +148,8 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
     now: Date,
     audit: (saved: ProductAsset, replaced: ProductAsset | null) => AuditEntry,
     assertObjectAvailable?: () => Promise<void>,
+    allowReplace = true,
+    expectedAssetId?: Uuid,
   ): Promise<{ saved: ProductAsset; replaced: ProductAsset | null }> {
     const snapshot = asset.toSnapshot();
     try {
@@ -129,6 +181,14 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
           .orderBy(desc(productAssets.uploadedAt))
           .limit(1);
 
+        if (expectedAssetId && current?.asset.id !== expectedAssetId)
+          throw new ConflictError(
+            'El archivo visible cambió. Actualiza la galería antes de reemplazarlo.',
+          );
+        if (current && !allowReplace)
+          throw new ConflictError(
+            'Otro archivo se agregó a la galería. Actualiza y vuelve a cargarlo.',
+          );
         if (current) {
           await transaction
             .update(productAssets)

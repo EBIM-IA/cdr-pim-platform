@@ -116,6 +116,7 @@ function fixture() {
     applications,
     products,
     new FixedClock(now),
+    { getMany: async () => [], get: async () => null, save: async () => {} },
   );
   return {
     useCases,
@@ -253,7 +254,7 @@ describe('ProductNamingUseCases', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.aplicacion?.modelo).toBe('COROLLA');
     expect(result.items[0]?.nombreAmigable).toContain('Rodamiento de bolas rígido');
-    expect(f.listForProducts).toHaveBeenCalledExactlyOnceWith([productId]);
+    expect(f.listForProducts).toHaveBeenCalledExactlyOnceWith([productId], true);
     expect(f.get).toHaveBeenCalledOnce();
     expect(f.getProductSheet).not.toHaveBeenCalled();
     expect(f.findById).not.toHaveBeenCalled();
@@ -271,7 +272,7 @@ describe('ProductNamingUseCases', () => {
     const result = await f.useCases.search({ q: '6205', limit: 12 }, actor);
     expect(result.items[0]?.productId).toBe(exactId);
     expect(f.getProductSheet).toHaveBeenCalledExactlyOnceWith(exactId, ['VENTAS']);
-    expect(f.listForProducts).toHaveBeenCalledExactlyOnceWith([productId, exactId]);
+    expect(f.listForProducts).toHaveBeenCalledExactlyOnceWith([productId, exactId], true);
     expect(f.findBySku).toHaveBeenCalledExactlyOnceWith('6205');
   });
 

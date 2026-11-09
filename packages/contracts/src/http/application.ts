@@ -23,6 +23,7 @@ export const groupApplicationSchema = z.object({
   engine: z.string().max(200).nullable(),
   notes: z.string().max(2_000).nullable(),
   active: z.boolean(),
+  verificationStatus: z.enum(['pending', 'verified']).optional(),
   source: z.enum(['manual', 'import']),
   importBatchId: uuidSchema.nullable(),
   createdAt: z.string().datetime(),
@@ -49,6 +50,7 @@ const applicationVehicleTypeWriteSchema = z.preprocess(
 
 const groupApplicationWriteFieldsSchema = z.object({
   vehicleType: applicationVehicleTypeWriteSchema,
+  verificationStatus: z.enum(['pending', 'verified']).optional(),
   make: z.string().trim().min(1).max(160),
   model: z.string().trim().min(1).max(200),
   bodyStyle: z.string().trim().max(200).nullable().optional(),
@@ -83,6 +85,7 @@ export type CreateGroupApplicationInput = z.infer<typeof createGroupApplicationS
 
 export const updateGroupApplicationSchema = z
   .object({
+    verificationStatus: z.enum(['pending', 'verified']).optional(),
     expectedUpdatedAt: z.string().datetime({ offset: true }),
     vehicleType: applicationVehicleTypeWriteSchema.optional(),
     make: z.string().trim().min(1).max(160).optional(),

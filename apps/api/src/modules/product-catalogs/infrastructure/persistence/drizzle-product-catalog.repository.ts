@@ -40,13 +40,18 @@ export class DrizzleProductCatalogRepository implements ProductCatalogRepository
     pageSize: number;
     q?: string;
     includeDeleted?: boolean;
+    currentOnly?: boolean;
     now: Date;
   }): Promise<{ items: CatalogWithShares[]; total: number; metrics: CatalogMetrics }> {
     return this.safe(() =>
       this.db.transaction(
         async (tx) => {
           const search = query.q?.trim().replace(/[\\%_]/gu, '\\$&');
+          const date = query.now.toISOString().slice(0, 10);
           const where = and(
+            query.currentOnly
+              ? sql`${productCatalogs.validFrom} <= ${date}::date AND (${productCatalogs.validUntil} IS NULL OR ${productCatalogs.validUntil} >= ${date}::date)`
+              : undefined,
             query.includeDeleted ? undefined : isNull(productCatalogs.deletedAt),
             search
               ? or(

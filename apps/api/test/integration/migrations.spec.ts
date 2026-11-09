@@ -60,6 +60,7 @@ describe('migration runner', () => {
         'catalog_product_readiness',
         'cdr_schema_migrations',
         'code_affixes',
+        'ecommerce_descriptions',
         'equivalence_group_members',
         'equivalence_groups',
         'external_homologs',

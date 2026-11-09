@@ -68,6 +68,10 @@ export const productSalesVariantSchema = z.object({
   codigoUnificador: z.string(),
   aplicacion: salesApplicationSchema.nullable(),
   ficha: z.string().startsWith('/products/'),
+  descripcionEcommerce: z
+    .object({ titulo: z.string(), descripcion: z.string() })
+    .nullable()
+    .optional(),
 });
 export type ProductSalesVariantDto = z.infer<typeof productSalesVariantSchema>;
 export const productExperienceSchema = z.object({
