@@ -1,3 +1,4 @@
+import { catalogParameters } from '../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
 import { createHash } from 'node:crypto';
 
 import { type Uuid, assertUuid } from '@cdr/shared';
@@ -277,6 +278,42 @@ export function assertDemoSeedEnvironment(value: string): asserts value is DemoS
  */
 export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
   const catalogResult = await db.transaction(async (tx) => {
+    // Match the initial vocabulary migration after test resets, without overriding admin edits.
+    await tx
+      .insert(catalogParameters)
+      .values([
+        {
+          id: 'a5290000-0000-4000-8000-000000000001',
+          kind: 'synonym',
+          value: 'ruliman',
+          target: 'rodamiento',
+        },
+        {
+          id: 'a5290000-0000-4000-8000-000000000002',
+          kind: 'synonym',
+          value: 'balinera',
+          target: 'rodamiento',
+        },
+        {
+          id: 'a5290000-0000-4000-8000-000000000003',
+          kind: 'synonym',
+          value: 'reten',
+          target: 'retenedor',
+        },
+        {
+          id: 'a5290000-0000-4000-8000-000000000004',
+          kind: 'synonym',
+          value: 'faja',
+          target: 'banda',
+        },
+        {
+          id: 'a5290000-0000-4000-8000-000000000005',
+          kind: 'synonym',
+          value: 'balata',
+          target: 'pastilla',
+        },
+      ])
+      .onConflictDoNothing();
     const insertedProducts = await tx
       .insert(products)
       .values(

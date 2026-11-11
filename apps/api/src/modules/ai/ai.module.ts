@@ -1,4 +1,7 @@
+import { QualityModule } from '../quality/quality.module';
 import { Module } from '@nestjs/common';
+import { EcommerceDescriptionUseCases } from './application/ecommerce-description.use-cases';
+import { EcommerceDescriptionController } from './presentation/ecommerce-description.controller';
 import { resolveAiCapabilityProviders, type ApiEnv } from '@cdr/config';
 
 import { API_ENV } from '../../shared/tokens';
@@ -32,9 +35,10 @@ import { AiController } from './presentation/ai.controller';
  * `fake` is the default so a developer with no API key, and CI, both get a working system.
  */
 @Module({
-  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule],
-  controllers: [AiController],
+  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule, QualityModule],
+  controllers: [AiController, EcommerceDescriptionController],
   providers: [
+    EcommerceDescriptionUseCases,
     {
       provide: AI_DOCUMENT_POLICY,
       inject: [API_ENV],

@@ -58,7 +58,7 @@ describe('private PDF catalog persistence and workflow', () => {
       resolve: new ResolveSharedProductCatalogUseCase(repository, tokens, storage, clock),
       deletion: new ChangeProductCatalogDeletionUseCase(repository, clock),
       revoke: new RevokeProductCatalogShareUseCase(repository, clock),
-      download: new DownloadProductCatalogUseCase(repository, storage),
+      download: new DownloadProductCatalogUseCase(repository, storage, clock),
       list: new ListProductCatalogsUseCase(repository, clock),
       get: new GetProductCatalogUseCase(repository, new PostgresAuditAdapter(database.db)),
     };
@@ -207,7 +207,7 @@ describe('private PDF catalog persistence and workflow', () => {
       false,
       actor,
     );
-    await expect(s.download.execute(created.catalog.id)).rejects.toThrow(
+    await expect(s.download.execute(created.catalog.id, actor)).rejects.toThrow(
       'ProductCatalog not found',
     );
     await expect(
@@ -229,7 +229,7 @@ describe('private PDF catalog persistence and workflow', () => {
       true,
       actor,
     );
-    expect((await s.download.execute(created.catalog.id)).content).toEqual(pdf.content);
+    expect((await s.download.execute(created.catalog.id, actor)).content).toEqual(pdf.content);
     expect(restored.shares[0]?.revokedAt).not.toBeNull();
     await expect(s.resolve.execute(link.token, true)).rejects.toThrow('SharedCatalog not found');
   });

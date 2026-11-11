@@ -18,6 +18,9 @@ import { Select } from '@/components/ui/select';
 import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { fetchWorkspace } from '@/lib/workspace-api';
+import { downloadCsv } from '@/lib/tabular-export';
+import { formatWorkspaceDateTime } from '@/lib/workspace-view';
 import { moduleDefinitions, moduleMenuCapabilities, moduleSlugs } from '@/lib/module-definitions';
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
@@ -237,123 +240,340 @@ export function IntegrationsReferenceView({
   view: 'sources' | 'monitor' | 'batches';
 }) {
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [live, setLive] = useState<WorkspaceDto | null>(null);
+  useEffect(() => setLive(null), [workspace]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const inbox = (live ?? workspace).axInbox;
+  const batch = inbox?.selectedBatch;
+  async function selectBatch(externalId: string, page = 1) {
+    setError('');
+    setBusy(true);
+    try {
+      setLive(
+        await fetchWorkspace('integrations', undefined, {
+          axBatchId: externalId,
+          page,
+          pageSize: 100,
+        }),
+      );
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo consultar el lote.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function downloadRecords() {
+    if (!batch) return;
+    setError('');
+    setBusy(true);
+    try {
+      const rows: NonNullable<WorkspaceDto['axInbox']>['records'] = [];
+      for (let page = 1; rows.length < batch.recordCount; page += 1) {
+        const data = await fetchWorkspace('integrations', undefined, {
+          axBatchId: batch.externalId,
+          page,
+          pageSize: 1000,
+        });
+        if (!data.axInbox?.records.length)
+          throw new Error('La descarga quedó incompleta. Actualiza el lote y vuelve a intentar.');
+        rows.push(...data.axInbox.records);
+      }
+      downloadCsv(
+        {
+          headers: ['Fila', 'Código artículo', 'Código proveedor', 'Fecha AX', 'Estado'],
+          rows: rows.map((row) => [
+            row.rowNumber,
+            row.itemCode,
+            row.supplierCode,
+            row.sourceModifiedAt ?? '',
+            'Recibido; pendiente de aplicación',
+          ]),
+        },
+        `AX_${batch.externalId.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+      );
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo descargar el lote.');
+    } finally {
+      setBusy(false);
+    }
+  }
   if (view === 'sources') return <ExternalSources />;
-  if (view === 'batches')
-    return (
-      <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ['Lote', '—'],
-            ['Recibidos', '—'],
-            ['Procesados', '—'],
-            ['Con incidencia', '—'],
-          ].map(([label, value]) => (
-            <Indicator key={label!} label={label!} value={value!} note="Sin lote seleccionado" />
-          ))}
-        </div>
-        <Panel title="Cabecera del lote">
-          <dl className="grid gap-4 text-xs sm:grid-cols-4">
-            {['Identificador del lote', 'Fecha de envío', 'Recepción PIM', 'Origen'].map(
-              (label) => (
-                <div key={label}>
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="mt-1 font-semibold">—</dd>
-                </div>
-              ),
-            )}
-          </dl>
-          <p className="mt-4 text-xs text-muted-foreground">
-            El detalle de lotes de Sismetic / AX estará disponible al habilitar la conexión.
-          </p>
-        </Panel>
-        <Panel title="Errores por registro">
-          <EmptyTable
-            columns={[
-              'Fila',
-              'Código artículo',
-              'Código de error',
-              'Campo',
-              'Mensaje',
-              'Estado',
-              'Acción',
-            ]}
-            message="No hay un lote disponible para consultar."
-          />
-          <div className="mt-4 flex justify-end gap-2">
-            <Button size="sm" variant="outline" disabled>
-              Descargar errores
-            </Button>
-            <Button size="sm" disabled>
-              Reprocesar advertencias
-            </Button>
-          </div>
-        </Panel>
-        <Button asChild size="sm" variant="outline">
-          <a href="/integrations?view=monitor">Volver al monitor</a>
-        </Button>
-      </div>
-    );
   const components = workspace.rows.filter(
     (row) => !['ax-mock', 'queue', 'storage', 'postgresql', 'ai'].includes(row.id),
   );
-  const configured = components.filter((row) => row.values.configured === true).length;
   const detail = components.find((row) => row.id === detailId);
-  return (
+  const recentTable = (
+    <div className="overflow-auto">
+      <table className="w-full min-w-[760px] text-left text-xs">
+        <thead className="border-b bg-slate-50">
+          <tr>
+            {['Integración', 'Lote', 'Recepción PIM', 'Recibidos', 'Estado', 'Acción'].map(
+              (label) => (
+                <th key={label} className="p-3">
+                  {label}
+                </th>
+              ),
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {inbox?.recentBatches.map((row) => (
+            <tr key={row.id} className="border-b">
+              <td className="p-3">Sismetic / AX</td>
+              <td className="p-3">{row.externalId}</td>
+              <td className="p-3">{formatWorkspaceDateTime(row.receivedAt)}</td>
+              <td className="p-3">{row.recordCount}</td>
+              <td className="p-3">Recibido · pendiente de aplicación</td>
+              <td className="p-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    void selectBatch(row.externalId);
+                    if (view !== 'batches') setDetailId('batch');
+                  }}
+                >
+                  Ver lote
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!inbox?.recentBatches.length ? (
+        <p className="p-8 text-center text-muted-foreground">Todavía no se recibieron lotes AX.</p>
+      ) : null}
+    </div>
+  );
+  const batchDetail = (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Indicator
-          label="Conectores externos"
-          value={components.length}
-          note={`${configured} configurados`}
+          label="Lote"
+          value={batch?.externalId ?? '—'}
+          note="Identificador recibido de AX"
         />
-        <Indicator label="Procesados" value="—" note="Historial no disponible" />
-        <Indicator label="Registros con error" value="—" note="Historial no disponible" />
-        <Indicator label="En proceso" value="—" note="Historial no disponible" />
+        <Indicator
+          label="Recibidos"
+          value={batch?.recordCount ?? 0}
+          note="Conservados en el inbox durable"
+        />
+        <Indicator label="Aplicados al catálogo" value="—" note="Pendiente de reglas aprobadas" />
+        <Indicator
+          label="Procesamiento"
+          value="Pendiente"
+          note="No se ha ejecutado la aplicación"
+        />
       </div>
-      <Panel title="Ejecuciones recientes">
-        <EmptyTable
-          columns={[
-            'Integración',
-            'Lote',
-            'Fecha',
-            'Recibidos',
-            'Procesados',
-            'Errores',
-            'Estado',
-            'Acción',
-          ]}
-          message="El historial de ejecuciones externas aún no está disponible."
-        />
-      </Panel>
-      <Panel title="Conectores">
-        <div className="grid gap-3 md:grid-cols-3">
-          {components.map((row) => (
-            <Card key={row.id} className="p-4">
-              <Database className="mb-2 size-5 text-primary" />
-              <h3 className="text-sm font-semibold">{String(row.values.system ?? row.id)}</h3>
-              <p className="my-3 text-xs text-muted-foreground">
-                {row.values.configured === true ? 'Configurado' : 'Pendiente de conexión'}
-              </p>
-              <Button size="sm" variant="outline" onClick={() => setDetailId(row.id)}>
-                Detalle
-              </Button>
-            </Card>
+      <Panel title="Cabecera del lote">
+        <dl className="grid gap-4 text-xs sm:grid-cols-2">
+          {[
+            ['Identificador del lote', batch?.externalId],
+            ['Fecha de envío', batch ? formatWorkspaceDateTime(batch.sentAt) : null],
+            ['Recepción PIM', batch ? formatWorkspaceDateTime(batch.receivedAt) : null],
+            ['Origen', batch?.sourceSystem],
+            ['Correlación', batch?.correlationId],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="mt-1 break-all font-semibold">{value ?? '—'}</dd>
+            </div>
           ))}
+        </dl>
+        <p className="mt-4 text-xs text-muted-foreground">
+          El lote se recibió y validó estructuralmente. Aplicarlo al catálogo requiere las reglas de
+          sobrescritura aprobadas por CDR.
+        </p>
+      </Panel>
+      <Panel title="Registros recibidos">
+        <div className="overflow-auto">
+          <table className="w-full min-w-[620px] text-left text-xs">
+            <thead className="border-b bg-slate-50">
+              <tr>
+                {['Fila', 'Código artículo', 'Código proveedor', 'Modificación AX', 'Estado'].map(
+                  (label) => (
+                    <th key={label} className="p-3">
+                      {label}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {inbox?.records.map((row) => (
+                <tr key={row.id} className="border-b">
+                  <td className="p-3">{row.rowNumber}</td>
+                  <td className="p-3">{row.itemCode}</td>
+                  <td className="p-3">{row.supplierCode}</td>
+                  <td className="p-3">
+                    {row.sourceModifiedAt ? formatWorkspaceDateTime(row.sourceModifiedAt) : '—'}
+                  </td>
+                  <td className="p-3">Recibido · pendiente de aplicación</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!batch ? (
+          <p className="p-5 text-sm text-muted-foreground">Selecciona un lote recibido.</p>
+        ) : null}
+        {batch && inbox ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span>
+              {batch.recordCount} registros · página {inbox.page} de{' '}
+              {Math.max(1, Math.ceil(batch.recordCount / inbox.pageSize))}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || inbox.page <= 1}
+                onClick={() => void selectBatch(batch.externalId, inbox.page - 1)}
+              >
+                Anterior
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || inbox.page * inbox.pageSize >= batch.recordCount}
+                onClick={() => void selectBatch(batch.externalId, inbox.page + 1)}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-4 flex justify-end">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!batch || busy}
+            onClick={() => void downloadRecords()}
+          >
+            Descargar registros CSV
+          </Button>
         </div>
       </Panel>
-      {detail ? (
-        <WorkspaceDrawer title={String(detail.values.system)} onClose={() => setDetailId(null)}>
-          <p className="text-sm">
-            {detail.values.configured === true
-              ? 'La conexión está configurada.'
-              : 'La conexión está pendiente de configuración.'}
-          </p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Las ejecuciones y sus errores aparecerán en el monitor cuando el conector esté
-            habilitado.
-          </p>
-        </WorkspaceDrawer>
+      <Panel title="Errores por registro">
+        <p className="text-sm text-muted-foreground">
+          No existen errores de procesamiento registrados: los lotes todavía no se aplican al
+          catálogo. Los envíos que no cumplen el contrato se rechazan antes de ingresar al inbox.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled
+            title="No existen errores de procesamiento registrados"
+          >
+            Descargar errores
+          </Button>
+          <Button
+            size="sm"
+            disabled
+            title="Requiere reglas de aplicación y sobrescritura aprobadas por CDR"
+          >
+            Reprocesar advertencias
+          </Button>
+        </div>
+      </Panel>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      {error ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+        >
+          {error}
+        </div>
       ) : null}
+      {view === 'batches' ? (
+        <>
+          {batchDetail}
+          <Panel title="Seleccionar lote recibido">{recentTable}</Panel>
+          <Button asChild size="sm" variant="outline">
+            <a href="/integrations?view=monitor">Volver al monitor</a>
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Indicator
+              label="Lotes recibidos"
+              value={inbox?.totalBatches ?? 0}
+              note="Historial durable AX"
+            />
+            <Indicator
+              label="Registros recibidos"
+              value={inbox?.totalRecords ?? 0}
+              note="Conservados en el inbox"
+            />
+            <Indicator
+              label="Aplicación al catálogo"
+              value="Pendiente"
+              note="Espera reglas aprobadas por CDR"
+            />
+            <Indicator
+              label="Conectores externos"
+              value={components.length}
+              note={`${components.filter((row) => row.values.configured === true).length} configurados`}
+            />
+          </div>
+          <Panel title="Ejecuciones recientes">
+            {recentTable}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Se muestran los últimos 50 lotes recibidos; recepción no acredita aplicación al
+              catálogo.
+            </p>
+          </Panel>
+          <Panel title="Conectores">
+            <div className="grid gap-3 md:grid-cols-3">
+              {components.map((row) => (
+                <Card key={row.id} className="p-4">
+                  <Database className="mb-2 size-5 text-primary" />
+                  <h3 className="text-sm font-semibold">{String(row.values.system ?? row.id)}</h3>
+                  <p className="my-3 text-xs text-muted-foreground">
+                    {String(row.values.state ?? '')}
+                  </p>
+                  <Button size="sm" variant="outline" onClick={() => setDetailId(row.id)}>
+                    Detalle
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          </Panel>
+          {detailId === 'batch' ? (
+            <WorkspaceDrawer
+              title={`Lote ${batch?.externalId ?? ''}`}
+              onClose={() => setDetailId(null)}
+            >
+              {busy ? <p>Cargando lote…</p> : batchDetail}
+            </WorkspaceDrawer>
+          ) : null}
+          {detail ? (
+            <WorkspaceDrawer title={String(detail.values.system)} onClose={() => setDetailId(null)}>
+              <p className="text-sm">{String(detail.values.state ?? '')}</p>
+              {detail.id === 'ax' ? (
+                <>
+                  <p className="my-3 text-xs text-muted-foreground">
+                    {inbox?.totalBatches ?? 0} lotes recibidos · {inbox?.totalRecords ?? 0}{' '}
+                    registros. Aplicación y reintentos pendientes de aprobación funcional.
+                  </p>
+                  {recentTable}
+                </>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Sin ejecuciones productivas registradas.
+                </p>
+              )}
+            </WorkspaceDrawer>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

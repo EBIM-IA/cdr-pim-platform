@@ -1,4 +1,22 @@
 import {
+  categorySkuAssignmentExportSchema,
+  categorySkuAssignmentPreviewSchema,
+  confirmedCategorySkuAssignmentsSchema,
+  type PreviewCategorySkuAssignmentsInput,
+  type ConfirmCategorySkuAssignmentsInput,
+} from '@cdr/contracts';
+import {
+  createCatalogCategorySchema,
+  moveCatalogCategorySchema,
+  configureCategoryTemplateSchema,
+  addTemplateAttributeSchema,
+  templateInheritancePreviewSchema,
+  type CreateCatalogCategoryInput,
+  type MoveCatalogCategoryInput,
+  type ConfigureCategoryTemplateInput,
+  type AddTemplateAttributeInput,
+} from '@cdr/contracts';
+import {
   type AdminCatalogCategoryDto,
   type AdminTemplateAttributeDto,
   type AdminTemplateDto,
@@ -86,4 +104,51 @@ export function updateAdminTemplateAttribute(
     adminTemplateAttributeSchema,
     { method: 'PATCH', body: JSON.stringify(input) },
   );
+}
+
+export function createAdminCategory(input: CreateCatalogCategoryInput) {
+  return request('/categories', adminCatalogCategorySchema, {
+    method: 'POST',
+    body: JSON.stringify(createCatalogCategorySchema.parse(input)),
+  });
+}
+export function moveAdminCategory(id: string, input: MoveCatalogCategoryInput) {
+  return request(`/categories/${encodeURIComponent(id)}/parent`, adminCatalogCategorySchema, {
+    method: 'PATCH',
+    body: JSON.stringify(moveCatalogCategorySchema.parse(input)),
+  });
+}
+export function configureAdminCategoryTemplate(id: string, input: ConfigureCategoryTemplateInput) {
+  return request(`/categories/${encodeURIComponent(id)}/template`, adminTemplateSchema, {
+    method: 'POST',
+    body: JSON.stringify(configureCategoryTemplateSchema.parse(input)),
+  });
+}
+export function addAdminTemplateAttribute(id: string, input: AddTemplateAttributeInput) {
+  return request(`/templates/${encodeURIComponent(id)}/attributes`, adminTemplateSchema, {
+    method: 'POST',
+    body: JSON.stringify(addTemplateAttributeSchema.parse(input)),
+  });
+}
+export function previewAdminTemplateInheritance(id: string, unifiedCode: string) {
+  return request(
+    `/templates/${encodeURIComponent(id)}/inheritance-preview?${new URLSearchParams({ unifiedCode })}`,
+    templateInheritancePreviewSchema,
+  );
+}
+
+export function exportAdminCategoryAssignments() {
+  return request('/category-assignments', categorySkuAssignmentExportSchema);
+}
+export function previewAdminCategoryAssignments(input: PreviewCategorySkuAssignmentsInput) {
+  return request('/category-assignments/preview', categorySkuAssignmentPreviewSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+export function confirmAdminCategoryAssignments(input: ConfirmCategorySkuAssignmentsInput) {
+  return request('/category-assignments/confirm', confirmedCategorySkuAssignmentsSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }

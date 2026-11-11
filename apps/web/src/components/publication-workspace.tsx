@@ -8,6 +8,7 @@ import type {
   CatalogWorkbookProductDto,
   CatalogWorkbookResultDto,
   ProductAttributeSheetDto,
+  ProductExperienceDto,
   WorkspaceDto,
 } from '@cdr/contracts';
 import { CheckCircle2, Download, ImageIcon, Search } from 'lucide-react';
@@ -28,6 +29,7 @@ import {
   fetchCatalogWorkbook,
   fetchProductAttributeSheet,
 } from '@/lib/dynamic-catalog-api';
+import { fetchProductExperience } from '@/lib/product-experience-api';
 import { listProductAssets } from '@/lib/product-assets-api';
 import { downloadXlsx } from '@/lib/tabular-export';
 
@@ -416,6 +418,25 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
                       : `${String(value)}${attribute.unit ? ` ${attribute.unit}` : ''}`}
                   </Row>
                 ))}
+                <details className="mt-3 rounded border p-3">
+                  <summary className="cursor-pointer text-xs font-semibold">
+                    Ejemplo JSON de los datos seleccionados
+                  </summary>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px]">
+                    {JSON.stringify(
+                      {
+                        codigoArticulo: sheet.product.sku,
+                        atributos: preview.map(({ attribute, value }) => ({
+                          clave: attribute.key,
+                          valor: value,
+                          unidad: attribute.unit,
+                        })),
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
               </div>
             ) : (
               <p className="mt-3 text-xs text-muted-foreground">
@@ -467,19 +488,24 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
   const [sheet, setSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [mediaCount, setMediaCount] = useState<number | null>(null);
   const [error, setError] = useState(false);
+  const [experience, setExperience] = useState<ProductExperienceDto | null>(null);
   useEffect(() => {
     setSheet(null);
     setMediaCount(null);
+    setExperience(null);
     setError(false);
     if (!product) return;
     const controller = new AbortController();
     void Promise.all([
       fetchProductAttributeSheet(product.id, controller.signal),
       listProductAssets({ productId: product.id }, controller.signal),
+      fetchProductExperience(product.id, controller.signal),
     ])
-      .then(([detail, assets]) => {
+      .then(([detail, assets, names]) => {
         setSheet(detail);
+        if (controller.signal.aborted) return;
         setMediaCount(assets.length);
+        setExperience(names);
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -515,7 +541,25 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
           : 'Cargando…'}
       </Row>
       <Row label="Medios">{mediaCount === null ? 'Cargando…' : `${mediaCount} registrados`}</Row>
-      <Row label="Descripción comercial">Sin aprobación registrada</Row>
+      <Row label="Descripción comercial">
+        {experience
+          ? `${experience.variants.filter((variant) => variant.descripcionEcommerce).length} de ${experience.variants.length} variantes con contenido disponible`
+          : 'Cargando…'}
+      </Row>
+      {experience ? (
+        <details className="mt-3 rounded border p-3">
+          <summary className="cursor-pointer text-xs font-semibold">
+            Vista previa JSON por variante
+          </summary>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Un registro por variante, con su descripción e-commerce disponible. El acceso del
+            consumidor externo está pendiente de configuración.
+          </p>
+          <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all text-[11px]">
+            {JSON.stringify(experience.variants, null, 2)}
+          </pre>
+        </details>
+      ) : null}
       <Row label="Precio y stock">Gestionados en ERP</Row>
       {error ? (
         <p role="alert" className="mt-2 text-xs text-red-700">

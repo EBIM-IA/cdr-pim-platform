@@ -1,3 +1,15 @@
+import { unifiedCodeRequests } from '../../modules/equivalences/infrastructure/persistence/unified-code-requests.tables';
+import { catalogParameters } from '../../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
+import {
+  reportPreferences,
+  reportBaselines,
+  reportBaselineProducts,
+  reportClosedPeriods,
+} from '../../modules/workspaces/infrastructure/report-settings.tables';
+import { searchEvents } from '../../modules/catalog-schema/infrastructure/persistence/search-telemetry.tables';
+import { productAttributeDrafts } from '../../modules/catalog-schema/infrastructure/persistence/product-drafts.tables';
+import { qualityReviewItems } from '../../modules/quality/infrastructure/persistence/quality-governance.tables';
+import { ecommerceDescriptions } from '../../modules/catalog-schema/infrastructure/persistence/ecommerce-descriptions.tables';
 import { productNameSettings } from '../../modules/catalog-schema/infrastructure/persistence/product-name-settings.tables';
 import {
   fileCleanupCandidates,
@@ -53,6 +65,16 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  unifiedCodeRequests,
+  catalogParameters,
+  reportPreferences,
+  reportBaselines,
+  reportBaselineProducts,
+  reportClosedPeriods,
+  searchEvents,
+  productAttributeDrafts,
+  qualityReviewItems,
+  ecommerceDescriptions,
   productNameSettings,
   fileCleanupCandidates,
   fileInventoryCursors,
@@ -86,6 +108,15 @@ export const schema = {
 };
 
 export {
+  unifiedCodeRequests,
+  catalogParameters,
+  reportPreferences,
+  reportBaselines,
+  reportBaselineProducts,
+  reportClosedPeriods,
+  searchEvents,
+  productAttributeDrafts,
+  qualityReviewItems,
   productNameSettings,
   fileCleanupCandidates,
   fileInventoryCursors,

@@ -310,7 +310,7 @@ describe('catálogo secundario aprobado', () => {
   });
 
   it('combina el autofiltro de Aplicaciones con la vista y exporta solo las filas visibles', async () => {
-    render(<ApplicationsWorkspace canWrite={false} />);
+    render(<ApplicationsWorkspace canWrite />);
 
     await screen.findAllByText('UNI-6205');
     fireEvent.click(screen.getByRole('button', { name: /^Marca Vehículo: filtrar u ordenar/u }));
@@ -321,7 +321,11 @@ describe('catálogo secundario aprobado', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('1 de 2 filas visibles');
     expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
-    expect(screen.getAllByText('Toyota').some((element) => element.tagName === 'TD')).toBe(true);
-    expect(screen.queryAllByText('Ford').some((element) => element.tagName === 'TD')).toBe(false);
+    expect(screen.getAllByText('Toyota').some((element) => !!element.closest('tbody td'))).toBe(
+      true,
+    );
+    expect(screen.queryAllByText('Ford').some((element) => !!element.closest('tbody td'))).toBe(
+      false,
+    );
   });
 });

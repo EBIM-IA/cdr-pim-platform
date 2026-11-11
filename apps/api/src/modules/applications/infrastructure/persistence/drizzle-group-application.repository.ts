@@ -92,6 +92,8 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
 
   async list(criteria: ApplicationCriteria): Promise<GroupApplication[]> {
     const conditions = [];
+    if (criteria.verifiedOnly)
+      conditions.push(eq(groupApplications.verificationStatus, 'verified'));
     if (!criteria.includeInactive) conditions.push(eq(groupApplications.active, true));
     if (criteria.unifiedCode) {
       conditions.push(eq(equivalenceGroups.code, criteria.unifiedCode.trim().toUpperCase()));
@@ -122,6 +124,7 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
 
   async listForProducts(
     productIds: readonly Uuid[],
+    verifiedOnly = false,
   ): Promise<ReadonlyMap<Uuid, readonly GroupApplication[]>> {
     const ids = [...new Set(productIds)];
     if (!ids.length) return new Map();
@@ -135,7 +138,11 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
       .innerJoin(equivalenceGroups, eq(equivalenceGroupMembers.groupId, equivalenceGroups.id))
       .innerJoin(groupApplications, eq(groupApplications.groupId, equivalenceGroups.id))
       .where(
-        and(inArray(equivalenceGroupMembers.productId, ids), eq(groupApplications.active, true)),
+        and(
+          inArray(equivalenceGroupMembers.productId, ids),
+          eq(groupApplications.active, true),
+          verifiedOnly ? eq(groupApplications.verificationStatus, 'verified') : undefined,
+        ),
       )
       .orderBy(groupApplications.createdAt, groupApplications.id);
     const result = new Map<Uuid, GroupApplication[]>();
@@ -261,6 +268,7 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
             engine: snapshot.engine,
             notes: snapshot.notes,
             active: snapshot.active,
+            verificationStatus: snapshot.verificationStatus ?? 'pending',
             source: 'import',
             importBatchId: snapshot.importBatchId,
             createdAt: snapshot.createdAt,
@@ -283,6 +291,7 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
               engine: snapshot.engine,
               notes: snapshot.notes,
               active: snapshot.active,
+              verificationStatus: snapshot.verificationStatus ?? 'pending',
               source: 'import',
               importBatchId: snapshot.importBatchId,
               updatedAt: snapshot.updatedAt,
@@ -329,6 +338,7 @@ export class DrizzleGroupApplicationRepository implements GroupApplicationReposi
       engine: row.engine,
       notes: row.notes,
       active: row.active,
+      verificationStatus: row.verificationStatus as 'pending' | 'verified',
       source: row.source as GroupApplicationSnapshot['source'],
       importBatchId: row.importBatchId as Uuid | null,
       createdAt: row.createdAt,
@@ -365,6 +375,7 @@ function toMutableRow(snapshot: GroupApplicationSnapshot) {
     engine: snapshot.engine,
     notes: snapshot.notes,
     active: snapshot.active,
+    verificationStatus: snapshot.verificationStatus ?? 'pending',
     updatedAt: snapshot.updatedAt,
   };
 }
@@ -390,6 +401,7 @@ function applicationChanges(
     'engine',
     'notes',
     'active',
+    'verificationStatus',
   ] as const;
   return Object.fromEntries(
     fields

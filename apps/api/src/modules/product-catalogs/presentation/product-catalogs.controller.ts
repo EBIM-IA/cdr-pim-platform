@@ -171,9 +171,10 @@ export class ProductCatalogsController {
     @Param('id') id: string,
     @Query('disposition', new ZodValidationPipe(dispositionSchema))
     disposition: 'inline' | 'attachment',
+    @CurrentActor() actor: AuthenticatedActor,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
-    const result = await this.downloading.execute(id);
+    const result = await this.downloading.execute(id, actor);
     return streamPdf(response, result.catalog.fileName, result.content, disposition);
   }
   @Delete(':id')

@@ -15,6 +15,8 @@ import {
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { CategorySkuAssignmentsDrawer } from '@/components/category-sku-assignments-drawer';
+import { CatalogDesignDrawer } from '@/components/catalog-design-drawer';
 import { PageHeader } from '@/components/page-header';
 import { CategoryTreePanel } from '@/components/category-tree-panel';
 import { ScreenGuide } from '@/components/screen-guide';
@@ -145,7 +147,12 @@ export function filterCategoryTreeRows(
   return treeRows.filter((row) => visibleIds.has(row.category.id));
 }
 
-export function CategoriesAdminWorkspace() {
+export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: boolean } = {}) {
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [design, setDesign] = useState<{
+    operation: 'create' | 'move' | 'template';
+    category: AdminCatalogCategoryDto | null;
+  } | null>(null);
   const [categories, setCategories] = useState<AdminCatalogCategoryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -313,6 +320,16 @@ export function CategoriesAdminWorkspace() {
         description="Jerarquía del ERP y relación de cada categoría final con sus variantes de plantilla PIM."
         actions={
           <>
+            {canManage ? (
+              <Button variant="outline" onClick={() => setAssignmentsOpen(true)}>
+                Categorías de SKU
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button onClick={() => setDesign({ operation: 'create', category: null })}>
+                Nueva categoría
+              </Button>
+            ) : null}
             <Button
               disabled
               title="La importación requiere el contrato aprobado de sincronización ERP"
@@ -333,7 +350,7 @@ export function CategoriesAdminWorkspace() {
           'Exporta el árbol vigente para validarlo con el cliente.',
         ]}
         dataSource="Las categorías, plantillas y asignaciones provienen de la API administrativa del catálogo; cada actualización usa control de concurrencia."
-        limitation="La importación, creación y reorganización del árbol permanecen bloqueadas hasta recibir los códigos y la sincronización definitiva del ERP."
+        limitation="La importación del árbol desde ERP requiere su contrato definitivo. Las categorías creadas aquí se administran en PIM."
       />
 
       <section
@@ -468,6 +485,9 @@ export function CategoriesAdminWorkspace() {
           searching={Boolean(query.trim())}
           savingId={savingId}
           onEdit={beginEdit}
+          onDesign={
+            canManage ? (category, operation) => setDesign({ category, operation }) : undefined
+          }
           onInspectCategory={(categoryId) => void inspectCategory(categoryId)}
           onSetActive={(category, active) => void setActive(category, active)}
         />
@@ -725,6 +745,19 @@ export function CategoriesAdminWorkspace() {
           </div>
         </Card>
       )}
+      {assignmentsOpen ? (
+        <CategorySkuAssignmentsDrawer onClose={() => setAssignmentsOpen(false)} onSaved={load} />
+      ) : null}
+      {design ? (
+        <CatalogDesignDrawer
+          categories={categories}
+          templates={templates}
+          category={design.category}
+          operation={design.operation}
+          onClose={() => setDesign(null)}
+          onSaved={load}
+        />
+      ) : null}
       <details className="mt-4 rounded-lg border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
         <summary className="cursor-pointer text-sm text-cdr-ink">
           Cómo llega la categoría desde el ERP

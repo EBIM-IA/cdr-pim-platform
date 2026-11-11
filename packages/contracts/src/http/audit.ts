@@ -28,6 +28,7 @@ export const auditChangeSchema = z.object({
   source: z.string().min(1),
   correlationId: z.string().min(1),
   occurredAt: z.string().datetime(),
+  reason: z.string().nullable().optional(),
 });
 export type AuditChangeDto = z.infer<typeof auditChangeSchema>;
 

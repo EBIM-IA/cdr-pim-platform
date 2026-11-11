@@ -73,11 +73,15 @@ export async function uploadProductAsset(input: {
   readonly productId: string;
   readonly type: ProductAssetType;
   readonly file: File;
+  readonly position?: number;
+  readonly replacesAssetId?: string;
 }): Promise<ProductAssetDto> {
   const body = new FormData();
   body.set('productId', input.productId);
   body.set('type', input.type);
   body.set('file', input.file);
+  if (input.position !== undefined) body.set('position', String(input.position));
+  if (input.replacesAssetId) body.set('replacesAssetId', input.replacesAssetId);
   const response = await authenticatedBffFetch('/api/operations/assets', {
     method: 'POST',
     headers: { accept: 'application/json' },
@@ -111,4 +115,17 @@ export async function deleteProductAsset(id: string): Promise<void> {
 
 export function productAssetDownloadUrl(id: string): string {
   return `/api/operations/assets/${encodeURIComponent(id)}/download`;
+}
+
+export async function reorderProductAssets(
+  productId: string,
+  type: 'FOTO' | 'PLANO',
+  assetIds: string[],
+): Promise<ProductAssetDto[]> {
+  const response = await authenticatedBffFetch('/api/operations/assets/order', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ productId, type, assetIds }),
+  });
+  return parseResponse(response, productAssetListSchema);
 }

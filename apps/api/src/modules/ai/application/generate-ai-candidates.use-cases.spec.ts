@@ -449,7 +449,7 @@ function productAsset(mimeType: string, type: 'FT' | 'PLANO', size = 8): Product
     size,
     checksum: createHash('sha256').update(content).digest('base64'),
     storageVersionId: null,
-    position: null,
+    position: type === 'PLANO' ? 1 : null,
     source: 'manual',
     uploadedBy: actor.id,
     uploadedAt: now,

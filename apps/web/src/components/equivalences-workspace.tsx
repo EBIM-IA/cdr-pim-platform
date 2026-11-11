@@ -1,5 +1,6 @@
 'use client';
 
+import { UnifiedCodeRequestsDrawer } from '@/components/unified-code-requests-drawer';
 import type {
   CatalogCategorySummaryDto,
   CatalogWorkbookColumnDto,
@@ -144,13 +145,16 @@ const errorMessage = (failure: unknown) =>
 
 export function EquivalencesWorkspace({
   canWrite,
+  canManageRequests = false,
   canViewCompleteness = false,
   canViewProductStatus = true,
 }: {
   canWrite: boolean;
+  canManageRequests?: boolean;
   canViewCompleteness?: boolean;
   canViewProductStatus?: boolean;
 }) {
+  const [requestsOpen, setRequestsOpen] = useState(false);
   const [view, setView] = useState<View>('groups');
   const [group, setGroup] = useState('');
   const [sku, setSku] = useState('');
@@ -747,6 +751,13 @@ export function EquivalencesWorkspace({
           ) : undefined
         }
       />
+      {requestsOpen ? (
+        <UnifiedCodeRequestsDrawer
+          products={catalog}
+          initialSku={sku}
+          onClose={() => setRequestsOpen(false)}
+        />
+      ) : null}
       <ScreenGuide
         objective="Consulta las asignaciones que envía AX y mantiene homólogos y OEM por código unificador."
         actions={[
@@ -1036,6 +1047,11 @@ export function EquivalencesWorkspace({
               role="toolbar"
               aria-label={`Acciones de ${view === 'groups' ? 'Códigos unificadores' : kind === 'homologs' ? 'Homólogos' : 'Códigos OEM'}`}
             >
+              {view === 'groups' && canManageRequests ? (
+                <Button variant="outline" onClick={() => setRequestsOpen(true)}>
+                  Solicitudes a AX
+                </Button>
+              ) : null}
               {view !== 'groups' && canWrite ? (
                 <Button
                   disabled={!canWrite || saving || !!activeDraft}
@@ -1081,18 +1097,20 @@ export function EquivalencesWorkspace({
                   Importar
                 </Button>
               ) : null}
-              <Button
-                variant="outline"
-                disabled={
-                  view === 'groups'
-                    ? !assignmentTable.visibleRows.length
-                    : !relationTable.visibleRows.length
-                }
-                onClick={() => exportTable()}
-              >
-                <Download />
-                Exportar Excel
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="outline"
+                  disabled={
+                    view === 'groups'
+                      ? !assignmentTable.visibleRows.length
+                      : !relationTable.visibleRows.length
+                  }
+                  onClick={() => exportTable()}
+                >
+                  <Download />
+                  Exportar Excel
+                </Button>
+              ) : null}
               {canWrite ? (
                 <Button variant="ghost" onClick={() => exportTable(true)}>
                   Plantilla

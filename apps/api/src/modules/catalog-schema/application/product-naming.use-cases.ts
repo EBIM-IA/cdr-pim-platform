@@ -1,9 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { SEARCH_TELEMETRY, type SearchTelemetryPort } from '../domain/ports/search-telemetry.port';
+import {
+  ECOMMERCE_DESCRIPTION,
+  type EcommerceDescriptionPort,
+  type EcommerceDescription,
+} from '../domain/ports/ecommerce-description.port';
+import {
+  ecommerceFacts,
+  ecommerceFingerprint,
+  ecommerceVariantKey,
+} from '../domain/entities/ecommerce-facts';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type {
   ProductExperienceDto,
   ProductNameConfig,
   ProductNameSettingsDto,
   ProductVariantSearchDto,
+  ProductSalesVariantDto,
 } from '@cdr/contracts';
 import {
   type Clock,
@@ -58,6 +70,8 @@ export class ProductNamingUseCases {
     private readonly applications: GroupApplicationRepositoryPort,
     @Inject(PRODUCT_REPOSITORY) private readonly products: ProductRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(ECOMMERCE_DESCRIPTION) private readonly descriptions: EcommerceDescriptionPort,
+    @Optional() @Inject(SEARCH_TELEMETRY) private readonly telemetry?: SearchTelemetryPort,
   ) {}
 
   getSettings(): Promise<ProductNameSettingsDto> {
@@ -100,7 +114,11 @@ export class ProductNamingUseCases {
       this.products.findById(id),
       this.catalog.getProductSheet(id, roles),
       this.settings.get(),
-      this.applications.list({ productId: id, includeInactive: false }),
+      this.applications.list({
+        productId: id,
+        includeInactive: false,
+        verifiedOnly: !roles.includes('ADMINISTRADOR'),
+      }),
       this.catalog.listActiveCategories(roles),
       // A draft's field picker includes the visible union of templates, as the formula is global.
       draft ? this.catalog.listWorkbook({ roles, page: 1, pageSize: 1, filters: [] }) : undefined,
@@ -111,7 +129,13 @@ export class ProductNamingUseCases {
     const config = draft ?? settings.config;
     return {
       nombreGeneral: generalProductName(ctx, config),
-      variants: productVariants(ctx, config),
+      variants: this.withDescriptions(
+        productVariants(ctx, config),
+        await this.descriptions.getMany([id]),
+        ctx,
+        columns,
+        sheet?.schema.category.name ?? '',
+      ),
       fields: namingFields(fieldCatalog?.columns ?? columns),
     };
   }
@@ -131,10 +155,10 @@ export class ProductNamingUseCases {
     ]);
     const extraExact = exact && !result.items.some((item) => item.id === exact.id) ? exact : null;
     const [applications, exactSheet] = await Promise.all([
-      this.applications.listForProducts([
-        ...result.items.map((item) => item.id),
-        ...(extraExact ? [extraExact.id] : []),
-      ]),
+      this.applications.listForProducts(
+        [...result.items.map((item) => item.id), ...(extraExact ? [extraExact.id] : [])],
+        !roles.includes('ADMINISTRADOR'),
+      ),
       extraExact ? this.catalog.getProductSheet(extraExact.id, roles) : null,
     ]);
     const contexts = result.items.map((item) =>
@@ -149,8 +173,25 @@ export class ProductNamingUseCases {
       query.q,
       contexts,
     );
+    const selected = variants.slice(0, query.limit);
+    const descriptions = await this.descriptions.getMany(
+      selected.map((variant) => variant.productId),
+    );
+    const items = selected.map((variant) => {
+      const ctx = contexts.find((ctx) => ctx.id === variant.productId)!;
+      const item = result.items.find((item) => item.id === variant.productId);
+      const columns = item ? result.columns : (exactSheet?.schema.attributes ?? []);
+      return this.withDescriptions(
+        [variant],
+        descriptions,
+        ctx,
+        columns,
+        item?.category?.name ?? exactSheet?.schema.category.name ?? '',
+      )[0]!;
+    });
+    await this.telemetry?.record(query.q, items.length, 'variants');
     return {
-      items: variants.slice(0, query.limit),
+      items,
       totalProducts: result.total,
       categories: [
         ...new Map(
@@ -165,6 +206,31 @@ export class ProductNamingUseCases {
       ),
       truncated: result.total > result.items.length || variants.length > query.limit,
     };
+  }
+  private withDescriptions(
+    variants: ProductSalesVariantDto[],
+    descriptions: EcommerceDescription[],
+    ctx: ProductNamingContext,
+    columns: readonly TemplateAttribute[],
+    category: string,
+  ): ProductSalesVariantDto[] {
+    return variants.map((variant) => {
+      const record = descriptions.find(
+        (record) =>
+          record.productId === variant.productId &&
+          record.variantKey === ecommerceVariantKey(variant),
+      );
+      const fingerprint = ecommerceFingerprint(
+        ecommerceFacts(variant, columns, ctx.attributes, category, record?.sourceKeys),
+      );
+      return {
+        ...variant,
+        descripcionEcommerce:
+          record?.status === 'approved' && record.fingerprint === fingerprint
+            ? { titulo: record.titulo, descripcion: record.descripcion }
+            : null,
+      };
+    });
   }
 }
 

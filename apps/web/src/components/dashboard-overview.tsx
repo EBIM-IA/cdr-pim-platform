@@ -261,8 +261,8 @@ export function DashboardOverview() {
             />
             <MetricCard
               label="Duplicados"
-              value="—"
-              note="motor de candidatos pendiente"
+              value={formatNumber(metric(reports.workspace, 'duplicates'))}
+              note="alertas abiertas de revisión"
               icon={Copy}
               href="/quality?view=duplicates"
             />
@@ -355,15 +355,30 @@ export function DashboardOverview() {
             <div className="mt-[18px] grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               {(
                 [
-                  ['Sin imagen', '—', 'text-red-500', '/documents'],
-                  ['Sin ficha técnica', '—', 'text-amber-500', '/documents'],
+                  [
+                    'Sin imagen',
+                    formatNumber(metric(reports.workspace, 'without-image')),
+                    'text-red-500',
+                    '/documents',
+                  ],
+                  [
+                    'Sin ficha técnica',
+                    formatNumber(metric(reports.workspace, 'without-technical-sheet')),
+                    'text-amber-500',
+                    '/documents',
+                  ],
                   [
                     'Obligatorios faltantes',
                     formatNumber(affected),
                     'text-primary',
                     '/quality?view=quality',
                   ],
-                  ['Con conflicto de fuente', '—', 'text-violet-500', '/quality?view=sources'],
+                  [
+                    'Con conflicto de fuente',
+                    formatNumber(metric(reports.workspace, 'source-conflicts')),
+                    'text-violet-500',
+                    '/quality?view=conflict',
+                  ],
                   [
                     'Listos para publicación',
                     formatNumber(publishable),

@@ -1,4 +1,25 @@
+import { CatalogParametersController } from './presentation/catalog-parameters.controller';
+import { CatalogParametersUseCase } from './application/catalog-parameters.use-case';
+import { CATALOG_PARAMETERS } from './domain/ports/catalog-parameters.port';
+import { DrizzleCatalogParameters } from './infrastructure/persistence/drizzle-catalog-parameters';
+import { DUPLICATE_CANDIDATES } from '../catalog/domain/ports/duplicate-candidates.port';
+import { DrizzleDuplicateCandidates } from './infrastructure/persistence/drizzle-duplicate-candidates';
+import { SEARCH_TELEMETRY } from './domain/ports/search-telemetry.port';
+import { PostgresSearchTelemetryAdapter } from './infrastructure/persistence/postgres-search-telemetry.adapter';
+import { ProductDraftUseCases } from './application/product-draft.use-cases';
+import { ProductDraftController } from './presentation/product-draft.controller';
+import { PRODUCT_DRAFT } from './domain/ports/product-draft.port';
+import { DrizzleProductDraft } from './infrastructure/persistence/drizzle-product-draft';
+import { CatalogDesignUseCases } from './application/catalog-design.use-cases';
+import { CatalogDesignController } from './presentation/catalog-design.controller';
+import { CATALOG_DESIGN_REPOSITORY } from './domain/ports/catalog-design.repository.port';
+import { DrizzleCatalogDesignRepository } from './infrastructure/persistence/drizzle-catalog-design.repository';
+import { QUALITY_GOVERNANCE } from '../quality/domain/ports/quality-governance.port';
+import { DrizzleQualityGovernanceRepository } from './infrastructure/persistence/drizzle-quality-governance.repository';
+import { ECOMMERCE_DESCRIPTION } from './domain/ports/ecommerce-description.port';
+import { DrizzleEcommerceDescription } from './infrastructure/persistence/drizzle-ecommerce-description';
 import { Module } from '@nestjs/common';
+import { PRODUCT_EXPERIENCE } from './domain/ports/product-experience.port';
 import { ApplicationsModule } from '../applications/applications.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { ProductNamingUseCases } from './application/product-naming.use-cases';
@@ -34,9 +55,27 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
 
 @Module({
   imports: [ApplicationsModule, CatalogModule],
-  controllers: [DynamicCatalogController, CatalogAdministrationController, ProductNamingController],
+  controllers: [
+    CatalogParametersController,
+    ProductDraftController,
+    CatalogDesignController,
+    DynamicCatalogController,
+    CatalogAdministrationController,
+    ProductNamingController,
+  ],
   providers: [
+    CatalogParametersUseCase,
+    { provide: CATALOG_PARAMETERS, useClass: DrizzleCatalogParameters },
+    { provide: DUPLICATE_CANDIDATES, useClass: DrizzleDuplicateCandidates },
+    { provide: SEARCH_TELEMETRY, useClass: PostgresSearchTelemetryAdapter },
+    ProductDraftUseCases,
+    { provide: PRODUCT_DRAFT, useClass: DrizzleProductDraft },
+    CatalogDesignUseCases,
+    { provide: CATALOG_DESIGN_REPOSITORY, useClass: DrizzleCatalogDesignRepository },
+    { provide: QUALITY_GOVERNANCE, useClass: DrizzleQualityGovernanceRepository },
+    { provide: ECOMMERCE_DESCRIPTION, useClass: DrizzleEcommerceDescription },
     ProductNamingUseCases,
+    { provide: PRODUCT_EXPERIENCE, useExisting: ProductNamingUseCases },
     { provide: PRODUCT_NAME_SETTINGS, useClass: DrizzleProductNameSettings },
     { provide: DYNAMIC_CATALOG_REPOSITORY, useClass: DrizzleDynamicCatalogRepository },
     {
@@ -62,6 +101,15 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     UpdateCatalogCategoryUseCase,
     UpdateTemplateAttributeUseCase,
   ],
-  exports: [DYNAMIC_CATALOG_REPOSITORY, CATEGORY_ATTRIBUTE_IMPORT],
+  exports: [
+    CATALOG_ADMINISTRATION_REPOSITORY,
+    DUPLICATE_CANDIDATES,
+    SEARCH_TELEMETRY,
+    QUALITY_GOVERNANCE,
+    DYNAMIC_CATALOG_REPOSITORY,
+    CATEGORY_ATTRIBUTE_IMPORT,
+    PRODUCT_EXPERIENCE,
+    ECOMMERCE_DESCRIPTION,
+  ],
 })
 export class CatalogSchemaModule {}

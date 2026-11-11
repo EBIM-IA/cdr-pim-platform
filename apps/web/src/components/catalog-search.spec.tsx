@@ -81,9 +81,9 @@ async function search(query = '6205', onSearch = vi.fn(), showDescription = true
 
 describe('CatalogSearch', () => {
   it.each([
-    { steps: 1, filter: undefined, query: '6205' },
-    { steps: 2, filter: { categoryId: '22222222-2222-4222-8222-222222222222' }, query: '6205' },
-    { steps: 3, filter: { brand: 'SKF' }, query: '6205' },
+    { steps: 2, filter: undefined, query: '6205' },
+    { steps: 3, filter: { categoryId: '22222222-2222-4222-8222-222222222222' }, query: '6205' },
+    { steps: 4, filter: { brand: 'SKF' }, query: '6205' },
   ])(
     'selects query/category/brand/SKU suggestion with $steps arrow presses',
     async ({ steps, filter, query }) => {
@@ -106,8 +106,8 @@ describe('CatalogSearch', () => {
     fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(input).toHaveAttribute('aria-activedescendant', options.at(-1)!.id);
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(push).toHaveBeenCalledWith(workbook().items[0]!.ficha);
-    expect(onSearch).not.toHaveBeenCalled();
+    expect(onSearch).toHaveBeenCalledWith('6205', { brand: 'SKF' });
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('shows friendly names and the selected vehicle to sales profiles', async () => {

@@ -19,11 +19,13 @@ export function CategoryTreePanel({
   onEdit,
   onInspectCategory,
   onSetActive,
+  onDesign,
 }: {
   rows: readonly CategoryTreeRow[];
   templatesForCategory: (id: string) => AdminTemplateDto[];
   searching: boolean;
   savingId: string | null;
+  onDesign?: (category: AdminCatalogCategoryDto, operation: 'move' | 'template') => void;
   onEdit: (category: AdminCatalogCategoryDto) => void;
   onInspectCategory?: (id: string) => void;
   onSetActive: (category: AdminCatalogCategoryDto, active: boolean) => void;
@@ -315,6 +317,24 @@ export function CategoryTreePanel({
             </p>
           </div>
           <footer className="flex flex-wrap gap-2 border-t p-4">
+            {onDesign ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onDesign(selected.category, 'move')}
+              >
+                Cambiar padre
+              </Button>
+            ) : null}
+            {onDesign && selected.leaf ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onDesign(selected.category, 'template')}
+              >
+                Configurar plantilla
+              </Button>
+            ) : null}
             <Button size="sm" variant="outline" onClick={() => onEdit(selected.category)}>
               <Pencil className="size-3.5" />
               Editar categoría

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   processProductAssetZip: vi.fn(),
   deleteProductAsset: vi.fn(),
   exportXlsx: vi.fn(),
+  downloadTechnicalSheetsZip: vi.fn(),
   listProductAssetsBatch: vi.fn(),
   fetchCatalogWorkbook: vi.fn(),
 }));
@@ -35,6 +36,10 @@ vi.mock('@/lib/catalog-api', () => ({ fetchProduct: mocks.fetchProduct }));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchCatalogCategories: mocks.fetchCatalogCategories,
   fetchCatalogWorkbook: mocks.fetchCatalogWorkbook,
+}));
+vi.mock('@/lib/technical-sheet-export', () => ({
+  downloadTechnicalSheetsZip: mocks.downloadTechnicalSheetsZip,
+  MAX_TECHNICAL_SHEETS_PER_ZIP: 250,
 }));
 vi.mock('@/lib/tabular-export', () => ({ downloadXlsx: mocks.exportXlsx }));
 
@@ -109,6 +114,7 @@ const allCatalog = () => ({
 });
 
 beforeEach(() => {
+  mocks.downloadTechnicalSheetsZip.mockResolvedValue(undefined);
   vi.resetAllMocks();
   window.history.replaceState({}, '', '/documents');
   mocks.fetchDocumentsCatalog.mockResolvedValue(allCatalog());
@@ -136,6 +142,75 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('DocumentsWorkspace', () => {
+  it('downloads one permission-filtered PDF per filtered SKU for a read-only catalog user', async () => {
+    render(<DocumentsWorkspace canWrite={false} />);
+    await screen.findByText(asset.filename);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar SKU' }), {
+      target: { value: product.sku },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }));
+    await waitFor(() =>
+      expect(mocks.downloadTechnicalSheetsZip).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: product.id })],
+        expect.any(Object),
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          onProgress: expect.any(Function),
+        }),
+      ),
+    );
+    await screen.findByText(/1 fichas técnicas descargadas/u);
+  });
+  it('reports a ZIP generation failure without claiming that sheets were downloaded', async () => {
+    mocks.downloadTechnicalSheetsZip.mockRejectedValue(
+      new Error('No se pudo generar la ficha del SKU 6205'),
+    );
+    render(<DocumentsWorkspace canWrite />);
+    await screen.findByText(asset.filename);
+    fireEvent.click(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }));
+    await screen.findByText('No se pudo generar la ficha del SKU 6205');
+    expect(screen.queryByText(/fichas técnicas descargadas/u)).not.toBeInTheDocument();
+  });
+  it('reorders column headings, filters and exported values together and restores the saved order', async () => {
+    window.localStorage.clear();
+    const view = render(<DocumentsWorkspace canWrite />);
+    await screen.findByText(asset.filename);
+    const headers = () =>
+      [...view.container.querySelectorAll('thead tr:first-child th')].map(
+        (cell) => (cell as HTMLElement).dataset.columnKey,
+      );
+    const before = headers();
+    const from = before.indexOf('brand');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Mover columna Marca de artículo a la izquierda' }),
+    );
+    const after = headers();
+    expect(after[from - 1]).toBe('brand');
+    expect(after[0]).toBe('sku');
+    const row = rowFor(product.sku);
+    expect(row.children[from - 1]).toHaveTextContent(product.brand ?? '');
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    const exported = mocks.exportXlsx.mock.calls[0]![0];
+    const exportIndex = after.filter((key) => key !== 'image').indexOf('brand');
+    expect(exported.headers[exportIndex]).toBe('Marca de artículo');
+    expect(exported.rows[0][exportIndex]).toBe(product.brand);
+    view.unmount();
+    const restored = render(<DocumentsWorkspace canWrite={false} />);
+    await screen.findByText(asset.filename);
+    expect(
+      [...restored.container.querySelectorAll('thead tr:first-child th')].map(
+        (cell) => (cell as HTMLElement).dataset.columnKey,
+      ),
+    ).toEqual(after);
+    fireEvent.click(screen.getByRole('button', { name: 'Restablecer orden' }));
+    expect(
+      [...restored.container.querySelectorAll('thead tr:first-child th')].map(
+        (cell) => (cell as HTMLElement).dataset.columnKey,
+      ),
+    ).toEqual(before);
+    window.localStorage.clear();
+  });
+
   it('shows required, optional, present and non-applicable slots from real template metadata', async () => {
     render(<DocumentsWorkspace canWrite />);
     expect(await screen.findByText(asset.filename)).toBeVisible();
@@ -303,7 +378,7 @@ describe('DocumentsWorkspace', () => {
     expect(screen.getByLabelText(ftLabel)).toBeEnabled();
   });
 
-  it('keeps downloads and export available while a read-only actor has no file mutations', async () => {
+  it('keeps downloads available while a consultation actor has no exports or file mutations', async () => {
     const { container } = render(<DocumentsWorkspace canWrite={false} />);
     await screen.findByText(asset.filename);
     expect(screen.getByText(/^Acceso de solo lectura:/i)).toBeVisible();
@@ -311,7 +386,7 @@ describe('DocumentsWorkspace', () => {
       'href',
       `/api/operations/assets/${asset.id}/download`,
     );
-    expect(screen.getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Exportar Excel' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Carga masiva/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'ZIP de ejemplo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Eliminar/ })).not.toBeInTheDocument();
@@ -445,7 +520,7 @@ describe('DocumentsWorkspace', () => {
       assetRequirements: product.assetRequirements,
     }));
     mocks.fetchDocumentsCatalog.mockResolvedValue({ products: [...products, second], assets: {} });
-    render(<DocumentsWorkspace canWrite={false} />);
+    render(<DocumentsWorkspace canWrite />);
     await screen.findByRole('link', { name: second.sku });
     fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
     expect(mocks.exportXlsx.mock.calls[0]![0].rows).toHaveLength(105);

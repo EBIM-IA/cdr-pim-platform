@@ -156,42 +156,29 @@ describe('ProductCatalogsWorkspace', () => {
     expect(api.listAllProductCatalogs).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps consultation and downloads while hiding all mutation and sharing actions for readers', async () => {
+  it('shows current PDF catalogs in a grid and hides administrative columns, exports and actions for readers', async () => {
     mount(false, false);
-    await screen.findByRole('button', { name: catalog.title });
-    for (const name of ['Subir catálogo', 'Editar', 'Compartir', 'Eliminar']) {
-      expect(toolbar().queryByRole('button', { name })).not.toBeInTheDocument();
-    }
-    fireEvent.click(screen.getByRole('checkbox', { name: `Seleccionar ${catalog.title}` }));
-    expect(toolbar().getByRole('button', { name: 'Exportar Excel' })).toBeEnabled();
-    const drawer = await openDetail();
-    expect(drawer.getByRole('link', { name: 'Descargar' })).toBeVisible();
-    expect(drawer.queryByRole('button', { name: 'Generar enlace' })).not.toBeInTheDocument();
-  });
-
-  it('shows real metrics, PDF actions and role permissions without placeholder blocks', async () => {
-    mount(false, true);
-    expect(await screen.findByRole('button', { name: catalog.title })).toBeVisible();
-    expect(within(screen.getByRole('table')).getAllByRole('columnheader')).toHaveLength(13);
-    expect(api.listAllProductCatalogs).toHaveBeenCalledWith(
-      { q: '', includeDeleted: false },
-      expect.any(AbortSignal),
-    );
-    expect(toolbar().queryByRole('button', { name: 'Subir catálogo' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox', { name: `Seleccionar ${catalog.title}` }));
-    expect(toolbar().queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
-    expect(toolbar().getByRole('button', { name: 'Compartir' })).toBeEnabled();
-    const drawer = await openDetail();
-    expect(drawer.getByRole('link', { name: 'Ver PDF' })).toHaveAttribute(
-      'href',
-      `/api/product-catalogs/${catalog.id}/file?disposition=inline`,
-    );
-    expect(drawer.getByRole('link', { name: 'Descargar' })).toHaveAttribute(
+    expect(await screen.findByRole('heading', { name: catalog.title })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Vista de catálogos' })).toBeVisible();
+    expect(screen.queryByLabelText('Indicadores de catálogos')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Descargar' })).toHaveAttribute(
       'href',
       `/api/product-catalogs/${catalog.id}/file?disposition=attachment`,
     );
-    expect(drawer.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/todavía no está habilitad/)).not.toBeInTheDocument();
+    for (const name of ['Subir catálogo', 'Editar', 'Compartir', 'Eliminar', 'Exportar Excel'])
+      expect(toolbar().queryByRole('button', { name })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tabla' }));
+    expect(screen.getByRole('table')).toBeVisible();
+    for (const name of [
+      'Estado',
+      'Enlaces',
+      'Fecha de creación',
+      'Modificado por',
+      'Fecha de modificación',
+    ])
+      expect(screen.queryByRole('columnheader', { name })).not.toBeInTheDocument();
+    expect(api.getProductCatalog).not.toHaveBeenCalled();
   });
 
   it('uploads a validated PDF with metadata, then refreshes the list', async () => {

@@ -115,6 +115,9 @@ export class UpdateTemplateAttributeUseCase {
     templateId: string,
     attributeDefinitionId: string,
     input: {
+      label?: string;
+      dataType?: AdminTemplateAttribute['dataType'];
+      unit?: string | null;
       active?: boolean;
       required?: boolean;
       replicable?: boolean;
@@ -139,6 +142,9 @@ export class UpdateTemplateAttributeUseCase {
     const result = await this.catalog.updateTemplateAttribute({
       templateId: assertUuid(templateId, 'templateId'),
       attributeDefinitionId: assertUuid(attributeDefinitionId, 'attributeDefinitionId'),
+      ...(input.label !== undefined ? { label: input.label } : {}),
+      ...(input.dataType !== undefined ? { dataType: input.dataType } : {}),
+      ...(input.unit !== undefined ? { unit: input.unit } : {}),
       ...(input.active !== undefined ? { active: input.active } : {}),
       ...(input.required !== undefined ? { required: input.required } : {}),
       ...(input.replicable !== undefined ? { replicable: input.replicable } : {}),

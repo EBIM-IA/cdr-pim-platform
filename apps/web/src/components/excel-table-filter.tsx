@@ -701,6 +701,7 @@ export function ExcelTableFilterBar({
   readonly onClear: () => void;
 }) {
   const active = filteredColumns.length > 0 || Boolean(sort);
+  if (!active) return null;
   return (
     <div
       className={cn(

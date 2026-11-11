@@ -21,6 +21,7 @@ export interface GroupApplicationSnapshot {
   readonly engine: string | null;
   readonly notes: string | null;
   readonly active: boolean;
+  readonly verificationStatus?: 'pending' | 'verified';
   readonly source: ApplicationSource;
   readonly importBatchId: Uuid | null;
   readonly createdAt: Date;
@@ -55,6 +56,7 @@ export class GroupApplication {
       groupId: Uuid;
       unifiedCode: string;
       source?: ApplicationSource;
+      verificationStatus?: 'pending' | 'verified';
       importBatchId?: Uuid | null;
       id?: Uuid;
     } & Partial<EditableApplicationFields>,
@@ -73,6 +75,7 @@ export class GroupApplication {
       unifiedCode: requiredText(input.unifiedCode, 'unifiedCode', 120).toUpperCase(),
       ...fields,
       active: true,
+      verificationStatus: input.verificationStatus ?? 'pending',
       source: input.source ?? 'manual',
       importBatchId: input.importBatchId ?? null,
       createdAt: now,
@@ -84,7 +87,13 @@ export class GroupApplication {
     return new GroupApplication(snapshot);
   }
 
-  update(input: Partial<EditableApplicationFields> & { active?: boolean }, now: Date): void {
+  update(
+    input: Partial<EditableApplicationFields> & {
+      active?: boolean;
+      verificationStatus?: 'pending' | 'verified';
+    },
+    now: Date,
+  ): void {
     const merged = normalizeFields({
       vehicleType: input.vehicleType === undefined ? this.state.vehicleType : input.vehicleType,
       make: input.make === undefined ? this.state.make : input.make,
@@ -105,6 +114,16 @@ export class GroupApplication {
       ...this.state,
       ...merged,
       active: input.active ?? this.state.active,
+      verificationStatus:
+        input.verificationStatus ??
+        (Object.keys(input).some(
+          (key) =>
+            key !== 'active' &&
+            key !== 'verificationStatus' &&
+            input[key as keyof typeof input] !== undefined,
+        )
+          ? 'pending'
+          : (this.state.verificationStatus ?? 'pending')),
       updatedAt: now,
     };
   }
@@ -114,7 +133,13 @@ export class GroupApplication {
   }
 
   markImported(importBatchId: Uuid, now: Date): void {
-    this.state = { ...this.state, source: 'import', importBatchId, updatedAt: now };
+    this.state = {
+      ...this.state,
+      source: 'import',
+      importBatchId,
+      updatedAt: now,
+      verificationStatus: 'pending',
+    };
   }
 
   toSnapshot(): GroupApplicationSnapshot {

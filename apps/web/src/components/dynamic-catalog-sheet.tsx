@@ -24,6 +24,8 @@ import {
   fetchCatalogSchema,
   patchProductAttribute,
 } from '@/lib/dynamic-catalog-api';
+import { downloadWorkbookXlsx, type TabularData } from '@/lib/tabular-export';
+import { buildCategoryImportWorkbook } from '@/lib/category-import-workbook';
 import { cn, formatNumber } from '@/lib/utils';
 
 type FilterValues = Record<string, string>;
@@ -231,7 +233,7 @@ function AttributeEditor({
   );
 }
 
-export function DynamicCatalogSheet() {
+export function DynamicCatalogSheet({ canImport = false }: { canImport?: boolean }) {
   const [categories, setCategories] = useState<CatalogCategorySummaryDto[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [schema, setSchema] = useState<CatalogGridSchemaDto | null>(null);
@@ -252,6 +254,7 @@ export function DynamicCatalogSheet() {
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<EditingCell | null>(null);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
   const loadCategories = useCallback(() => {
@@ -358,6 +361,59 @@ export function DynamicCatalogSheet() {
       .finally(() => setGridLoading(false));
     return () => controller.abort();
   }, [debouncedSearch, filterKey, page, pageSize, revision, schema, selectedCategory]);
+
+  const downloadImportWorkbook = async (example = false) => {
+    if (!schema || !selectedCategory || downloading) return;
+    setDownloading(true);
+    setNotice(null);
+    try {
+      const rows: CatalogGridProductDto[] = [];
+      if (!example) {
+        if (total > 5000)
+          throw new Error('Ajusta los filtros para descargar hasta 5 000 productos por archivo.');
+        let expected = total;
+        for (let currentPage = 1; rows.length < expected; currentPage += 1) {
+          const result = await fetchCatalogGrid({
+            categoryId: selectedCategory.id,
+            templateId: selectedCategory.templateId,
+            page: currentPage,
+            pageSize: 100,
+            q: debouncedSearch || undefined,
+            filter: serializedFilters,
+          });
+          expected = result.total;
+          if (expected > 5000)
+            throw new Error(
+              'La selección supera 5 000 productos. Ajusta los filtros y vuelve a descargar.',
+            );
+          if (!result.items.length) break;
+          rows.push(...result.items);
+        }
+        if (rows.length !== expected || new Set(rows.map((row) => row.id)).size !== expected)
+          throw new Error(
+            'El catálogo cambió durante la descarga. Actualiza la hoja e inténtalo nuevamente.',
+          );
+      }
+      const sheets: readonly TabularData[] = buildCategoryImportWorkbook(schema, rows, example);
+      downloadWorkbookXlsx(
+        sheets,
+        `${selectedCategory.slug}-${example ? 'ejemplo-carga-parcial' : 'actualizacion'}`,
+      );
+      setNotice({
+        tone: 'success',
+        message: example
+          ? 'Ejemplo descargado. Conserva codigo_articulo y solo las columnas que necesitas actualizar.'
+          : `Excel descargado con ${rows.length} productos e instrucciones de carga.`,
+      });
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'No fue posible descargar el Excel.',
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const selectCategory = (nextTemplateId: string) => {
     setSelectedTemplateId(nextTemplateId);
@@ -499,6 +555,38 @@ export function DynamicCatalogSheet() {
             </Button>
           </div>
         </div>
+        {canImport && schema ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={downloading || gridLoading || !total}
+              onClick={() => void downloadImportWorkbook()}
+            >
+              {downloading ? 'Preparando Excel…' : 'Descargar Excel con datos'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={downloading}
+              onClick={() => void downloadImportWorkbook(true)}
+            >
+              Ejemplo de carga parcial
+            </Button>
+            <Button asChild size="sm">
+              <Link
+                href={`/imports?view=new&target=category&templateId=${encodeURIComponent(selectedTemplateId)}`}
+              >
+                Subir Excel completado
+              </Link>
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Descarga, completa y valida antes de confirmar la importación.
+            </span>
+          </div>
+        ) : null}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
           <h2 id="dynamic-catalog-heading" className="font-semibold text-foreground">
             Hoja de datos dinámica

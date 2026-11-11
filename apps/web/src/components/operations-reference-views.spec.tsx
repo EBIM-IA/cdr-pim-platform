@@ -51,22 +51,35 @@ describe('Reference operations layouts', () => {
     expect(screen.queryByText('Simular rol de la sesión')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Editar permisos' })).toBeDisabled();
   });
-  it('preserves execution and error table structure without turning absent telemetry into zero', () => {
+  it('shows an empty durable inbox without claiming catalog processing', () => {
     render(
       <IntegrationsReferenceView
         workspace={{
           ...workspace,
           slug: 'integrations',
-          rows: [{ id: 'ax', values: { system: 'Dynamics AX', configured: false } }],
+          rows: [
+            {
+              id: 'ax',
+              values: { system: 'Dynamics AX', configured: false, state: 'Receptor PUSH durable' },
+            },
+          ],
+          axInbox: {
+            totalBatches: 0,
+            totalRecords: 0,
+            recentBatches: [],
+            selectedBatch: null,
+            records: [],
+            page: 1,
+            pageSize: 100,
+            catalogApplicationEnabled: false,
+          },
         }}
         view="monitor"
       />,
     );
     expect(screen.getByRole('columnheader', { name: 'Recibidos' })).toBeVisible();
-    expect(
-      screen.getByText('El historial de ejecuciones externas aún no está disponible.'),
-    ).toBeVisible();
-    expect(screen.getAllByText('—')).toHaveLength(3);
-    expect(screen.getByText('Pendiente de conexión')).toBeVisible();
+    expect(screen.getByText('Todavía no se recibieron lotes AX.')).toBeVisible();
+    expect(screen.getByText('Espera reglas aprobadas por CDR')).toBeVisible();
+    expect(screen.getByText('Receptor PUSH durable')).toBeVisible();
   });
 });

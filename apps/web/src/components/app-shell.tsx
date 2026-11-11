@@ -32,6 +32,7 @@ import {
 
 import { ColumnOrderUserProvider } from '@/components/column-order';
 import { resetColumnPreferences, TableColumnResizeController } from '@/components/column-resize';
+import { TableExportPermission } from '@/components/table-export-buttons';
 import { TableActionTooltip } from '@/components/table-action-tooltip';
 import { Button } from '@/components/ui/button';
 import type { AuthActor } from '@/lib/auth';
@@ -988,7 +989,11 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                   <span aria-current="page">{screen?.label ?? 'CDR PIM'}</span>
                 </nav>
               ) : null}
-              {children}
+              <TableExportPermission.Provider
+                value={actor.roles.some((role) => role === 'ADMINISTRADOR' || role === 'ADMIN')}
+              >
+                {children}
+              </TableExportPermission.Provider>
             </main>
             <FooterPager
               collapsed={sidebarCollapsed}

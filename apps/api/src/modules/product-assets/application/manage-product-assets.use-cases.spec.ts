@@ -173,7 +173,8 @@ function repositoryFake(): ProductAssetRepositoryPort {
     listByProductIds: async () => [],
     findById: async () => null,
     findActiveSlot: async () => null,
-    nextPhotoPosition: async () => 1,
+    nextGalleryPosition: async () => 1,
+    reorder: async () => {},
     saveReplacing: async (asset, _actorId, _time, audit) => {
       audit(asset, null);
       return { saved: asset, replaced: null };

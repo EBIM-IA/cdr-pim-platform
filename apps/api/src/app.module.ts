@@ -1,3 +1,4 @@
+import { QualityModule } from './modules/quality/quality.module';
 import { FileMaintenanceModule } from './modules/file-maintenance/file-maintenance.module';
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
@@ -127,6 +128,7 @@ import { API_ENV } from './shared/tokens';
     ApplicationsModule,
     EquivalencesModule,
     AiModule,
+    QualityModule,
     SearchModule,
     ImportsModule,
     IntegrationsModule,

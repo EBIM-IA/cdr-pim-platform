@@ -63,7 +63,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
   }
 
   if (module === 'categories') {
-    return <CategoriesAdminWorkspace />;
+    return <CategoriesAdminWorkspace canManage={capabilities.has('administration:manage')} />;
   }
   if (module === 'templates') {
     return (
@@ -77,6 +77,7 @@ export default async function ModulePage({ params }: ModulePageProps) {
     return (
       <EquivalencesWorkspace
         canWrite={capabilities.has('equivalences:write')}
+        canManageRequests={capabilities.has('administration:manage')}
         canViewCompleteness={capabilities.has('administration:manage')}
         canViewProductStatus={
           !actor?.roles.includes('VENTAS') || !!actor?.roles.includes('ADMINISTRADOR')

@@ -103,8 +103,8 @@ describe('PostgresWorkspaceReadModel', () => {
     `;
     await database.sql`
       INSERT INTO group_applications (
-        id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source
-      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'AUTOMOTRIZ', 'Toyota', 'Corolla', 2014, 2018, true, 'manual')
+        id, equivalence_group_id, vehicle_type, make, model, year_from, year_to, active, source, verification_status
+      ) VALUES (${APPLICATION_ID}, ${GROUP_ID}, 'AUTOMOTRIZ', 'Toyota', 'Corolla', 2014, 2018, true, 'manual', 'verified')
     `;
     await database.sql`
       INSERT INTO external_homologs (
@@ -123,6 +123,25 @@ describe('PostgresWorkspaceReadModel', () => {
     await database?.close();
   });
 
+  it('reports actual missing assets, open duplicate alerts and distinct source conflicts for dashboard indicators', async () => {
+    await database.sql`INSERT INTO quality_review_items (id,kind,status,product_id,version,data,created_at,updated_at) VALUES ('a0000000-0000-4000-8000-000000000001','duplicate','pending',${PRODUCT_ID},1,'{}'::jsonb,now(),now())`;
+    await database.sql`INSERT INTO quality_review_items (id,kind,status,product_id,version,data,created_at,updated_at) VALUES ('a0000000-0000-4000-8000-000000000002','attribute','pending',${PRODUCT_ID},1,'{"candidates":[{"value":"A"},{"value":"B"}]}'::jsonb,now(),now())`;
+    const result = await readModel.read('reports', actor);
+    for (const key of [
+      'duplicates',
+      'without-image',
+      'without-technical-sheet',
+      'source-conflicts',
+    ])
+      expect(result.metrics.find((metric) => metric.key === key)?.value).toBe(1);
+    expect(
+      result.reportIndicators?.find((indicator) => indicator.key === 'duplicates')?.value,
+    ).toBe(1);
+    await database.sql`UPDATE quality_review_items SET status='approved' WHERE kind IN ('duplicate','attribute')`;
+    const decided = await readModel.read('reports', actor);
+    expect(decided.metrics.find((metric) => metric.key === 'duplicates')?.value).toBe(0);
+    expect(decided.metrics.find((metric) => metric.key === 'source-conflicts')?.value).toBe(0);
+  });
   it('returns a contract-valid projection for every web workspace', async () => {
     const projections = await Promise.all(
       workspaceSlugSchema.options.map((slug) => readModel.read(slug, actor)),
@@ -635,7 +654,7 @@ describe('PostgresWorkspaceReadModel', () => {
     expect(summary.reportIndicators).toHaveLength(8);
     for (const key of ['duplicates', 'searches', 'integrations'])
       expect(summary.reportIndicators).toContainEqual(
-        expect.objectContaining({ key, value: null, status: 'unavailable' }),
+        expect.objectContaining({ key, value: 0, status: 'available' }),
       );
     expect(summary.reportCategories).toContainEqual({
       id: CATEGORY_ID,

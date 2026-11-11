@@ -125,6 +125,7 @@ export class PostgresAuditAdapter implements AuditPort, AuditReadPort {
           source: auditEntries.source,
           correlationId: auditEntries.correlationId,
           occurredAt: auditEntries.occurredAt,
+          reason: sql<string | null>`${auditEntries.changes} -> 'reason' ->> 'after'`,
         })
         .from(auditChangeItems)
         .innerJoin(auditEntries, eq(auditEntries.id, auditChangeItems.auditEntryId))

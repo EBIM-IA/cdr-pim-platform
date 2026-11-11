@@ -30,7 +30,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { downloadCsv, downloadXlsx } from '@/lib/tabular-export';
+import { downloadCsv, downloadXlsx, downloadWorkbookXlsx } from '@/lib/tabular-export';
 import { applicationMatches, findApplicationUnifiedCodes } from '@/lib/application-search';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -317,14 +317,68 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     orderedApplicationColumns.map((column) => column.getValue(item)),
   );
   const downloadTemplate = () => {
-    const content =
-      'codigo_unificador,marca_vehiculo,modelo,tipo,combustible,traccion,cilindraje,anio_desde,anio_hasta,area,subarea,motor,notas\n';
-    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'plantilla-aplicaciones.csv';
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadWorkbookXlsx(
+      [
+        {
+          sheetName: 'Datos',
+          headers: [
+            'codigo_unificador',
+            'tipo_aplicacion',
+            'marca_vehiculo',
+            'modelo',
+            'tipo',
+            'combustible',
+            'traccion',
+            'cilindraje',
+            'anio_desde',
+            'anio_hasta',
+            'area',
+            'subarea',
+            'motor',
+            'notas',
+          ],
+          rows: applicationTable.visibleRows.map((item) => [
+            item.unifiedCode,
+            item.vehicleType,
+            item.make,
+            item.model,
+            item.bodyStyle,
+            item.fuel,
+            item.traction,
+            item.displacement,
+            item.yearFrom,
+            item.yearTo,
+            item.area,
+            item.subarea,
+            item.engine,
+            item.notes,
+          ]),
+        },
+        {
+          sheetName: 'Instrucciones',
+          headers: ['Paso', 'Instrucción'],
+          rows: [
+            [
+              '1',
+              'La primera hoja contiene las aplicaciones visibles con los filtros actuales. Conserva codigo_unificador, marca_vehiculo y modelo.',
+            ],
+            [
+              '2',
+              'Edita los datos y sube el Excel en Importaciones, destino Aplicaciones. Revisa el mapeo y la validación antes de confirmar.',
+            ],
+            [
+              '3',
+              'tipo_aplicacion admite AUTOMOTRIZ o INDUSTRIAL. Los años deben ser enteros y el año final no puede ser anterior al inicial.',
+            ],
+            [
+              '4',
+              'Las aplicaciones se vinculan al código unificador y son compartidas por sus SKU. Esta carga no elimina aplicaciones existentes.',
+            ],
+          ],
+        },
+      ],
+      'plantilla-aplicaciones-con-datos',
+    );
   };
 
   const updateField = <Key extends keyof ApplicationForm>(
@@ -595,24 +649,26 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             </Link>
           </Button>
         ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={loading || !exportRows.length}
-          onClick={() =>
-            downloadXlsx(
-              {
-                headers: orderedApplicationColumns.map((column) => column.label),
-                rows: exportRows,
-                sheetName: 'Aplicaciones',
-              },
-              unifiedCodeFilter ? `aplicaciones-${unifiedCodeFilter}` : 'aplicaciones-filtradas',
-            )
-          }
-        >
-          <Download className="size-3.5" aria-hidden="true" />
-          Exportar Excel
-        </Button>
+        {canWrite ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={loading || !exportRows.length}
+            onClick={() =>
+              downloadXlsx(
+                {
+                  headers: orderedApplicationColumns.map((column) => column.label),
+                  rows: exportRows,
+                  sheetName: 'Aplicaciones',
+                },
+                unifiedCodeFilter ? `aplicaciones-${unifiedCodeFilter}` : 'aplicaciones-filtradas',
+              )
+            }
+          >
+            <Download className="size-3.5" aria-hidden="true" />
+            Exportar Excel
+          </Button>
+        ) : null}
         {canWrite ? (
           <Button
             size="sm"
@@ -759,7 +815,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       reorder={applicationColumnOrder.getColumnControl(column.key, column.label)}
                     />
                   ))}
-                  <th className="px-4 py-3">Guardado</th>
+                  <th className="px-4 py-3">Verificación y guardado</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -815,6 +871,44 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                       />
                     ))}
                     <td className="px-4 py-3">
+                      {canWrite ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={cellSaving || !item.active}
+                          onClick={() => {
+                            setCellSaving(true);
+                            setError(null);
+                            void updateApplication(item.id, {
+                              expectedUpdatedAt: item.updatedAt,
+                              verificationStatus:
+                                item.verificationStatus === 'verified' ? 'pending' : 'verified',
+                            })
+                              .then((updated) => {
+                                setItems((rows) =>
+                                  rows.map((row) => (row.id === item.id ? updated : row)),
+                                );
+                                setNotice(
+                                  updated.verificationStatus === 'verified'
+                                    ? 'Aplicación verificada para consulta.'
+                                    : 'Aplicación enviada a revisión.',
+                                );
+                              })
+                              .catch((cause: unknown) =>
+                                setError(
+                                  cause instanceof Error
+                                    ? cause.message
+                                    : 'No se pudo verificar la aplicación.',
+                                ),
+                              )
+                              .finally(() => setCellSaving(false));
+                          }}
+                        >
+                          {item.verificationStatus === 'verified'
+                            ? 'Verificada · revisar'
+                            : 'Verificar'}
+                        </Button>
+                      ) : null}
                       <span className="text-xs text-muted-foreground">
                         {cellSaving ? 'Guardando…' : 'Al día'}
                       </span>
@@ -837,50 +931,52 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           <p className="border-t px-3.5 py-2 text-[11px] text-muted-foreground">
             {canWrite
               ? 'Clic en una celda o empieza a escribir para editar · se guarda al salir de la celda (Tab, Enter o clic fuera) · Esc cancela · * obligatorio.'
-              : 'Acceso de consulta: puedes filtrar, ordenar y exportar las aplicaciones.'}
+              : 'Acceso de consulta: puedes filtrar y ordenar las aplicaciones.'}
           </p>
         </Card>
       )}
-      <details className="mt-3 text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Más opciones</summary>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(event) => setIncludeInactive(event.target.checked)}
-            />
-            Mostrar inactivos
-          </label>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!exportRows.length}
-            onClick={() =>
-              downloadCsv(
-                {
-                  headers: orderedApplicationColumns.map((column) => column.label),
-                  rows: exportRows,
-                },
-                'aplicaciones-filtradas',
-              )
-            }
-          >
-            Exportar CSV
-          </Button>
-          {includeInactive && canWrite ? (
+      {canWrite ? (
+        <details className="mt-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Más opciones</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(event) => setIncludeInactive(event.target.checked)}
+              />
+              Mostrar inactivos
+            </label>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void reactivateSelected()}
-              disabled={restoring || !selectedIds.size}
+              disabled={!exportRows.length}
+              onClick={() =>
+                downloadCsv(
+                  {
+                    headers: orderedApplicationColumns.map((column) => column.label),
+                    rows: exportRows,
+                  },
+                  'aplicaciones-filtradas',
+                )
+              }
             >
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              Reactivar selección
+              Exportar CSV
             </Button>
-          ) : null}
-        </div>
-      </details>
+            {includeInactive && canWrite ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void reactivateSelected()}
+                disabled={restoring || !selectedIds.size}
+              >
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+                Reactivar selección
+              </Button>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
     </>
   );
 }

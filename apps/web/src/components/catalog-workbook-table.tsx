@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePersistentColumnOrder } from '@/components/column-order';
 import {
@@ -230,6 +230,38 @@ function editableDraft(value: CatalogAttributeValue | null): string {
   return String(value);
 }
 
+function SearchMatch({ value, query }: { value: string; query?: string }) {
+  const words = (query ?? '').trim().split(/\s+/u).filter(Boolean);
+  if (!words.length) return <>{value}</>;
+  const normalize = (text: string) =>
+    text
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLocaleLowerCase();
+  const pattern = new RegExp(
+    words.map((word) => normalize(word).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'),
+    'giu',
+  );
+  const normalized = normalize(value);
+  const segments = [];
+  let offset = 0;
+  for (const match of normalized.matchAll(pattern)) {
+    const start = match.index;
+    if (start > offset)
+      segments.push(<span key={`text-${offset}`}>{value.slice(offset, start)}</span>);
+    const end = start + match[0].length;
+    segments.push(
+      <mark key={`match-${start}`} className="rounded bg-yellow-200 text-inherit">
+        {value.slice(start, end)}
+      </mark>,
+    );
+    offset = end;
+  }
+  if (offset < value.length)
+    segments.push(<span key={`text-${offset}`}>{value.slice(offset)}</span>);
+  return <>{segments}</>;
+}
+
 export function CatalogWorkbookTable({
   q,
   brand,
@@ -271,6 +303,18 @@ export function CatalogWorkbookTable({
   const [columnExpressions, setColumnExpressions] = useState<Record<string, string>>({});
   const scrollArea = useRef<HTMLDivElement>(null);
   const pagination = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<{ row: number; column: number } | null>(null);
+  const focusCell = (row: number, column: number) => {
+    scrollArea.current
+      ?.querySelector<HTMLElement>(`[data-workbook-row="${row}"][data-workbook-column="${column}"]`)
+      ?.focus();
+  };
+  useEffect(() => {
+    if (loading || editing || !pendingFocus.current) return;
+    const target = pendingFocus.current;
+    focusCell(target.row, target.column);
+    pendingFocus.current = null;
+  }, [loading, editing, rows]);
 
   const columns = useMemo<WorkbookColumn[]>(
     () => [
@@ -503,7 +547,7 @@ export function CatalogWorkbookTable({
   };
 
   const saveEdit = async (column: CatalogWorkbookColumnDto) => {
-    if (!editing || saving) return;
+    if (!editing || saving) return false;
     const product = rows.find((row) => row.id === editing.productId);
     const cell = product?.attributes[editing.attributeKey];
     if (!canEdit || !product?.template || !cell?.applicable || !cell.permissions.edit) {
@@ -517,7 +561,7 @@ export function CatalogWorkbookTable({
     const parsed = parseWorkbookDraft(column, editing.draft);
     if (parsed.kind === 'noop') {
       setEditing(null);
-      return;
+      return true;
     }
     if (parsed.kind === 'error') {
       setNotice({ tone: 'error', message: parsed.message });
@@ -539,6 +583,7 @@ export function CatalogWorkbookTable({
             : 'Cambio guardado y registrado en auditoría.',
       });
       setRevision((value) => value + 1);
+      return true;
     } catch (saveError) {
       const conflict = saveError instanceof DynamicCatalogApiError && saveError.status === 409;
       setNotice({
@@ -552,6 +597,62 @@ export function CatalogWorkbookTable({
       if (conflict) setRevision((value) => value + 1);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const navigateCell = (event: KeyboardEvent<HTMLElement>, row: number, column: number) => {
+    const delta = {
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      Tab: [0, event.shiftKey ? -1 : 1],
+    }[event.key];
+    if (!delta || event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = cellTarget(row, column, delta[0] ?? 0, delta[1] ?? 0);
+    if (!target) return;
+    event.preventDefault();
+    focusCell(target.row, target.column);
+  };
+  const cellTarget = (row: number, column: number, dy: number, dx: number) => {
+    let nextRow = row + dy;
+    let nextColumn = column + dx;
+    if (nextColumn >= orderedColumns.length) {
+      nextColumn = 0;
+      nextRow += 1;
+    }
+    if (nextColumn < 0) {
+      nextColumn = orderedColumns.length - 1;
+      nextRow -= 1;
+    }
+    if (nextRow < 0 || nextRow >= table.visibleRows.length) return null;
+    return { row: nextRow, column: nextColumn };
+  };
+  const editKey = async (
+    event: KeyboardEvent<HTMLElement>,
+    attribute: CatalogWorkbookColumnDto,
+    row: number,
+    column: number,
+  ) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      pendingFocus.current = { row, column };
+      setEditing(null);
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      event.stopPropagation();
+      const target =
+        event.key === 'Tab'
+          ? cellTarget(row, column, 0, event.shiftKey ? -1 : 1)
+          : cellTarget(row, column, 1, 0);
+      if (await saveEdit(attribute)) {
+        pendingFocus.current = target ?? { row, column };
+        requestAnimationFrame(() => {
+          if (pendingFocus.current)
+            focusCell(pendingFocus.current.row, pendingFocus.current.column);
+        });
+      }
     }
   };
 
@@ -599,26 +700,30 @@ export function CatalogWorkbookTable({
             <RefreshCw aria-hidden="true" className={cn('size-3.5', loading && 'animate-spin')} />
             Actualizar
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading || exporting || total === 0}
-            onClick={() => void exportFilteredView('csv')}
-            title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
-          >
-            <Download aria-hidden="true" className="size-4" />
-            CSV · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading || exporting || total === 0}
-            onClick={() => void exportFilteredView('xlsx')}
-            title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
-          >
-            <FileSpreadsheet aria-hidden="true" className="size-4" />
-            XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
-          </Button>
+          {canEdit ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading || exporting || total === 0}
+                onClick={() => void exportFilteredView('csv')}
+                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+              >
+                <Download aria-hidden="true" className="size-4" />
+                CSV · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loading || exporting || total === 0}
+                onClick={() => void exportFilteredView('xlsx')}
+                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+              >
+                <FileSpreadsheet aria-hidden="true" className="size-4" />
+                XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
+              </Button>
+            </>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -755,7 +860,7 @@ export function CatalogWorkbookTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {table.visibleRows.map((row) => (
+            {table.visibleRows.map((row, rowIndex) => (
               <tr
                 key={row.id}
                 aria-selected={selectedRowId === row.id}
@@ -773,6 +878,10 @@ export function CatalogWorkbookTable({
                       <td
                         key={column.key}
                         data-cell-state="not-applicable"
+                        tabIndex={0}
+                        data-workbook-row={rowIndex}
+                        data-workbook-column={index}
+                        onKeyDown={(event) => navigateCell(event, rowIndex, index)}
                         className={cn(
                           'max-w-[280px] border-r px-3 py-2.5',
                           column.key === 'base:sku' &&
@@ -790,7 +899,7 @@ export function CatalogWorkbookTable({
                             href={`/products/${encodeURIComponent(row.id)}`}
                             className="whitespace-nowrap font-semibold hover:text-primary"
                           >
-                            {row.sku}
+                            <SearchMatch value={row.sku} query={q} />
                           </Link>
                         ) : column.key === 'base:status' ? (
                           <span className="flex min-w-max items-center gap-2">
@@ -813,7 +922,7 @@ export function CatalogWorkbookTable({
                                 'font-mono text-[11px]',
                             )}
                           >
-                            {displayCell(value)}
+                            <SearchMatch value={displayCell(value)} query={q} />
                           </span>
                         )}
                       </td>
@@ -826,6 +935,10 @@ export function CatalogWorkbookTable({
                       <td
                         key={column.key}
                         aria-label={`${attribute.label}: no aplica`}
+                        tabIndex={0}
+                        data-workbook-row={rowIndex}
+                        data-workbook-column={index}
+                        onKeyDown={(event) => navigateCell(event, rowIndex, index)}
                         className={cn(
                           'min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500',
                           index > 0 &&
@@ -843,6 +956,30 @@ export function CatalogWorkbookTable({
                   return (
                     <td
                       key={column.key}
+                      tabIndex={isEditing ? -1 : 0}
+                      data-workbook-row={rowIndex}
+                      data-workbook-column={index}
+                      onKeyDown={(event) => {
+                        if (isEditing) return;
+                        if (
+                          editable &&
+                          (event.key === 'F2' ||
+                            event.key === 'Enter' ||
+                            (event.key.length === 1 &&
+                              !event.ctrlKey &&
+                              !event.metaKey &&
+                              !event.altKey))
+                        ) {
+                          event.preventDefault();
+                          setNotice(null);
+                          setEditing({
+                            productId: row.id,
+                            attributeKey: attribute.key,
+                            version: cell.version,
+                            draft: event.key.length === 1 ? event.key : editableDraft(cell.value),
+                          });
+                        } else navigateCell(event, rowIndex, index);
+                      }}
                       data-cell-state={cell.required && cell.value === null ? 'missing' : undefined}
                       className={cn(
                         'min-w-36 border-r px-2 py-1.5',
@@ -863,8 +1000,7 @@ export function CatalogWorkbookTable({
                                 setEditing({ ...editing, draft: event.target.value })
                               }
                               onKeyDown={(event) => {
-                                if (event.key === 'Escape') setEditing(null);
-                                if (event.key === 'Enter') void saveEdit(attribute);
+                                void editKey(event, attribute, rowIndex, index);
                               }}
                               autoFocus
                             >
@@ -885,8 +1021,7 @@ export function CatalogWorkbookTable({
                                 setEditing({ ...editing, draft: event.target.value })
                               }
                               onKeyDown={(event) => {
-                                if (event.key === 'Escape') setEditing(null);
-                                if (event.key === 'Enter') void saveEdit(attribute);
+                                void editKey(event, attribute, rowIndex, index);
                               }}
                               autoFocus
                             >
@@ -910,8 +1045,7 @@ export function CatalogWorkbookTable({
                                 setEditing({ ...editing, draft: event.target.value })
                               }
                               onKeyDown={(event) => {
-                                if (event.key === 'Escape') setEditing(null);
-                                if (event.key === 'Enter') void saveEdit(attribute);
+                                void editKey(event, attribute, rowIndex, index);
                               }}
                               className="h-8 min-w-36 text-xs"
                             />
@@ -950,14 +1084,18 @@ export function CatalogWorkbookTable({
                           className="group flex min-h-5 w-full items-center justify-between gap-2 rounded px-1 text-left hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
                           aria-label={`Editar ${attribute.label} de ${row.sku}`}
                         >
-                          <span>{displayCell(cell.value)}</span>
+                          <span>
+                            <SearchMatch value={displayCell(cell.value)} query={q} />
+                          </span>
                           <Pencil
                             aria-hidden="true"
                             className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
                           />
                         </button>
                       ) : (
-                        <span className="block min-h-5 px-1 py-0.5">{displayCell(cell.value)}</span>
+                        <span className="block min-h-5 px-1 py-0.5">
+                          <SearchMatch value={displayCell(cell.value)} query={q} />
+                        </span>
                       )}
                     </td>
                   );

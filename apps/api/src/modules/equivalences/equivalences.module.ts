@@ -1,3 +1,7 @@
+import { UnifiedCodeRequestsController } from './presentation/unified-code-requests.controller';
+import { UnifiedCodeRequestsUseCase } from './application/unified-code-requests.use-case';
+import { UNIFIED_CODE_REQUESTS } from './domain/ports/unified-code-requests.port';
+import { DrizzleUnifiedCodeRequests } from './infrastructure/persistence/drizzle-unified-code-requests';
 import { Module } from '@nestjs/common';
 
 import { CatalogModule } from '../catalog/catalog.module';
@@ -36,8 +40,10 @@ import { OemCodesController } from './presentation/oem-codes.controller';
  */
 @Module({
   imports: [CatalogModule],
-  controllers: [ExternalHomologsController, OemCodesController],
+  controllers: [UnifiedCodeRequestsController, ExternalHomologsController, OemCodesController],
   providers: [
+    UnifiedCodeRequestsUseCase,
+    { provide: UNIFIED_CODE_REQUESTS, useClass: DrizzleUnifiedCodeRequests },
     { provide: EQUIVALENCE_GROUP_REPOSITORY, useClass: DrizzleEquivalenceGroupRepository },
     { provide: EXTERNAL_HOMOLOG_REPOSITORY, useClass: DrizzleExternalHomologRepository },
     { provide: GROUP_OEM_CODE_REPOSITORY, useClass: DrizzleGroupOemCodeRepository },

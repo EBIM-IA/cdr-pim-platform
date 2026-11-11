@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  reportSettings: vi.fn(),
   view: '',
   push: vi.fn(),
   fetchWorkspace: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(mocks.view),
   usePathname: () => '/reports',
 }));
+vi.mock('@/lib/report-settings-api', () => ({ reportSettings: mocks.reportSettings }));
 vi.mock('@/lib/workspace-api', () => ({ fetchWorkspace: mocks.fetchWorkspace }));
 vi.mock('@/lib/tabular-export', () => ({ downloadWorkbookXlsx: mocks.downloadWorkbookXlsx }));
 vi.mock('@/lib/report-pdf', () => ({ downloadReportPdf: mocks.downloadReportPdf }));
@@ -72,6 +74,11 @@ beforeEach(() => {
   localStorage.clear();
   mocks.view = '';
   mocks.fetchWorkspace.mockResolvedValue(base);
+  mocks.reportSettings.mockImplementation(async (input) => ({
+    layouts: {},
+    formats: input?.operation === 'save-format' ? [input.format] : [],
+    baselines: [],
+  }));
 });
 afterEach(cleanup);
 const capabilities = ['menu:ai-quality:view', 'menu:products:view', 'menu:reports:view'];
@@ -111,7 +118,7 @@ describe('ReportsWorkspace', () => {
     ).toHaveLength(4);
     expect(screen.getByRole('heading', { name: 'Términos frecuentes' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Consultas sin resultado' })).toBeVisible();
-    expect(screen.getByRole('columnheader', { name: 'Posible causa' })).toBeVisible();
+    expect(screen.getAllByRole('columnheader', { name: 'Última consulta' })).toHaveLength(2);
     expect(screen.getByRole('link', { name: 'Abrir búsqueda' })).toHaveAttribute(
       'href',
       '/products?view=search',
@@ -119,6 +126,53 @@ describe('ReportsWorkspace', () => {
     expect(screen.queryByText('18.420')).not.toBeInTheDocument();
     expect(screen.queryByText('94,8%')).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.fetchWorkspace).toHaveBeenCalled());
+  });
+
+  it('renders observed search metrics and zero-result terms from the server', async () => {
+    mocks.view = 'view=searches';
+    const term = { query: '6205', count: 2, withoutResults: 1, lastAt: '2026-11-01T12:00:00.000Z' };
+    mocks.fetchWorkspace.mockResolvedValue({
+      ...base,
+      searchReport: {
+        total: 3,
+        withResults: 2,
+        withoutResults: 1,
+        semantic: 1,
+        terms: [term],
+        unsuccessfulTerms: [{ ...term, count: 1 }],
+      },
+    });
+    render(<ReportsWorkspace actorId="admin" capabilities={capabilities} />);
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('region', { name: 'Indicadores de búsquedas' })).getByText('3'),
+      ).toBeVisible(),
+    );
+    expect(screen.getAllByText('6205')).toHaveLength(2);
+    expect(screen.queryByText('Sin consultas registradas para analizar.')).not.toBeInTheDocument();
+  });
+
+  it('loads a saved historical cut and sends its identity with the report filters', async () => {
+    mocks.view = 'view=general-report';
+    const baseline = {
+      id: '11111111-1111-4111-8111-111111111111',
+      label: 'Corte confirmado',
+      capturedAt: '2026-11-01T12:00:00.000Z',
+      productCount: 97,
+    };
+    mocks.reportSettings.mockResolvedValue({ layouts: {}, formats: [], baselines: [baseline] });
+    render(<ReportsWorkspace actorId="admin" canManageFormats capabilities={capabilities} />);
+    await screen.findByRole('option', { name: /Corte confirmado/u });
+    fireEvent.change(screen.getByLabelText('Comparar con corte histórico'), {
+      target: { value: baseline.id },
+    });
+    await waitFor(() =>
+      expect(mocks.fetchWorkspace).toHaveBeenCalledWith(
+        'reports',
+        expect.any(AbortSignal),
+        expect.objectContaining({ baselineId: baseline.id, report: 'general_results' }),
+      ),
+    );
   });
 
   it('applies category filters to the API and preserves visible columns and filters in both exports', async () => {
@@ -164,6 +218,15 @@ describe('ReportsWorkspace', () => {
     expect(localStorage.getItem('cdr:reports:columns:admin:products-by-category')).toContain(
       'name',
     );
+    await waitFor(() =>
+      expect(mocks.reportSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'save-layout',
+          key: 'products-by-category',
+          layout: expect.objectContaining({ hidden: ['name'] }),
+        }),
+      ),
+    );
   });
   it('reads client CSV headers, maps them and stores only personal configuration', async () => {
     render(<ReportsWorkspace actorId="admin" canManageFormats capabilities={capabilities} />);
@@ -182,11 +245,20 @@ describe('ReportsWorkspace', () => {
     expect(screen.getByLabelText('Campo PIM para Código artículo')).toHaveValue('sku');
     expect(screen.getByLabelText('Campo PIM para Nota')).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: 'Guardar formato' }));
-    const saved = localStorage.getItem('cdr:reports:personal:admin:v1');
+    await waitFor(() =>
+      expect(mocks.reportSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ operation: 'save-format' }),
+      ),
+    );
+    const saved = JSON.stringify(
+      mocks.reportSettings.mock.calls.find((call) => call[0]?.operation === 'save-format')?.[0],
+    );
     expect(saved).toContain('Cliente');
     expect(saved).not.toContain('No debe guardarse');
     expect(saved).not.toContain('6205');
-    expect(mocks.push).toHaveBeenCalledWith(expect.stringContaining('/reports?view=personal-'));
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith(expect.stringContaining('/reports?view=personal-')),
+    );
   });
   it('keeps format creation restricted to administrators and disables unavailable module links', async () => {
     render(<ReportsWorkspace actorId="reader" capabilities={['menu:reports:view']} />);

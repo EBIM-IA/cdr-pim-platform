@@ -16,8 +16,18 @@ const mocks = vi.hoisted(() => ({
   fetchProductAttributeSheet: vi.fn(),
   patchProductAttributes: vi.fn(),
   listProductAssets: vi.fn(),
+  listQualityReviews: vi.fn(),
+  decideQualityReview: vi.fn(),
 }));
 
+vi.mock('@/lib/quality-governance-api', () => ({
+  listQualityProductChanges: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  listQualityReviews: mocks.listQualityReviews,
+  decideQualityReview: mocks.decideQualityReview,
+  detectQualityDuplicates: vi.fn(),
+  updateQualitySourcePriority: vi.fn(),
+  createQualityConflict: vi.fn(),
+}));
 vi.mock('@/lib/ai-api', () => ({
   extractAssetCandidates: mocks.extractAssetCandidates,
   generateCommercialProposal: mocks.generateCommercialProposal,
@@ -109,6 +119,14 @@ const product = {
   attributes: [],
 };
 
+async function selectCatalogProduct() {
+  const select = await screen.findByLabelText<HTMLSelectElement>('Producto real del catálogo');
+  await waitFor(() =>
+    expect([...select.options].some((option) => option.value === product.id)).toBe(true),
+  );
+  fireEvent.change(select, { target: { value: product.id } });
+}
+
 const numberColumn = {
   id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   key: 'diametro',
@@ -197,6 +215,8 @@ describe('QualitySecondaryWorkspace', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.listQualityReviews.mockResolvedValue({ items: [], total: 0 });
+    mocks.decideQualityReview.mockResolvedValue({});
     window.history.replaceState({}, '', '/quality');
     mocks.fetchProduct.mockResolvedValue(product);
     mocks.fetchProducts.mockResolvedValue({
@@ -216,7 +236,8 @@ describe('QualitySecondaryWorkspace', () => {
       model: 'gpt-6-luna',
       proposal: 'Propuesta comercial verificable.',
       usage: { inputTokens: 120, outputTokens: 24 },
-      persisted: false,
+      persisted: true,
+      reviewIds: ['10000000-0000-4000-8000-000000000001'],
       requiresHumanReview: true,
     });
     mocks.extractAssetCandidates.mockResolvedValue({
@@ -226,7 +247,8 @@ describe('QualitySecondaryWorkspace', () => {
       filename: asset.filename,
       model: 'gpt-6-luna',
       candidates: [{ key: 'diametro', value: '25,5', confidence: 0.91 }],
-      persisted: false,
+      persisted: true,
+      reviewIds: ['10000000-0000-4000-8000-000000000001'],
       requiresHumanReview: true,
     });
   });
@@ -294,7 +316,7 @@ describe('QualitySecondaryWorkspace', () => {
     );
   });
 
-  it('generates and copies an explicitly unpersisted commercial proposal for a real product', async () => {
+  it('generates and copies an persisted commercial proposal for a real product', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -302,16 +324,14 @@ describe('QualitySecondaryWorkspace', () => {
     });
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
 
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.change(screen.getByLabelText('Canal'), { target: { value: 'b2b' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
 
     expect(await screen.findByText('Propuesta comercial verificable.')).toBeInTheDocument();
     expect(screen.getByText('gpt-6-luna')).toBeInTheDocument();
     expect(screen.getByText('120 tokens')).toBeInTheDocument();
-    expect(screen.getByText('No persistida')).toBeInTheDocument();
+    expect(screen.getByText('Guardada en bandeja')).toBeInTheDocument();
     expect(screen.getByText('Revisión humana')).toBeInTheDocument();
     expect(mocks.generateCommercialProposal).toHaveBeenCalledWith(
       product.id,
@@ -326,9 +346,7 @@ describe('QualitySecondaryWorkspace', () => {
   it('extracts only visible editable keys and atomically applies a human-selected candidate', async () => {
     render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
 
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     expect(await screen.findByText('ficha-tecnica.pdf')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Extraer candidatos' }));
 
@@ -340,28 +358,26 @@ describe('QualitySecondaryWorkspace', () => {
     );
     expect(screen.getByText('Valor actual')).toBeInTheDocument();
     expect(screen.getByText('20 mm')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Aplicar seleccionados' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Guardar decisiones' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Aceptar Diámetro' }));
     expect(screen.getByText('Aceptada · pendiente de aplicar')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Aplicar seleccionados' }));
-
+    fireEvent.change(screen.getByLabelText('Motivo de las decisiones IA'), {
+      target: { value: 'Validado contra documento.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar decisiones' }));
     await waitFor(() =>
-      expect(mocks.patchProductAttributes).toHaveBeenCalledWith(
-        product.id,
-        { updates: [{ attributeKey: 'diametro', value: 25.5, expectedVersion: 4 }] },
-        expect.any(AbortSignal),
+      expect(mocks.decideQualityReview).toHaveBeenCalledWith(
+        '10000000-0000-4000-8000-000000000001',
+        { version: 1, action: 'approve', chosenIndex: 0, reason: 'Validado contra documento.' },
       ),
     );
-    expect(
-      await screen.findByText(/1 atributo fue aplicado mediante una confirmación humana y atómica/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/1 decisiones guardadas/)).toBeInTheDocument();
+    expect(mocks.patchProductAttributes).not.toHaveBeenCalled();
   });
 
-  it('shows real document evidence and discards a candidate locally without changing the catalog', async () => {
+  it('shows real document evidence and persists rejection with a reason without a catalog write', async () => {
     render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     await screen.findByText(asset.filename);
     fireEvent.click(screen.getByRole('button', { name: 'Extraer candidatos' }));
     await screen.findByText('Confianza 91%');
@@ -375,8 +391,18 @@ describe('QualitySecondaryWorkspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Cerrar configuración' }));
     fireEvent.click(screen.getByRole('button', { name: 'Rechazar Diámetro' }));
-    expect(screen.getByText('Descartada en esta revisión')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Aplicar seleccionados' })).toBeDisabled();
+    expect(screen.getByText('Rechazo pendiente de guardar')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar decisiones' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Motivo de las decisiones IA'), {
+      target: { value: 'Documento no corresponde.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar decisiones' }));
+    await waitFor(() =>
+      expect(mocks.decideQualityReview).toHaveBeenCalledWith(
+        '10000000-0000-4000-8000-000000000001',
+        expect.objectContaining({ action: 'reject', reason: 'Documento no corresponde.' }),
+      ),
+    );
     expect(mocks.patchProductAttributes).not.toHaveBeenCalled();
   });
 
@@ -384,9 +410,7 @@ describe('QualitySecondaryWorkspace', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
     await screen.findByText('Propuesta comercial verificable.');
     fireEvent.click(screen.getByRole('button', { name: 'Editar propuesta' }));
@@ -417,9 +441,7 @@ describe('QualitySecondaryWorkspace', () => {
         }),
     );
     render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
-    fireEvent.change(await screen.findByLabelText('Producto real del catálogo'), {
-      target: { value: product.id },
-    });
+    await selectCatalogProduct();
     fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Generando propuesta…');

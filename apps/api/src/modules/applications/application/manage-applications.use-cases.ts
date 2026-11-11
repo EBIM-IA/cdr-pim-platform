@@ -77,6 +77,7 @@ export class CreateGroupApplicationUseCase {
         subarea: input.subarea,
         engine: input.engine,
         notes: input.notes,
+        verificationStatus: input.verificationStatus,
       },
       occurredAt,
     );
@@ -130,6 +131,7 @@ export class UpdateGroupApplicationUseCase {
         engine: fields.engine,
         notes: fields.notes,
         active: fields.active,
+        verificationStatus: fields.verificationStatus,
       },
       occurredAt,
     );

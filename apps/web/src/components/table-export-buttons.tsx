@@ -1,5 +1,7 @@
 'use client';
 
+import { createContext, useContext } from 'react';
+
 import { Download, FileSpreadsheet } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +11,8 @@ import {
   type TabularCell,
   type TabularData,
 } from '@/lib/tabular-export';
+
+export const TableExportPermission = createContext(true);
 
 interface TableExportButtonsProps {
   readonly filename: string;
@@ -25,6 +29,8 @@ export function TableExportButtons({
   sheetName,
   disabled = false,
 }: TableExportButtonsProps) {
+  const allowed = useContext(TableExportPermission);
+  if (!allowed) return null;
   const data: TabularData = { headers, rows, sheetName };
   const unavailable = disabled || rows.length === 0;
   const visibleRows = `${rows.length} ${rows.length === 1 ? 'fila' : 'filas'}`;

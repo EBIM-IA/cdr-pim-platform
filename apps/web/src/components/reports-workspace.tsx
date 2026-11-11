@@ -1,6 +1,6 @@
 'use client';
 
-import type { WorkspaceDto, WorkspaceQuery } from '@cdr/contracts';
+import type { ReportSettingsDto, WorkspaceDto, WorkspaceQuery } from '@cdr/contracts';
 import {
   ArrowDown,
   ArrowLeft,
@@ -37,9 +37,7 @@ import {
   matchReportField,
   parseCsvHeaders,
   personalDefinition,
-  personalReportsKey,
   projectReport,
-  readPersonalReports,
   reportColumns,
   reportQuery,
   reportRows,
@@ -48,6 +46,8 @@ import {
   type ReportLayout,
 } from '@/lib/reports';
 import { downloadWorkbookXlsx, type TabularData } from '@/lib/tabular-export';
+import { parseClosedReportPeriods } from '@/lib/closed-report-periods';
+import { reportSettings } from '@/lib/report-settings-api';
 import { fetchWorkspace } from '@/lib/workspace-api';
 import { parseFirstXlsxWorksheet } from '@/lib/xlsx-import';
 
@@ -187,6 +187,13 @@ export function ReportsWorkspace({
   const [revision, setRevision] = useState(0);
   const [personal, setPersonal] = useState<PersonalReport[]>([]);
   const [drawer, setDrawer] = useState(false);
+  const [settings, setSettings] = useState<ReportSettingsDto | null>(null);
+  const [baselineId, setBaselineId] = useState('');
+  const [baselineLabel, setBaselineLabel] = useState('');
+  const [savingBaseline, setSavingBaseline] = useState(false);
+  const currentView = useRef(view);
+  currentView.current = view;
+  const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [workspace, setWorkspace] = useState<WorkspaceDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -213,16 +220,31 @@ export function ReportsWorkspace({
   const filterQuery = useMemo<WorkspaceQuery>(
     () => ({
       ...(categoryId ? { categoryId } : {}),
+      ...(baselineId ? { baselineId } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       ...(debouncedQuery.trim() ? { q: debouncedQuery.trim() } : {}),
     }),
-    [categoryId, from, to, debouncedQuery],
+    [categoryId, from, to, debouncedQuery, baselineId],
   );
   const invalidDates = !!from && !!to && from > to;
   const pendingSearch = query !== debouncedQuery;
   useEffect(() => {
-    setPersonal(readPersonalReports(actorId));
+    let active = true;
+    void reportSettings()
+      .then((data) => {
+        if (active) {
+          setSettings(data);
+          setPersonal(data.formats);
+          setLayout(data.layouts[currentView.current] ?? savedLayout(actorId, currentView.current));
+        }
+      })
+      .catch((failure: unknown) => {
+        if (active) setError(errorText(failure));
+      });
+    return () => {
+      active = false;
+    };
   }, [actorId]);
   useEffect(() => {
     const controller = new AbortController();
@@ -248,7 +270,8 @@ export function ReportsWorkspace({
     setColumnsOpen(false);
     setSort(null);
     setPage(1);
-    setLayout(savedLayout(actorId, view));
+    setLayout(settings?.layouts[view] ?? savedLayout(actorId, view));
+    setBaselineId('');
     setMessage('');
   }, [actorId, view]);
   useEffect(() => {
@@ -336,7 +359,19 @@ export function ReportsWorkspace({
     categoryId || from || to || query || Object.values(columnFilters).some(Boolean);
   function updateLayout(next: ReportLayout) {
     setLayout(next);
-    if (definition) persistLayout(actorId, definition.id, next);
+    if (definition) {
+      const key = definition.id;
+      persistLayout(actorId, key, next);
+      setSettings((previous) =>
+        previous ? { ...previous, layouts: { ...previous.layouts, [key]: next } } : previous,
+      );
+      settingsQueue.current = settingsQueue.current
+        .catch(() => undefined)
+        .then(() => reportSettings({ operation: 'save-layout', key, layout: next }))
+        .catch((failure: unknown) => {
+          setError(errorText(failure));
+        });
+    }
   }
   function openReport(id: string) {
     router.push(`/reports?view=${encodeURIComponent(id)}`);
@@ -371,7 +406,9 @@ export function ReportsWorkspace({
       const projection = projectReport(
         targetColumns,
         targetRows,
-        active ? effectiveLayout : savedLayout(actorId, target.id),
+        active
+          ? effectiveLayout
+          : (settings?.layouts[target.id] ?? savedLayout(actorId, target.id)),
         active ? columnFilters : {},
       );
       const context = active ? filterDescription : 'Todas las categorías · Sin filtros de fecha';
@@ -420,7 +457,7 @@ export function ReportsWorkspace({
           ...projectReport(
             reportColumns(target, data),
             reportRows(target, data),
-            savedLayout(actorId, target.id),
+            settings?.layouts[target.id] ?? savedLayout(actorId, target.id),
           ),
           sheetName: target.title,
         });
@@ -437,26 +474,66 @@ export function ReportsWorkspace({
       exportController.current = null;
     }
   }
-  function savePersonal(report: PersonalReport) {
-    const next = [...personal, report];
-    localStorage.setItem(personalReportsKey(actorId), JSON.stringify(next));
-    setPersonal(next);
+  async function savePersonal(report: PersonalReport) {
+    const data = await reportSettings({ operation: 'save-format', format: report });
+    setSettings(data);
+    setPersonal(data.formats);
     setDrawer(false);
     openReport(report.id);
   }
-  function removePersonal(report: PersonalReport) {
-    if (
-      !canManageFormats ||
-      !window.confirm(`¿Quitar el formato personal «${report.title}» de este navegador?`)
-    )
+  async function removePersonal(report: PersonalReport) {
+    if (!canManageFormats || !window.confirm(`¿Quitar el formato «${report.title}» del servidor?`))
       return;
     try {
-      const next = personal.filter((item) => item.id !== report.id);
-      localStorage.setItem(personalReportsKey(actorId), JSON.stringify(next));
-      setPersonal(next);
-      setMessage('Formato personal quitado.');
-    } catch {
-      setError('No se pudo actualizar el almacenamiento de este navegador.');
+      const data = await reportSettings({ operation: 'delete-format', key: report.id });
+      setSettings(data);
+      setPersonal(data.formats);
+      setMessage('Formato quitado del servidor.');
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+  async function captureBaseline() {
+    if (!baselineLabel.trim()) return;
+    setSavingBaseline(true);
+    setError('');
+    try {
+      const data = await reportSettings({
+        operation: 'capture-baseline',
+        label: baselineLabel.trim(),
+      });
+      setSettings(data);
+      setBaselineId(data.baselines[0]?.id ?? '');
+      setBaselineLabel('');
+      setMessage('Corte actual guardado para comparaciones posteriores.');
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      setSavingBaseline(false);
+    }
+  }
+  async function importClosedPeriods(file: File) {
+    setError('');
+    setSavingBaseline(true);
+    try {
+      if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 10 * 1024 * 1024)
+        throw new Error('Selecciona un Excel XLSX de hasta 10 MB.');
+      const periods = parseClosedReportPeriods(
+        await parseFirstXlsxWorksheet(await file.arrayBuffer()),
+      );
+      if (
+        !window.confirm(
+          `Se guardarán ${periods.length} cierres mensuales desde «${file.name}». Si un mes ya existe, se reemplazará su total. ¿Continuar?`,
+        )
+      )
+        return;
+      await reportSettings({ operation: 'save-closed-periods', source: file.name, periods });
+      setRevision((value) => value + 1);
+      setMessage(`${periods.length} cierres mensuales guardados con su fuente.`);
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      setSavingBaseline(false);
     }
   }
   function tile(target: ReportDefinition) {
@@ -692,56 +769,72 @@ export function ReportsWorkspace({
             className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
             aria-label="Indicadores de búsquedas"
           >
-            {['Consultas', 'Con resultados', 'Sin resultados', 'Conversacionales'].map((label) => (
+            {[
+              ['Consultas', summary?.searchReport?.total],
+              ['Con resultados', summary?.searchReport?.withResults],
+              ['Sin resultados', summary?.searchReport?.withoutResults],
+              ['Semánticas', summary?.searchReport?.semantic],
+            ].map(([label, value]) => (
               <article key={label} className={`${styles.tableCard} p-4`}>
                 <small className="text-muted-foreground">{label}</small>
-                <strong className="mt-2 block text-2xl text-slate-400">—</strong>
-                <p className="mt-1 text-xs text-muted-foreground">Sin telemetría registrada</p>
+                <strong className="mt-2 block text-2xl">{value ?? '—'}</strong>
               </article>
             ))}
           </section>
           <p className="text-xs text-muted-foreground">
-            {summary?.reportIndicators?.find((item) => item.key === 'searches')?.detail ??
-              'El sistema todavía no registra telemetría de consultas para construir este reporte.'}
+            Consultas de variantes y búsquedas semánticas ejecutadas desde la activación de
+            telemetría. Cada ejecución del buscador cuenta una consulta. No se reconstruye historial
+            anterior.
           </p>
           <div className="grid items-start gap-4 lg:grid-cols-2">
-            <section className={styles.tableCard} aria-labelledby="frequent-searches-title">
-              <div className={styles.tableHeading}>
-                <h2 id="frequent-searches-title">Términos frecuentes</h2>
-                <p>Frecuencia de consultas registradas en el buscador.</p>
-              </div>
-              <div className={styles.empty}>
-                No hay métricas de búsquedas registradas. Las búsquedas del catálogo siguen
-                disponibles.
-              </div>
-            </section>
-            <section className={styles.tableCard} aria-labelledby="unsuccessful-searches-title">
-              <div className={styles.tableHeading}>
-                <h2 id="unsuccessful-searches-title">Consultas sin resultado</h2>
-                <p>Consultas para revisar códigos, aplicaciones, categorías o sinónimos.</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[420px] text-left text-xs">
-                  <thead className="border-b bg-slate-50 text-muted-foreground">
-                    <tr>
-                      {['Consulta', 'Veces', 'Posible causa', 'Acción'].map((heading) => (
-                        <th key={heading} className="px-4 py-3 font-semibold">
-                          {heading}
-                        </th>
+            {[false, true].map((emptyOnly) => (
+              <section key={String(emptyOnly)} className={styles.tableCard}>
+                <div className={styles.tableHeading}>
+                  <h2>{emptyOnly ? 'Consultas sin resultado' : 'Términos frecuentes'}</h2>
+                  <p>
+                    {emptyOnly
+                      ? 'Términos observados para revisar códigos, categorías o sinónimos.'
+                      : 'Frecuencia de consultas registradas en el buscador.'}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b bg-slate-50">
+                      <tr>
+                        <th className="p-3">Consulta</th>
+                        <th className="p-3">Veces</th>
+                        <th className="p-3">Última consulta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(emptyOnly
+                        ? summary?.searchReport?.unsuccessfulTerms
+                        : summary?.searchReport?.terms
+                      )?.map((term) => (
+                        <tr key={term.query} className="border-b">
+                          <td className="p-3">{term.query}</td>
+                          <td className="p-3">{emptyOnly ? term.withoutResults : term.count}</td>
+                          <td className="p-3">{new Date(term.lastAt).toLocaleString('es-PE')}</td>
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
-                        Sin consultas registradas para analizar.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                    </tbody>
+                  </table>
+                  {!(
+                    emptyOnly
+                      ? summary?.searchReport?.unsuccessfulTerms
+                      : summary?.searchReport?.terms
+                  )?.length ? (
+                    <p className="p-8 text-center text-muted-foreground">
+                      Sin consultas registradas para analizar.
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            ))}
           </div>
+          <p className="text-xs text-muted-foreground">
+            Se muestran los 50 términos más frecuentes.
+          </p>
           {capabilities.includes('menu:products:view') ? (
             <Button asChild variant="dark">
               <Link href="/products?view=search">Abrir búsqueda</Link>
@@ -751,6 +844,88 @@ export function ReportsWorkspace({
       ) : null}
       {definition ? (
         <>
+          {definition.format === 'period_results' && canManageFormats ? (
+            <section className={`${styles.tableCard} p-4`}>
+              <label className="text-sm font-semibold">
+                Importar cierres del Excel del cliente
+                <input
+                  className="mt-2 block text-xs"
+                  type="file"
+                  accept=".xlsx"
+                  disabled={savingBaseline}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importClosedPeriods(file);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Formato: MES y columnas ITEMS ACT AAAA. Solo meses cerrados; conserva la fuente y
+                reemplaza el cierre del mismo mes. No se importan valores de la demo.
+              </p>
+            </section>
+          ) : null}
+          {definition.format === 'general_results' ? (
+            <>
+              <section
+                className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+                aria-label="Resultados de enriquecimiento"
+              >
+                {workspace?.metrics
+                  .filter((metric) => metric.key !== 'rows')
+                  .map((metric) => (
+                    <article key={metric.key} className={`${styles.tableCard} p-4`}>
+                      <small className="text-muted-foreground">{metric.label}</small>
+                      <strong className="mt-2 block text-2xl">{metric.value}</strong>
+                    </article>
+                  ))}
+              </section>
+              <section
+                className={`${styles.tableCard} flex flex-wrap items-end gap-3 p-4`}
+                aria-label="Corte histórico"
+              >
+                <label className={styles.field}>
+                  <span>Comparar con corte histórico</span>
+                  <select
+                    value={baselineId}
+                    onChange={(event) => setBaselineId(event.target.value)}
+                  >
+                    <option value="">Sin corte seleccionado</option>
+                    {settings?.baselines.map((baseline) => (
+                      <option key={baseline.id} value={baseline.id}>
+                        {baseline.label} · {new Date(baseline.capturedAt).toLocaleString('es-PE')} ·{' '}
+                        {baseline.productCount} SKU
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {canManageFormats ? (
+                  <>
+                    <label className={styles.field}>
+                      <span>Nombre del nuevo corte</span>
+                      <input
+                        value={baselineLabel}
+                        maxLength={160}
+                        onChange={(event) => setBaselineLabel(event.target.value)}
+                        placeholder="Cierre de noviembre"
+                      />
+                    </label>
+                    <Button
+                      disabled={savingBaseline || !baselineLabel.trim()}
+                      onClick={() => void captureBaseline()}
+                    >
+                      Guardar corte actual
+                    </Button>
+                  </>
+                ) : null}
+                <p className="w-full text-xs text-muted-foreground">
+                  El corte conserva los conteos reales actuales de todo el catálogo. Los periodos
+                  anteriores a su captura no se reconstruyen.
+                </p>
+              </section>
+            </>
+          ) : null}
           <div
             className={styles.toolbar}
             role="toolbar"
@@ -840,7 +1015,7 @@ export function ReportsWorkspace({
               <strong className="text-sm">Columnas del reporte</strong>
               <p>
                 Marca las que quieres ver y ordénalas. Se aplica a la pantalla, al Excel y al PDF.
-                Guardado en este navegador.
+                Guardado en el servidor para tu usuario.
               </p>
               <ol>
                 {effectiveLayout.order.map((key, index) => {
@@ -1043,7 +1218,7 @@ function NewReportDrawer({
 }: {
   fields: NonNullable<WorkspaceDto['reportFields']>;
   onClose: () => void;
-  onSave: (report: PersonalReport) => void;
+  onSave: (report: PersonalReport) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<PersonalReport | null>(null);
   const [error, setError] = useState('');
@@ -1100,8 +1275,8 @@ function NewReportDrawer({
         dejarlo vacío.
       </p>
       <p className={styles.message}>
-        Guardado en este navegador, para tu usuario. Solo se guarda la configuración; las filas se
-        consultan desde los datos actuales del PIM.
+        El formato se guarda en el servidor y se comparte con los usuarios de reportes. Solo se
+        guarda la configuración; las filas se consultan desde los datos actuales del PIM.
       </p>
       <label className={styles.drop}>
         <UploadCloud className="size-8 shrink-0 text-primary" aria-hidden="true" />
@@ -1187,13 +1362,13 @@ function NewReportDrawer({
             <Button
               disabled={busy || !draft.title.trim() || mapped === 0}
               onClick={() => {
-                try {
-                  onSave({ ...draft, title: draft.title.trim() });
-                } catch {
-                  setError(
-                    'No se pudo guardar la configuración. Comprueba que el almacenamiento de este navegador esté habilitado.',
-                  );
-                }
+                setBusy(true);
+                setError('');
+                void onSave({ ...draft, title: draft.title.trim() })
+                  .catch((failure: unknown) => {
+                    setError(errorText(failure));
+                  })
+                  .finally(() => setBusy(false));
               }}
             >
               Guardar formato

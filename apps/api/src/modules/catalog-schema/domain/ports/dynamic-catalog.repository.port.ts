@@ -160,6 +160,8 @@ export interface DynamicCatalogRepositoryPort {
   updateAttributes(input: {
     productId: Uuid;
     updates: readonly AttributeUpdateRequest[];
+    reason?: string;
+    statusTarget?: 'draft' | 'in_review';
     source: AttributeValueSource;
     roles: readonly string[];
     now: Date;

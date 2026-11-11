@@ -88,7 +88,11 @@ export class CompositeProductSearchReadModel implements ProductSearchReadModelPo
             }),
           ),
         ),
-        this.applicationSearch.findActiveProductIds(input.query, input.limit),
+        this.applicationSearch.findActiveProductIds(
+          input.query,
+          input.limit,
+          !roles.includes('ADMINISTRADOR'),
+        ),
         this.homologs.searchEligible(input.query),
         this.oemCodes.searchEligible(input.query),
       ]);
@@ -134,7 +138,7 @@ export class CompositeProductSearchReadModel implements ProductSearchReadModelPo
     const [attributeParts, groups, applications] = await Promise.all([
       this.universallyVisibleAttributeParts(productId),
       this.groups.findByProductId(productId),
-      this.applications.list({ productId, includeInactive: false }),
+      this.applications.list({ productId, includeInactive: false, verifiedOnly: true }),
     ]);
 
     const relationParts = applications.map((application) => {

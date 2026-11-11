@@ -72,7 +72,7 @@ export function catalogAttributePermissionsForRoles(
   return {
     edit: administrator && permissions.edit,
     import: administrator && permissions.import,
-    export: permissions.export,
+    export: administrator && permissions.export,
   };
 }
 

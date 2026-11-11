@@ -22,6 +22,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
+import { ReorderableColumnLabel, usePersistentColumnOrder } from '@/components/column-order';
 import { matchesAxFilterExpression } from '@/components/excel-table-filter';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
@@ -48,6 +49,10 @@ import {
   productAssetDownloadUrl,
   uploadProductAsset,
 } from '@/lib/product-assets-api';
+import {
+  downloadTechnicalSheetsZip,
+  MAX_TECHNICAL_SHEETS_PER_ZIP,
+} from '@/lib/technical-sheet-export';
 import { downloadXlsx } from '@/lib/tabular-export';
 import { cn } from '@/lib/utils';
 
@@ -92,6 +97,22 @@ const PHOTO_GUIDANCE =
   'Recomendamos fotografías JPG o PNG cuadradas de 800 × 800 o 1000 × 1000 px. También se admite WebP, hasta 20 MB. Un SKU admite varias fotos; se cargan una a la vez y se muestran en la galería del producto.';
 
 export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
+  const allColumns = [
+    { key: 'sku', label: 'Código artículo', width: 145 },
+    { key: 'image', label: 'Imagen', width: 70 },
+    ...BASE_COLUMNS.map((column) => ({ ...column, width: 220 })),
+    ...ASSET_TYPES.map((type) => ({ key: type.value, label: type.label, width: 245 })),
+    { key: 'coverage', label: 'Documentos', width: 110 },
+  ];
+  const order = usePersistentColumnOrder({
+    screenKey: 'documents',
+    columnKeys: allColumns.map((column) => column.key),
+    fixedColumnKeys: ['sku'],
+  });
+  const orderedColumns = order.orderedColumnKeys.flatMap((key) => {
+    const column = allColumns.find((column) => column.key === key);
+    return column ? [column] : [];
+  });
   const [products, setProducts] = useState<DocumentProduct[]>([]);
   const [categories, setCategories] = useState<CatalogCategorySummaryDto[]>([]);
   const [assetsByProduct, setAssetsByProduct] = useState<DocumentAssets>({});
@@ -103,6 +124,11 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [view, setView] = useState<'table' | 'context'>('table');
   const [selectedId, setSelectedId] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [exportingSheets, setExportingSheets] = useState(false);
+  const [sheetProgress, setSheetProgress] = useState(0);
+  const [sheetExportTotal, setSheetExportTotal] = useState(0);
+  const sheetExportController = useRef<AbortController | null>(null);
+  useEffect(() => () => sheetExportController.current?.abort(), []);
   const [uploadingSlots, setUploadingSlots] = useState<ReadonlySet<string>>(new Set());
   const pendingUploads = useRef(new Set<string>());
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -113,6 +139,35 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [bulkError, setBulkError] = useState<string | null>(null);
   const validatedZip = useRef<File | null>(null);
   const bulkInFlight = useRef(false);
+  async function exportTechnicalSheets() {
+    const selected = [...filteredProducts];
+    setSheetExportTotal(selected.length);
+    const controller = new AbortController();
+    sheetExportController.current = controller;
+    setExportingSheets(true);
+    setSheetProgress(0);
+    setNotice(null);
+    try {
+      await downloadTechnicalSheetsZip(selected, assetsByProduct, {
+        signal: controller.signal,
+        onProgress: (complete) => setSheetProgress(complete),
+      });
+      setNotice({
+        tone: 'success',
+        message: `${selected.length} fichas técnicas descargadas, una por SKU. Se exportaron únicamente atributos autorizados.`,
+      });
+    } catch (failure) {
+      if (!controller.signal.aborted)
+        setNotice({
+          tone: 'error',
+          message:
+            failure instanceof Error ? failure.message : 'No se pudo generar el ZIP de fichas.',
+        });
+    } finally {
+      setExportingSheets(false);
+      sheetExportController.current = null;
+    }
+  }
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('productId');
@@ -222,7 +277,20 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
     setUploadingSlots(new Set(pendingUploads.current));
     setNotice(null);
     try {
-      const uploaded = await uploadProductAsset({ productId: product.id, type, file });
+      const primaryPlan =
+        type === 'PLANO'
+          ? (assetsByProduct[product.id] ?? [])
+              .filter((asset) => asset.type === 'PLANO')
+              .sort((a, b) => (a.position ?? 1) - (b.position ?? 1))[0]
+          : undefined;
+      const uploaded = await uploadProductAsset({
+        productId: product.id,
+        type,
+        file,
+        ...(primaryPlan
+          ? { position: primaryPlan.position ?? 1, replacesAssetId: primaryPlan.id }
+          : {}),
+      });
       setNotice({
         tone: 'success',
         message: `${uploaded.filename} quedó asociado a ${uploaded.sku}.`,
@@ -290,20 +358,14 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
     downloadXlsx(
       {
         sheetName: 'Imagenes y documentos',
-        headers: [
-          'Código artículo',
-          ...BASE_COLUMNS.map((column) => column.label),
-          ...ASSET_TYPES.map((type) => type.label),
-          'Documentos',
-        ],
-        rows: filteredProducts.map((product) => [
-          product.sku,
-          ...BASE_COLUMNS.map((column) => baseValue(product, column.key)),
-          ...ASSET_TYPES.map((type) =>
-            documentState(product, type.value, assetsByProduct[product.id] ?? []),
-          ),
-          baseValue(product, 'coverage'),
-        ]),
+        headers: orderedColumns
+          .filter((column) => column.key !== 'image')
+          .map((column) => column.label),
+        rows: filteredProducts.map((product) =>
+          orderedColumns
+            .filter((column) => column.key !== 'image')
+            .map((column) => baseValue(product, column.key)),
+        ),
       },
       'imagenes-y-documentos',
     );
@@ -367,19 +429,53 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           role="toolbar"
           aria-label="Acciones de imágenes y documentos"
         >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={
+              loading ||
+              !!error ||
+              exportingSheets ||
+              !filteredProducts.length ||
+              filteredProducts.length > MAX_TECHNICAL_SHEETS_PER_ZIP
+            }
+            title={`Un PDF por SKU filtrado. Hasta ${MAX_TECHNICAL_SHEETS_PER_ZIP} fichas y 100 MB por ZIP.`}
+            onClick={() => void exportTechnicalSheets()}
+          >
+            <FileArchive className="size-3.5" aria-hidden="true" />
+            {exportingSheets
+              ? `Generando ${sheetProgress}/${sheetExportTotal}…`
+              : 'Fichas técnicas PDF (ZIP)'}
+          </Button>
+          {exportingSheets ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => sheetExportController.current?.abort()}
+            >
+              Cancelar generación
+            </Button>
+          ) : null}
+          {filteredProducts.length > MAX_TECHNICAL_SHEETS_PER_ZIP ? (
+            <span className="text-xs text-muted-foreground">
+              Filtra hasta {MAX_TECHNICAL_SHEETS_PER_ZIP} SKU para descargar sus fichas.
+            </span>
+          ) : null}
           {canWrite ? (
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               <FileArchive className="size-3.5" aria-hidden="true" /> Carga masiva (ZIP)
             </Button>
           ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loading || !!error || !filteredProducts.length}
-            onClick={exportMatrix}
-          >
-            <FileSpreadsheet className="size-3.5" aria-hidden="true" /> Exportar Excel
-          </Button>
+          {canWrite ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading || !!error || !filteredProducts.length}
+              onClick={exportMatrix}
+            >
+              <FileSpreadsheet className="size-3.5" aria-hidden="true" /> Exportar Excel
+            </Button>
+          ) : null}
           {canWrite ? (
             <a
               className={styles.example}
@@ -413,7 +509,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
       </div>
       {!canWrite ? (
         <p className="mb-3 text-xs text-muted-foreground">
-          Acceso de solo lectura: consulta, exporta y descarga los archivos disponibles.
+          Acceso de solo lectura: consulta y descarga los archivos disponibles.
         </p>
       ) : null}
       {notice ? (
@@ -452,6 +548,12 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
               servidor
             </p>
             <div className={styles.legend}>
+              <span>Arrastra las columnas o usa sus flechas para moverlas.</span>
+              {!order.isDefaultOrder ? (
+                <button type="button" onClick={order.resetOrder}>
+                  Restablecer orden
+                </button>
+              ) : null}
               <span>
                 <i className={styles.loadedSwatch} /> Cargado
               </span>
@@ -463,67 +565,71 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
               </span>
             </div>
           </div>
-          <div className={styles.filterHelp}>
-            <span title={'Filtros AX: *texto*, prefijo*, !valor, A|B y "" para vacías.'}>
-              ⓘ Filtros AX por columna
-            </span>
-            <span role="status">
-              {filteredProducts.length} filas
-              {Object.values(filters).some(Boolean) ? (
-                <button type="button" onClick={() => setFilters({})}>
-                  Limpiar filtros
-                </button>
-              ) : null}
-            </span>
-          </div>
+          {Object.values(filters).some(Boolean) ? (
+            <div className={styles.filterHelp}>
+              <span title={'Filtros AX: *texto*, prefijo*, !valor, A|B y "" para vacías.'}>
+                ⓘ Filtros AX por columna
+              </span>
+              <span role="status">
+                {filteredProducts.length} filas
+                {Object.values(filters).some(Boolean) ? (
+                  <button type="button" onClick={() => setFilters({})}>
+                    Limpiar filtros
+                  </button>
+                ) : null}
+              </span>
+            </div>
+          ) : null}
           <div
             className={styles.scroll}
             tabIndex={0}
             role="region"
             aria-label="Matriz de documentos desplazable"
           >
-            <table className={styles.table}>
+            <table
+              className={styles.table}
+              data-column-table="documents"
+              data-column-resize-key="documents"
+            >
               <colgroup>
-                {[145, 56, 220, 220, 220, 128, 170, 156, 245, 245, 245, 245, 245, 110].map(
-                  (width, index) => (
-                    <col key={index} style={{ width }} />
-                  ),
-                )}
+                {orderedColumns.map((column) => (
+                  <col key={column.key} style={{ width: column.width }} />
+                ))}
               </colgroup>
               <thead>
-                <tr className={styles.groups}>
-                  <th>SKU</th>
-                  <th colSpan={7}>Imagen y Datos Base ERP · Solo Lectura</th>
-                  <th colSpan={5}>
-                    {canWrite
-                      ? 'Documentos · «Cargar» o arrastra el archivo a la celda'
-                      : 'Documentos disponibles'}
-                  </th>
-                  <th>Control</th>
-                </tr>
                 <tr>
-                  <th>Código artículo</th>
-                  <th>Imagen</th>
-                  {BASE_COLUMNS.map((column) => (
-                    <th key={column.key}>{column.label}</th>
-                  ))}
-                  {ASSET_TYPES.map((type) => (
-                    <th key={type.value} title={type.formats}>
-                      {type.label}
+                  {orderedColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      data-column-key={column.key}
+                      data-column-label={column.label}
+                    >
+                      {column.key === 'sku' ? (
+                        column.label
+                      ) : (
+                        <ReorderableColumnLabel
+                          control={order.getColumnControl(column.key, column.label)}
+                        />
+                      )}
                     </th>
                   ))}
-                  <th>Documentos</th>
                 </tr>
-                <tr>
-                  <th>{filterInput('sku', 'Código artículo')}</th>
-                  <th />
-                  {BASE_COLUMNS.map((column) => (
-                    <th key={column.key}>{filterInput(column.key, column.label)}</th>
+                <tr className="xf-row">
+                  {orderedColumns.map((column) => (
+                    <th key={column.key}>
+                      {column.key === 'image' ? (
+                        <button
+                          type="button"
+                          aria-label="Ayuda de filtros AX"
+                          title={'Filtros AX: *texto*, prefijo*, !valor, A|B y "" para vacías.'}
+                        >
+                          ⓘ
+                        </button>
+                      ) : (
+                        filterInput(column.key, column.label)
+                      )}
+                    </th>
                   ))}
-                  {ASSET_TYPES.map((type) => (
-                    <th key={type.value}>{filterInput(type.value, type.label)}</th>
-                  ))}
-                  <th>{filterInput('coverage', 'Documentos')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -532,37 +638,50 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
                   const coverage = documentCoverage(product, assets);
                   return (
                     <tr key={product.id}>
-                      <th>
-                        <Link href={`/products/${encodeURIComponent(product.id)}`}>
-                          {product.sku}
-                        </Link>
-                      </th>
-                      <td>
-                        <ProductPhoto product={product} assets={assets} />
-                      </td>
-                      {BASE_COLUMNS.map((column) => (
-                        <td
-                          key={column.key}
-                          className={styles.erp}
-                          title={baseValue(product, column.key)}
-                        >
-                          <span>{baseValue(product, column.key) || '—'}</span>
-                        </td>
-                      ))}
-                      {ASSET_TYPES.map((type) => (
-                        <AssetSlotCell
-                          key={type.value}
-                          product={product}
-                          type={type}
-                          assets={assets.filter((asset) => asset.type === type.value)}
-                          {...slotProps}
-                        />
-                      ))}
-                      <td className={styles.coverage}>
-                        <span data-missing={!!coverage?.requiredMissing}>
-                          {coverage ? `${coverage.present}/${coverage.total}` : '—'}
-                        </span>
-                      </td>
+                      {orderedColumns.map((column) => {
+                        if (column.key === 'sku')
+                          return (
+                            <th key={column.key}>
+                              <Link href={`/products/${encodeURIComponent(product.id)}`}>
+                                {product.sku}
+                              </Link>
+                            </th>
+                          );
+                        if (column.key === 'image')
+                          return (
+                            <td key={column.key}>
+                              <ProductPhoto product={product} assets={assets} />
+                            </td>
+                          );
+                        const type = ASSET_TYPES.find((type) => type.value === column.key);
+                        if (type)
+                          return (
+                            <AssetSlotCell
+                              key={column.key}
+                              product={product}
+                              type={type}
+                              assets={assets.filter((asset) => asset.type === type.value)}
+                              {...slotProps}
+                            />
+                          );
+                        if (column.key === 'coverage')
+                          return (
+                            <td key={column.key} className={styles.coverage}>
+                              <span data-missing={!!coverage?.requiredMissing}>
+                                {coverage ? `${coverage.present}/${coverage.total}` : '—'}
+                              </span>
+                            </td>
+                          );
+                        return (
+                          <td
+                            key={column.key}
+                            className={styles.erp}
+                            title={baseValue(product, column.key)}
+                          >
+                            <span>{baseValue(product, column.key) || '—'}</span>
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}

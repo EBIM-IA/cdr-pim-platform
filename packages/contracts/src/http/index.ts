@@ -15,3 +15,14 @@ export * from './product-catalog';
 export * from './search';
 export * from './workspace';
 export * from './product-naming';
+
+export * from './ecommerce';
+
+export * from './quality-governance';
+export * from './product-draft';
+
+export * from './report-settings';
+export * from './integration-monitor';
+export * from './search-report';
+export * from './catalog-parameters';
+export * from './unified-code-request';

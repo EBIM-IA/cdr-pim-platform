@@ -641,7 +641,7 @@ export function ProductsCatalog({
               Volver al catálogo
             </Button>
           </Card>
-          <DynamicCatalogSheet />
+          <DynamicCatalogSheet canImport={canViewImports} />
         </>
       ) : (
         <>

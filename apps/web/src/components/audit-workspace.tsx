@@ -15,6 +15,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,7 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<AuditChangeDto | null>(null);
 
   const currentQuery = useCallback(
     (queryPage = page, queryPageSize = pageSize): AuditChangeListQuery => ({
@@ -143,6 +145,31 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <>
+      {selected ? (
+        <WorkspaceDrawer title="Detalle de cambio" onClose={() => setSelected(null)}>
+          <dl className="space-y-3 text-sm">
+            {[
+              ['SKU / recurso', selected.sku ?? selected.resourceId],
+              ['Campo', selected.field],
+              ['Acción', actionLabels[selected.action]],
+              ['Antes', formatValue(selected.before)],
+              ['Después', formatValue(selected.after)],
+              ['Motivo', selected.reason ?? 'No se registró motivo para este evento.'],
+              ['Actor', selected.actorId ?? 'Sistema'],
+              ['Origen', selected.source],
+              ['Fecha', new Date(selected.occurredAt).toLocaleString('es-PE')],
+              ['Correlación', selected.correlationId],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
+                <dd className="mt-1 whitespace-pre-wrap break-words rounded border bg-slate-50 p-2">
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </WorkspaceDrawer>
+      ) : null}
       {!embedded ? (
         <>
           <PageHeader
@@ -428,6 +455,14 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
                       <span className="text-[10px] text-muted-foreground">
                         {item.correlationId}
                       </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelected(item)}
+                      >
+                        Ver detalle
+                      </Button>
                     </td>
                   </tr>
                 ))}

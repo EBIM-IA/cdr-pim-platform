@@ -89,6 +89,20 @@ export function CatalogSearch({
     },
   ];
   if (data) {
+    for (const item of data.items) {
+      choices.splice(
+        choices.findIndex((choice) => choice.kind === 'query'),
+        0,
+        {
+          kind: 'sku',
+          value: item.ficha,
+          label: item.nombreAmigable,
+          detail: [item.codigoArticulo, item.marca].filter(Boolean).join(' · '),
+          href: item.ficha,
+          type: item.tipo,
+        },
+      );
+    }
     for (const { id: categoryId, name } of data.categories) {
       choices.push({
         kind: 'category',
@@ -103,16 +117,6 @@ export function CatalogSearch({
         value: brand,
         label: brand,
         detail: 'Marca · filtrar resultados',
-      });
-    }
-    for (const item of data.items) {
-      choices.push({
-        kind: 'sku',
-        value: item.ficha,
-        label: item.nombreAmigable,
-        detail: [item.codigoArticulo, item.marca].filter(Boolean).join(' · '),
-        href: item.ficha,
-        type: item.tipo,
       });
     }
   }

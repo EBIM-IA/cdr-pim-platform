@@ -26,6 +26,7 @@ export interface ProductCatalogRepositoryPort {
     readonly pageSize: number;
     readonly q?: string;
     readonly includeDeleted?: boolean;
+    readonly currentOnly?: boolean;
     readonly now: Date;
   }): Promise<{ items: CatalogWithShares[]; total: number; metrics: CatalogMetrics }>;
   find(id: string): Promise<CatalogWithShares | null>;

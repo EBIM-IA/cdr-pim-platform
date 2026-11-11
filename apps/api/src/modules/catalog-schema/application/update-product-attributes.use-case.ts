@@ -37,6 +37,8 @@ export interface ProductAttributeBatchItem {
 export interface UpdateProductAttributesCommand {
   readonly productId: string;
   readonly updates: readonly ProductAttributeBatchItem[];
+  readonly reason?: string;
+  readonly statusTarget?: 'draft' | 'in_review';
 }
 
 export interface UpdatedProductAttributes {
@@ -97,6 +99,8 @@ export class UpdateProductAttributesUseCase {
     const result = await this.catalog.updateAttributes({
       productId,
       updates: command.updates,
+      ...(command.reason ? { reason: command.reason } : {}),
+      ...(command.statusTarget ? { statusTarget: command.statusTarget } : {}),
       source: AttributeValueSource.Manual,
       roles,
       now,

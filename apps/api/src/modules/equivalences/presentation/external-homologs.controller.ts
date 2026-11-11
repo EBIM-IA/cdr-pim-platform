@@ -18,7 +18,11 @@ import {
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  Capability,
+  actorHasCapability,
+  type AuthenticatedActor,
+} from '../../identity/domain/entities/role';
 import {
   CreateExternalHomologUseCase,
   DeactivateExternalHomologUseCase,
@@ -43,8 +47,17 @@ export class ExternalHomologsController {
   @Get('homologs')
   async list(
     @Query(new ZodValidationPipe(homologListQuerySchema)) query: HomologListQuery,
+    @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ExternalHomologDto[]> {
-    return (await this.listHomologs.execute(query)).map(toDto);
+    const canManage = actorHasCapability(actor, Capability.EquivalencesWrite);
+    return (
+      await this.listHomologs.execute({
+        ...query,
+        includeInactive: canManage && query.includeInactive,
+      })
+    )
+      .map(toDto)
+      .filter((row) => canManage || (row.active && row.approvalStatus === 'approved'));
   }
 
   @Post('homologs')
