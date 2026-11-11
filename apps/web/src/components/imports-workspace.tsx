@@ -29,6 +29,7 @@ import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspaceData } from '@/components/use-workspace-data';
@@ -369,11 +370,19 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     void fetchCatalogCategories(controller.signal)
       .then((categories) => {
         setCategoryOptions(categories);
-        setCategoryCode((current) => current || categories[0]?.slug || '');
-        setTemplateId((current) =>
-          categories.some((category) => category.templateId === current)
-            ? current
-            : (categories[0]?.templateId ?? ''),
+        const requestedTemplate = new URLSearchParams(window.location.search).get('templateId');
+        const requestedCategory = categories.find(
+          (category) => category.templateId === requestedTemplate,
+        );
+        setCategoryCode(
+          (current) => requestedCategory?.slug ?? (current || categories[0]?.slug || ''),
+        );
+        setTemplateId(
+          (current) =>
+            requestedCategory?.templateId ??
+            (categories.some((category) => category.templateId === current)
+              ? current
+              : (categories[0]?.templateId ?? '')),
         );
       })
       .catch(() => setCategoryOptions([]));
@@ -381,6 +390,31 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   }, []);
   const [resultId, setResultId] = useState('');
   const history = useWorkspaceData('imports');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({});
+  const historyRows = useMemo(() => {
+    const normalize = (value: string) =>
+      value
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase();
+    return (history.workspace?.rows ?? []).filter((row) => {
+      const cells = (history.workspace?.columns ?? []).map((column) => ({
+        key: column.key,
+        value: formatWorkspaceCell(row.values[column.key], column),
+      }));
+      return (
+        normalize([row.id, ...cells.map((cell) => cell.value)].join(' ')).includes(
+          normalize(historyQuery.trim()),
+        ) &&
+        cells.every(
+          (cell) =>
+            !historyFilters[cell.key]?.trim() ||
+            normalize(cell.value).includes(normalize(historyFilters[cell.key]!.trim())),
+        )
+      );
+    });
+  }, [history.workspace, historyQuery, historyFilters]);
 
   const columns = useMemo(() => sourceColumns(payload, format), [format, payload]);
   const fields = useMemo<readonly ImportField[]>(
@@ -742,6 +776,55 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   Actualizar
                 </Button>
               </div>
+              <div className="space-y-2 border-b p-3">
+                <Input
+                  type="search"
+                  aria-label="Buscar importaciones"
+                  placeholder="Buscar por lote, archivo, destino o estado…"
+                  value={historyQuery}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                />
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {historyRows.length} de {history.workspace.rows.length} lotes consultados
+                  </span>
+                  {historyQuery ? (
+                    <button
+                      type="button"
+                      className="rounded-full bg-orange-50 px-2 py-1 text-orange-800"
+                      onClick={() => setHistoryQuery('')}
+                    >
+                      Búsqueda: {historyQuery} ×
+                    </button>
+                  ) : null}
+                  {Object.entries(historyFilters)
+                    .filter(([, value]) => value)
+                    .map(([key, value]) => (
+                      <button
+                        type="button"
+                        key={key}
+                        className="rounded-full bg-orange-50 px-2 py-1 text-orange-800"
+                        onClick={() => setHistoryFilters((filters) => ({ ...filters, [key]: '' }))}
+                      >
+                        {history.workspace?.columns.find((column) => column.key === key)?.label}:{' '}
+                        {value} ×
+                      </button>
+                    ))}
+                  {historyQuery || Object.values(historyFilters).some(Boolean) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setHistoryQuery('');
+                        setHistoryFilters({});
+                      }}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
               {history.workspace.rows.length === 0 ? (
                 <div className="p-5">
                   <StatePanel
@@ -761,13 +844,35 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                         {history.workspace.columns.map((column) => (
                           <th key={column.key} className="px-4 py-3">
                             {column.label}
+                            <Input
+                              className="mt-2 h-8 min-w-28 text-xs"
+                              aria-label={`Filtrar importaciones: ${column.label}`}
+                              placeholder="Filtrar…"
+                              value={historyFilters[column.key] ?? ''}
+                              onChange={(event) =>
+                                setHistoryFilters((current) => ({
+                                  ...current,
+                                  [column.key]: event.target.value,
+                                }))
+                              }
+                            />
                           </th>
                         ))}
                         <th className="px-4 py-3">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {history.workspace.rows.map((row) => (
+                      {!historyRows.length ? (
+                        <tr>
+                          <td
+                            colSpan={history.workspace.columns.length + 2}
+                            className="px-4 py-10 text-center text-muted-foreground"
+                          >
+                            Sin lotes que coincidan con los filtros.
+                          </td>
+                        </tr>
+                      ) : null}
+                      {historyRows.map((row) => (
                         <tr key={row.id} className="hover:bg-orange-50/40">
                           <td className="px-4 py-3 font-mono text-xs">{row.id.slice(0, 8)}</td>
                           {history.workspace?.columns.map((column) => {

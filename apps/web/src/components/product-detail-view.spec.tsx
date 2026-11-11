@@ -2,6 +2,7 @@ import type { ProductAttributeSheetDto, ProductExperienceDto } from '@cdr/contra
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { fetchProductDraft, saveProductDraft } from '@/lib/product-draft-api';
 import { fetchProduct } from '@/lib/catalog-api';
 import {
   fetchProductAttributeSheet,
@@ -21,6 +22,11 @@ import { fetchProductExperience } from '@/lib/product-experience-api';
 import { listProductAssets, uploadProductAsset } from '@/lib/product-assets-api';
 
 import { ProductDetailView } from './product-detail-view';
+
+vi.mock('@/lib/product-draft-api', () => ({
+  fetchProductDraft: vi.fn(),
+  saveProductDraft: vi.fn(),
+}));
 
 vi.mock('@/lib/ecommerce-api', () => ({
   fetchEcommerceDescription: vi.fn(async () => null),
@@ -223,6 +229,20 @@ const sheet: ProductAttributeSheetDto = {
 afterEach(cleanup);
 
 beforeEach(() => {
+  vi.mocked(fetchProductDraft).mockResolvedValue({
+    productId: product.id,
+    templateId: sheet.schema.template.id,
+    version: 0,
+    entries: [],
+    updatedAt: null,
+  });
+  vi.mocked(saveProductDraft).mockImplementation(async (productId, input) => ({
+    productId,
+    templateId: input.templateId,
+    version: input.expectedVersion + 1,
+    entries: input.entries,
+    updatedAt: '2026-11-10T15:00:00.000Z',
+  }));
   window.history.replaceState({}, '', `/products/${product.id}`);
   vi.clearAllMocks();
   vi.mocked(fetchProduct).mockResolvedValue(product);
@@ -774,12 +794,18 @@ describe('ProductDetailView operational data', () => {
       target: { value: 'Pastilla semimetálica' },
     });
     fireEvent.change(rendered.getByLabelText('Color'), { target: { value: 'Negro' } });
+    if (rendered.queryByLabelText('Motivo del cambio'))
+      fireEvent.change(rendered.getByLabelText('Motivo del cambio'), {
+        target: { value: 'Validación cliente' },
+      });
     fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
 
     await waitFor(() => {
       expect(patchProductAttributes).toHaveBeenCalledTimes(1);
     });
     expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
+      statusTarget: 'in_review',
+      reason: 'Validación cliente',
       updates: [
         {
           attributeKey: 'descripcion_interna',
@@ -841,10 +867,16 @@ describe('ProductDetailView operational data', () => {
     fireEvent.change(input, { target: { value: 'Pastilla semimetálica' } });
     expect(saveBar).toHaveTextContent('1 cambio sin guardar');
     expect(input.closest('tr')).toHaveClass('bg-amber-50');
+    if (rendered.queryByLabelText('Motivo del cambio'))
+      fireEvent.change(rendered.getByLabelText('Motivo del cambio'), {
+        target: { value: 'Validación cliente' },
+      });
     fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
 
     await waitFor(() =>
       expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
+        statusTarget: 'in_review',
+        reason: 'Validación cliente',
         updates: [
           {
             attributeKey: 'descripcion_interna',
@@ -931,7 +963,7 @@ describe('ProductDetailView operational data', () => {
     const input = await rendered.findByRole('textbox', { name: 'Descripción interna' });
     fireEvent.change(input, { target: { value: 'Cambio descartado' } });
     fireEvent.click(rendered.getByRole('button', { name: 'Descartar cambios' }));
-    expect(input).toHaveValue('Pastilla cerámica');
+    await waitFor(() => expect(input).toHaveValue('Pastilla cerámica'));
     expect(rendered.getByRole('button', { name: 'Descartar cambios' })).toBeDisabled();
     expect(rendered.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
     expect(rendered.getByRole('region', { name: 'Guardar cambios de la ficha' })).toHaveTextContent(
@@ -971,6 +1003,10 @@ describe('ProductDetailView operational data', () => {
     fireEvent.change(rendered.getByRole('textbox', { name: 'Descripción interna' }), {
       target: { value: 'Valor en conflicto' },
     });
+    if (rendered.queryByLabelText('Motivo del cambio'))
+      fireEvent.change(rendered.getByLabelText('Motivo del cambio'), {
+        target: { value: 'Validación cliente' },
+      });
     fireEvent.click(rendered.getByRole('button', { name: 'Guardar cambios' }));
 
     expect(await rendered.findByRole('alert')).toHaveTextContent(
@@ -1042,7 +1078,7 @@ describe('ProductDetailView operational data', () => {
       'Borrador preservado',
     );
     fireEvent.click(rendered.getByRole('button', { name: 'Descartar cambios' }));
-    expect(selector).toBeEnabled();
+    await waitFor(() => expect(selector).toBeEnabled());
   });
 
   it('opens enrichment deep links in the drawer while preserving variant context and real field permissions', async () => {
@@ -1089,9 +1125,15 @@ describe('ProductDetailView operational data', () => {
     fireEvent.change(editor.getByRole('textbox', { name: 'Descripción interna' }), {
       target: { value: 'Actualizada desde enriquecimiento' },
     });
+    if (editor.queryByLabelText('Motivo del cambio'))
+      fireEvent.change(editor.getByLabelText('Motivo del cambio'), {
+        target: { value: 'Validación cliente' },
+      });
     fireEvent.click(editor.getByRole('button', { name: 'Guardar cambios' }));
     await waitFor(() =>
       expect(patchProductAttributes).toHaveBeenCalledWith(product.id, {
+        statusTarget: 'in_review',
+        reason: 'Validación cliente',
         updates: [
           {
             attributeKey: 'descripcion_interna',
@@ -1167,6 +1209,10 @@ describe('ProductDetailView operational data', () => {
     fireEvent.change(editor.getByRole('textbox', { name: 'Descripción interna' }), {
       target: { value: 'Actualizada' },
     });
+    if (editor.queryByLabelText('Motivo del cambio'))
+      fireEvent.change(editor.getByLabelText('Motivo del cambio'), {
+        target: { value: 'Validación cliente' },
+      });
     fireEvent.click(editor.getByRole('button', { name: 'Guardar cambios' }));
     expect(editor.getByRole('button', { name: 'Cerrar' })).toBeDisabled();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -1245,5 +1291,47 @@ describe('ProductDetailView operational data', () => {
       });
     });
     expect(await screen.findByText(/Variante 15\.2/)).toBeInTheDocument();
+  });
+  it('recovers a durable draft and saves it without applying catalog attributes', async () => {
+    vi.mocked(fetchProductAttributeSheet).mockResolvedValue({
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        columns: sheet.schema.columns.map((column) =>
+          column.sourceAuthority === 'pim'
+            ? { ...column, permissions: { edit: true, import: true, export: true } }
+            : column,
+        ),
+      },
+    });
+    vi.mocked(fetchProductDraft).mockResolvedValue({
+      productId: product.id,
+      templateId: sheet.schema.template.id,
+      version: 4,
+      updatedAt: '2026-11-10T15:00:00Z',
+      entries: [
+        { attributeKey: 'descripcion_interna', draft: 'Borrador del servidor', expectedVersion: 1 },
+      ],
+    });
+    render(<ProductDetailView productId={product.id} canReassignTemplate showCompleteness />);
+    expect(await screen.findByText(/Recuperamos tu borrador guardado/u)).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Descripción interna' })).toHaveValue(
+      'Borrador del servidor',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar borrador' }));
+    await waitFor(() =>
+      expect(saveProductDraft).toHaveBeenCalledWith(product.id, {
+        templateId: sheet.schema.template.id,
+        expectedVersion: 4,
+        entries: [
+          {
+            attributeKey: 'descripcion_interna',
+            draft: 'Borrador del servidor',
+            expectedVersion: 1,
+          },
+        ],
+      }),
+    );
+    expect(patchProductAttributes).not.toHaveBeenCalled();
   });
 });

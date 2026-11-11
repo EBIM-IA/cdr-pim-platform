@@ -1,3 +1,5 @@
+import { catalogParameters } from './catalog-parameters.tables';
+import { expandCatalogSynonyms } from '../../domain/services/catalog-synonyms';
 import { Inject, Injectable } from '@nestjs/common';
 import { type Uuid, ValidationError, newUuid } from '@cdr/shared';
 import { and, asc, count, eq, ilike, inArray, isNull, max, or, sql, type SQL } from 'drizzle-orm';
@@ -450,13 +452,18 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       eq(attributeTemplates.status, 'active'),
     ];
     if (options.q) {
-      const pattern = `%${escapeLike(options.q)}%`;
-      const searchableIds = schema.attributes
-        .filter((attribute) => attribute.searchable)
-        .map((attribute) => attribute.id);
-      const attributeSearch =
-        searchableIds.length > 0
-          ? sql<boolean>`EXISTS (
+      const synonyms = await this.db
+        .select({ value: catalogParameters.value, target: catalogParameters.target })
+        .from(catalogParameters)
+        .where(and(eq(catalogParameters.kind, 'synonym'), eq(catalogParameters.active, true)));
+      const queryMatches = expandCatalogSynonyms(options.q, synonyms).map((term) => {
+        const pattern = `%${escapeLike(term)}%`;
+        const searchableIds = schema.attributes
+          .filter((attribute) => attribute.searchable)
+          .map((attribute) => attribute.id);
+        const attributeSearch =
+          searchableIds.length > 0
+            ? sql<boolean>`EXISTS (
               SELECT 1 FROM product_attribute_values qv
               WHERE qv.product_id = ${products.id}
                 AND qv.attribute_definition_id IN (
@@ -468,14 +475,17 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
                 AND qv.deleted_at IS NULL
                 AND qv.value_text ILIKE ${pattern}
             )`
-          : undefined;
-      const search = or(
-        ilike(products.sku, pattern),
-        ilike(products.name, pattern),
-        ilike(products.brand, pattern),
-        attributeSearch,
-      );
-      if (search) filters.push(search);
+            : undefined;
+        const search = or(
+          ilike(products.sku, pattern),
+          ilike(products.name, pattern),
+          ilike(products.brand, pattern),
+          attributeSearch,
+        );
+        return search;
+      });
+      const combined = or(...queryMatches);
+      if (combined) filters.push(combined);
     }
     for (const filter of options.filters) {
       filters.push(this.attributeFilterSql(filter, schema.attributes));
@@ -564,6 +574,12 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       if (options.completeness === 'incomplete') filters.push(sql`${score} < 100`);
     }
 
+    const synonyms = options.q
+      ? await this.db
+          .select({ value: catalogParameters.value, target: catalogParameters.target })
+          .from(catalogParameters)
+          .where(and(eq(catalogParameters.kind, 'synonym'), eq(catalogParameters.active, true)))
+      : [];
     for (const term of [
       ...new Set(
         normalizeAxFilterText(options.q ?? '')
@@ -572,17 +588,9 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           .filter(Boolean),
       ),
     ]) {
-      // Vocabulary supplied by the designer; both the typed term and its synonym remain valid.
-      const synonyms: Record<string, string> = {
-        ruliman: 'rodamiento',
-        balinera: 'rodamiento',
-        reten: 'retenedor',
-        faja: 'banda',
-        balata: 'pastilla',
-      };
-      const patterns = [
-        ...new Set([term, synonyms[term]].filter((word): word is string => Boolean(word))),
-      ].map((word) => `%${escapeLike(word)}%`);
+      const patterns = expandCatalogSynonyms(term, synonyms).map(
+        (word) => `%${escapeLike(normalizeAxFilterText(word))}%`,
+      );
       const matches = (expression: SQL) =>
         sql<boolean>`${normalizedAxColumnSql(expression)} LIKE ANY (ARRAY[${sql.join(
           patterns.map((pattern) => sql`${pattern}`),
@@ -1113,6 +1121,8 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
   async updateAttributes(input: {
     productId: Uuid;
     updates: readonly AttributeUpdateRequest[];
+    reason?: string;
+    statusTarget?: 'draft' | 'in_review';
     source: AttributeValueSource;
     roles: readonly string[];
     now: Date;
@@ -1434,6 +1444,30 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           productAudit.status = { before, after: 'in_review' };
           auditChanges.set(productId as Uuid, productAudit);
         }
+      }
+
+      if (input.statusTarget) {
+        const before = previousStatus.get(input.productId);
+        if (before === 'archived')
+          throw new ValidationError(
+            'Un producto archivado no puede cambiar de estado desde el enriquecimiento.',
+          );
+        await tx
+          .update(products)
+          .set({ status: input.statusTarget, updatedAt: input.now })
+          .where(eq(products.id, input.productId));
+        if (before !== input.statusTarget) {
+          const primaryAudit = auditChanges.get(input.productId) ?? {};
+          primaryAudit.status = { before, after: input.statusTarget };
+          auditChanges.set(input.productId, primaryAudit);
+        } else {
+          // An intermediate published->review transition above must never produce a false event.
+          const primaryAudit = auditChanges.get(input.productId);
+          if (primaryAudit) delete primaryAudit.status;
+        }
+      }
+      if (input.reason) {
+        for (const changes of auditChanges.values()) changes.reason = { after: input.reason };
       }
 
       // Audit insertion stays inside this transaction. Any history failure rolls back every

@@ -1,3 +1,8 @@
+import { Inject } from '@nestjs/common';
+import {
+  QUALITY_CANDIDATE_CAPTURE,
+  type QualityCandidateCapturePort,
+} from '../../quality/domain/ports/quality-candidate-capture.port';
 import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -29,13 +34,14 @@ export class AiController {
   constructor(
     private readonly generateProposal: GenerateCommercialProposalUseCase,
     private readonly extractCandidates: ExtractAssetCandidatesUseCase,
+    @Inject(QUALITY_CANDIDATE_CAPTURE) private readonly capture: QualityCandidateCapturePort,
   ) {}
 
   @Post('products/:productId/commercial-proposal')
   @HttpCode(200)
   @RateLimit('ai')
   @ApiOperation({
-    summary: 'Generate a non-persisted commercial-copy candidate for one product',
+    summary: 'Generate a persisted, reviewable commercial-copy candidate for one product',
   })
   @ApiOkResponse({ schema: openApiSchema(aiCommercialProposalResponseSchema) })
   async commercialProposal(
@@ -45,6 +51,7 @@ export class AiController {
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<AiCommercialProposalResponse> {
     const result = await this.generateProposal.execute(productId, body, actor);
+    const reviewIds = await this.capture.captureCommercial(result, actor);
     return {
       productId: result.productId,
       sku: result.sku,
@@ -55,7 +62,8 @@ export class AiController {
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
       },
-      persisted: false,
+      persisted: true,
+      reviewIds,
       requiresHumanReview: true,
     };
   }
@@ -65,7 +73,7 @@ export class AiController {
   @RateLimit('ai')
   @RequireCapabilities(Capability.CatalogRead, Capability.AiDocumentExtract)
   @ApiOperation({
-    summary: 'Extract non-persisted attribute candidates from an existing private asset',
+    summary: 'Extract persisted, reviewable attribute candidates from an existing private asset',
   })
   @ApiOkResponse({ schema: openApiSchema(aiExtractionCandidatesResponseSchema) })
   async extractionCandidates(
@@ -75,6 +83,7 @@ export class AiController {
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<AiExtractionCandidatesResponse> {
     const result = await this.extractCandidates.execute(assetId, body, actor);
+    const reviewIds = await this.capture.captureExtraction(result, actor);
     return {
       assetId: result.assetId,
       productId: result.productId,
@@ -82,7 +91,8 @@ export class AiController {
       filename: result.filename,
       model: result.model,
       candidates: [...result.candidates],
-      persisted: false,
+      persisted: true,
+      reviewIds,
       requiresHumanReview: true,
     };
   }

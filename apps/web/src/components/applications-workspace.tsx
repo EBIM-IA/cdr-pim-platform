@@ -30,7 +30,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { downloadCsv, downloadXlsx } from '@/lib/tabular-export';
+import { downloadCsv, downloadXlsx, downloadWorkbookXlsx } from '@/lib/tabular-export';
 import { applicationMatches, findApplicationUnifiedCodes } from '@/lib/application-search';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -317,14 +317,68 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     orderedApplicationColumns.map((column) => column.getValue(item)),
   );
   const downloadTemplate = () => {
-    const content =
-      'codigo_unificador,marca_vehiculo,modelo,tipo,combustible,traccion,cilindraje,anio_desde,anio_hasta,area,subarea,motor,notas\n';
-    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'plantilla-aplicaciones.csv';
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadWorkbookXlsx(
+      [
+        {
+          sheetName: 'Datos',
+          headers: [
+            'codigo_unificador',
+            'tipo_aplicacion',
+            'marca_vehiculo',
+            'modelo',
+            'tipo',
+            'combustible',
+            'traccion',
+            'cilindraje',
+            'anio_desde',
+            'anio_hasta',
+            'area',
+            'subarea',
+            'motor',
+            'notas',
+          ],
+          rows: applicationTable.visibleRows.map((item) => [
+            item.unifiedCode,
+            item.vehicleType,
+            item.make,
+            item.model,
+            item.bodyStyle,
+            item.fuel,
+            item.traction,
+            item.displacement,
+            item.yearFrom,
+            item.yearTo,
+            item.area,
+            item.subarea,
+            item.engine,
+            item.notes,
+          ]),
+        },
+        {
+          sheetName: 'Instrucciones',
+          headers: ['Paso', 'Instrucción'],
+          rows: [
+            [
+              '1',
+              'La primera hoja contiene las aplicaciones visibles con los filtros actuales. Conserva codigo_unificador, marca_vehiculo y modelo.',
+            ],
+            [
+              '2',
+              'Edita los datos y sube el Excel en Importaciones, destino Aplicaciones. Revisa el mapeo y la validación antes de confirmar.',
+            ],
+            [
+              '3',
+              'tipo_aplicacion admite AUTOMOTRIZ o INDUSTRIAL. Los años deben ser enteros y el año final no puede ser anterior al inicial.',
+            ],
+            [
+              '4',
+              'Las aplicaciones se vinculan al código unificador y son compartidas por sus SKU. Esta carga no elimina aplicaciones existentes.',
+            ],
+          ],
+        },
+      ],
+      'plantilla-aplicaciones-con-datos',
+    );
   };
 
   const updateField = <Key extends keyof ApplicationForm>(

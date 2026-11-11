@@ -49,6 +49,10 @@ import {
   productAssetDownloadUrl,
   uploadProductAsset,
 } from '@/lib/product-assets-api';
+import {
+  downloadTechnicalSheetsZip,
+  MAX_TECHNICAL_SHEETS_PER_ZIP,
+} from '@/lib/technical-sheet-export';
 import { downloadXlsx } from '@/lib/tabular-export';
 import { cn } from '@/lib/utils';
 
@@ -120,6 +124,11 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [view, setView] = useState<'table' | 'context'>('table');
   const [selectedId, setSelectedId] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [exportingSheets, setExportingSheets] = useState(false);
+  const [sheetProgress, setSheetProgress] = useState(0);
+  const [sheetExportTotal, setSheetExportTotal] = useState(0);
+  const sheetExportController = useRef<AbortController | null>(null);
+  useEffect(() => () => sheetExportController.current?.abort(), []);
   const [uploadingSlots, setUploadingSlots] = useState<ReadonlySet<string>>(new Set());
   const pendingUploads = useRef(new Set<string>());
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -130,6 +139,35 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [bulkError, setBulkError] = useState<string | null>(null);
   const validatedZip = useRef<File | null>(null);
   const bulkInFlight = useRef(false);
+  async function exportTechnicalSheets() {
+    const selected = [...filteredProducts];
+    setSheetExportTotal(selected.length);
+    const controller = new AbortController();
+    sheetExportController.current = controller;
+    setExportingSheets(true);
+    setSheetProgress(0);
+    setNotice(null);
+    try {
+      await downloadTechnicalSheetsZip(selected, assetsByProduct, {
+        signal: controller.signal,
+        onProgress: (complete) => setSheetProgress(complete),
+      });
+      setNotice({
+        tone: 'success',
+        message: `${selected.length} fichas técnicas descargadas, una por SKU. Se exportaron únicamente atributos autorizados.`,
+      });
+    } catch (failure) {
+      if (!controller.signal.aborted)
+        setNotice({
+          tone: 'error',
+          message:
+            failure instanceof Error ? failure.message : 'No se pudo generar el ZIP de fichas.',
+        });
+    } finally {
+      setExportingSheets(false);
+      sheetExportController.current = null;
+    }
+  }
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('productId');
@@ -391,6 +429,38 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           role="toolbar"
           aria-label="Acciones de imágenes y documentos"
         >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={
+              loading ||
+              !!error ||
+              exportingSheets ||
+              !filteredProducts.length ||
+              filteredProducts.length > MAX_TECHNICAL_SHEETS_PER_ZIP
+            }
+            title={`Un PDF por SKU filtrado. Hasta ${MAX_TECHNICAL_SHEETS_PER_ZIP} fichas y 100 MB por ZIP.`}
+            onClick={() => void exportTechnicalSheets()}
+          >
+            <FileArchive className="size-3.5" aria-hidden="true" />
+            {exportingSheets
+              ? `Generando ${sheetProgress}/${sheetExportTotal}…`
+              : 'Fichas técnicas PDF (ZIP)'}
+          </Button>
+          {exportingSheets ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => sheetExportController.current?.abort()}
+            >
+              Cancelar generación
+            </Button>
+          ) : null}
+          {filteredProducts.length > MAX_TECHNICAL_SHEETS_PER_ZIP ? (
+            <span className="text-xs text-muted-foreground">
+              Filtra hasta {MAX_TECHNICAL_SHEETS_PER_ZIP} SKU para descargar sus fichas.
+            </span>
+          ) : null}
           {canWrite ? (
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               <FileArchive className="size-3.5" aria-hidden="true" /> Carga masiva (ZIP)

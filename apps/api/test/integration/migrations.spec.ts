@@ -57,6 +57,7 @@ describe('migration runner', () => {
         'ax_inbound_batches',
         'ax_inbound_records',
         'catalog_categories',
+        'catalog_parameters',
         'catalog_product_readiness',
         'cdr_schema_migrations',
         'code_affixes',
@@ -72,6 +73,7 @@ describe('migration runner', () => {
         'import_batches',
         'import_rows',
         'product_assets',
+        'product_attribute_drafts',
         'product_attribute_values',
         'product_catalog_shares',
         'product_catalogs',
@@ -80,9 +82,16 @@ describe('migration runner', () => {
         'product_name_settings',
         'product_template_assignments',
         'products',
+        'quality_review_items',
+        'report_baseline_products',
+        'report_baselines',
+        'report_closed_periods',
+        'report_preferences',
+        'search_events',
         'template_asset_requirements',
         'template_attribute_assignments',
         'template_attribute_role_access',
+        'unified_code_requests',
       ]);
 
       const auditId = randomUUID();

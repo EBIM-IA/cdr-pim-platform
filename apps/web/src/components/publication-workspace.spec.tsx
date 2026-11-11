@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   template: vi.fn(),
   update: vi.fn(),
   assets: vi.fn(),
+  experience: vi.fn(),
 }));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchCatalogCategories: api.categories,
@@ -27,6 +28,7 @@ vi.mock('@/lib/catalog-admin-api', () => ({
   getAdminTemplate: api.template,
   updateAdminTemplateAttribute: api.update,
 }));
+vi.mock('@/lib/product-experience-api', () => ({ fetchProductExperience: api.experience }));
 vi.mock('@/lib/product-assets-api', () => ({ listProductAssets: api.assets }));
 
 import { PublicationWorkspace, publicationReadiness } from './publication-workspace';
@@ -77,6 +79,7 @@ const workspace: WorkspaceDto = {
   actions: [],
 };
 beforeEach(() => {
+  api.experience.mockResolvedValue({ nombreGeneral: 'Rodamiento', variants: [], fields: [] });
   vi.resetAllMocks();
   api.categories.mockResolvedValue([
     { id: 'category-1', templateId: 'template-1', name: 'Rodamientos', templateName: 'Rodamiento' },

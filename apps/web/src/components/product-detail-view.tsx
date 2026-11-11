@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 
 import { EcommerceDescriptionCard } from '@/components/ecommerce-description-card';
+import { ProductRelationsDrawer } from '@/components/product-relations-drawer';
 import { ProductGallery } from '@/components/product-gallery';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -57,6 +58,7 @@ import {
   listHomologs,
   listOemCodes,
 } from '@/lib/operational-api';
+import { fetchProductDraft, saveProductDraft } from '@/lib/product-draft-api';
 import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
 import {
   listProductAssets,
@@ -172,6 +174,8 @@ function EnrichmentDrawer({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [statusTarget, setStatusTarget] = useState<'draft' | 'in_review'>('in_review');
   const [showMode, setShowMode] = useState<'all' | 'required' | 'empty'>('all');
   const drawerElement = useRef<HTMLElement>(null);
   const drawerActions = useRef({ onClose, saving });
@@ -273,7 +277,10 @@ function EnrichmentDrawer({
           throw new Error(`${column.label} es obligatorio.`);
         }
       }
+      if (!reason.trim()) throw new Error('Indica el motivo del cambio.');
       const result = await patchProductAttributes(sheet.product.id, {
+        reason: reason.trim(),
+        statusTarget,
         updates: changes.map((column) => {
           const current = sheet.product.attributes[column.key];
           return {
@@ -519,6 +526,32 @@ function EnrichmentDrawer({
               {error}
             </p>
           ) : null}
+          <div className="mb-3 grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-xs font-semibold">
+              Motivo del cambio *
+              <textarea
+                aria-label="Motivo del cambio"
+                required
+                maxLength={2000}
+                className="rounded border p-2"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                disabled={saving}
+              />
+            </label>
+            <Select
+              label="Estado destino"
+              value={statusTarget}
+              onChange={(event) => setStatusTarget(event.target.value as 'draft' | 'in_review')}
+              disabled={saving}
+            >
+              <option value="in_review">Enviar a revisión</option>
+              <option value="draft">Guardar como borrador</option>
+            </Select>
+          </div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Los archivos se administran en la sección Documentos de la ficha.
+          </p>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
               Cancelar
@@ -648,7 +681,13 @@ function TechnicalPanel({
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const loadedDraftProduct = useRef<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [statusTarget, setStatusTarget] = useState<'draft' | 'in_review'>('in_review');
   const editingSnapshot = useRef<ProductAttributeSheetDto | null>(null);
   const pendingSheet = useRef<ProductAttributeSheetDto | null>(null);
   const initializedSheet = useRef<ProductAttributeSheetDto | null | undefined>(undefined);
@@ -702,6 +741,144 @@ function TechnicalPanel({
     setSaveError(null);
     setEditing(allowed.length > 0);
   }, [canEditDirect, dirty, product.id, sheet]);
+
+  useEffect(() => {
+    if (!sheet || !canEditDirect || loadedDraftProduct.current === product.id) return;
+    const controller = new AbortController();
+    setDraftLoading(true);
+    setDraftVersion(null);
+    setDraftNotice(null);
+    void fetchProductDraft(product.id, controller.signal)
+      .then((stored) => {
+        if (controller.signal.aborted) return;
+        loadedDraftProduct.current = product.id;
+        setDraftVersion(stored.version);
+        if (!stored.entries.length) return;
+        if (stored.templateId !== sheet.schema.template.id) {
+          setDraftNotice(
+            'La plantilla cambió desde tu último borrador. Revisa los atributos antes de guardar un nuevo borrador.',
+          );
+          return;
+        }
+        const baseline = editingSnapshot.current ?? sheet;
+        editingSnapshot.current = {
+          ...baseline,
+          product: {
+            ...baseline.product,
+            attributes: {
+              ...baseline.product.attributes,
+              ...Object.fromEntries(
+                stored.entries.map((entry) => [
+                  entry.attributeKey,
+                  {
+                    ...(baseline.product.attributes[entry.attributeKey] ?? {
+                      value: null,
+                      source: 'manual',
+                      updatedAt:
+                        stored.updatedAt ?? product.updatedAt ?? '1970-01-01T00:00:00.000Z',
+                    }),
+                    version: entry.expectedVersion,
+                  },
+                ]),
+              ),
+            },
+          },
+        };
+        setDrafts((current) => ({
+          ...current,
+          ...Object.fromEntries(stored.entries.map((entry) => [entry.attributeKey, entry.draft])),
+        }));
+        setDraftNotice(
+          'Recuperamos tu borrador guardado. Revisa los valores y guarda los cambios para aplicarlos al catálogo.',
+        );
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setDraftNotice(
+            error instanceof Error ? error.message : 'No fue posible recuperar el borrador.',
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDraftLoading(false);
+      });
+    return () => controller.abort();
+  }, [canEditDirect, product.id, sheet]);
+
+  const persistDraft = async (discard = false) => {
+    if (!sheet || saving) return;
+    if (draftVersion === null) {
+      if (discard) {
+        const baseline = pendingSheet.current ?? sheet;
+        editingSnapshot.current = baseline;
+        pendingSheet.current = null;
+        setDrafts(
+          Object.fromEntries(
+            baseline.schema.columns
+              .filter((column) => column.permissions.edit && column.sourceAuthority === 'pim')
+              .map((column) => [
+                column.key,
+                attributeInputValue(baseline.product.attributes[column.key]?.value),
+              ]),
+          ),
+        );
+        setSaveError(null);
+        setDraftNotice(
+          'Cambios locales descartados. No se pudo acceder al borrador guardado en el servidor.',
+        );
+      }
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const baseline = editingSnapshot.current ?? sheet;
+      const entries = discard
+        ? []
+        : sheet.schema.columns
+            .filter(
+              (column) =>
+                column.permissions.edit &&
+                column.sourceAuthority === 'pim' &&
+                (drafts[column.key] ?? '') !==
+                  attributeInputValue(baseline.product.attributes[column.key]?.value),
+            )
+            .map((column) => ({
+              attributeKey: column.key,
+              draft: drafts[column.key] ?? '',
+              expectedVersion: baseline.product.attributes[column.key]?.version ?? 0,
+            }));
+      const stored = await saveProductDraft(product.id, {
+        templateId: sheet.schema.template.id,
+        expectedVersion: draftVersion,
+        entries,
+      });
+      setDraftVersion(stored.version);
+      setDraftNotice(
+        discard
+          ? 'Borrador descartado.'
+          : 'Borrador guardado en el servidor. El catálogo mantiene sus valores actuales.',
+      );
+      if (discard) {
+        const currentSheet = pendingSheet.current ?? sheet;
+        editingSnapshot.current = currentSheet;
+        pendingSheet.current = null;
+        setDrafts(
+          Object.fromEntries(
+            currentSheet.schema.columns
+              .filter((column) => column.permissions.edit && column.sourceAuthority === 'pim')
+              .map((column) => [
+                column.key,
+                attributeInputValue(currentSheet.product.attributes[column.key]?.value),
+              ]),
+          ),
+        );
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No fue posible guardar el borrador.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const attributes = sheet
     ? technicalAttributesFromSheet(sheet).map((attribute) => ({
@@ -840,6 +1017,8 @@ function TechnicalPanel({
       );
       if (!changed.length) return;
       const result = await patchProductAttributes(product.id, {
+        ...(reason.trim() ? { reason: reason.trim() } : {}),
+        statusTarget,
         updates: changed.map((column) => ({
           attributeKey: column.key,
           value: parsedAttributeValue(column, drafts[column.key] ?? ''),
@@ -878,6 +1057,21 @@ function TechnicalPanel({
           ]),
         ),
       );
+      if (draftVersion !== null) {
+        try {
+          const cleared = await saveProductDraft(product.id, {
+            templateId: original.schema.template.id,
+            expectedVersion: draftVersion,
+            entries: [],
+          });
+          setDraftVersion(cleared.version);
+          setDraftNotice('Cambios aplicados al catálogo.');
+        } catch {
+          setDraftNotice(
+            'Los cambios se aplicaron al catálogo, pero no se pudo limpiar el borrador guardado.',
+          );
+        }
+      }
       onSaved(
         new Set(result.attributes.flatMap((attribute) => attribute.replicatedProductIds)).size,
       );
@@ -1065,7 +1259,7 @@ function TechnicalPanel({
                                 aria-label={attribute.label}
                                 className={inputClass}
                                 value={value}
-                                disabled={saving}
+                                disabled={saving || draftLoading}
                                 onChange={(event) =>
                                   setDrafts((current) => ({
                                     ...current,
@@ -1092,7 +1286,7 @@ function TechnicalPanel({
                                 aria-label={attribute.label}
                                 className={inputClass}
                                 value={value}
-                                disabled={saving}
+                                disabled={saving || draftLoading}
                                 required={column.required}
                                 type={column.dataType === 'date' ? 'date' : 'text'}
                                 inputMode={
@@ -1161,6 +1355,11 @@ function TechnicalPanel({
             aria-label="Guardar cambios de la ficha"
             className="sticky bottom-3 mt-4 rounded-lg border bg-white p-3 shadow-lg"
           >
+            {draftLoading || draftNotice ? (
+              <p role="status" className="mb-2 text-xs text-muted-foreground">
+                {draftLoading ? 'Recuperando borrador…' : draftNotice}
+              </p>
+            ) : null}
             {saveError ? (
               <p role="alert" className="mb-2 text-xs text-red-700">
                 {saveError}
@@ -1170,33 +1369,50 @@ function TechnicalPanel({
               <p className="text-xs text-muted-foreground" aria-live="polite">
                 <strong>{dirtyCount}</strong> {dirtyCount === 1 ? 'cambio' : 'cambios'} sin guardar
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid gap-1 text-xs">
+                  Motivo del cambio
+                  <input
+                    aria-label="Motivo del cambio en ficha"
+                    maxLength={2000}
+                    className="h-8 rounded border px-2"
+                    placeholder="Opcional"
+                    value={reason}
+                    disabled={saving || draftLoading}
+                    onChange={(event) => setReason(event.target.value)}
+                  />
+                </label>
+                <Select
+                  label="Estado destino"
+                  value={statusTarget}
+                  onChange={(event) => setStatusTarget(event.target.value as 'draft' | 'in_review')}
+                  disabled={saving || draftLoading}
+                >
+                  <option value="in_review">Enviar a revisión</option>
+                  <option value="draft">Guardar como borrador</option>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={saving || !dirty}
-                  onClick={() => {
-                    const baseline = pendingSheet.current ?? editingSnapshot.current ?? sheet;
-                    editingSnapshot.current = baseline;
-                    pendingSheet.current = null;
-                    setDrafts(
-                      Object.fromEntries(
-                        editableColumns.map((column) => [
-                          column.key,
-                          attributeInputValue(baseline?.product.attributes[column.key]?.value),
-                        ]),
-                      ),
-                    );
-                    setSaveError(null);
-                  }}
+                  disabled={saving || draftLoading || !dirty || draftVersion === null}
+                  onClick={() => void persistDraft()}
+                >
+                  Guardar borrador
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={saving || draftLoading || !dirty}
+                  onClick={() => void persistDraft(true)}
                 >
                   Descartar cambios
                 </Button>
                 <Button
                   type="button"
                   size="sm"
-                  disabled={saving || !dirty}
+                  disabled={saving || draftLoading || !dirty}
                   onClick={() => void save()}
                 >
                   <Save aria-hidden="true" className="size-3" />
@@ -2051,12 +2267,16 @@ export function ProductDetailView({
   productId,
   canWriteAssets = false,
   canReassignTemplate = false,
+  canWriteApplications = false,
+  canWriteEquivalences = false,
   showCompleteness = false,
   showProductStatus = true,
 }: {
   productId: string;
   canWriteAssets?: boolean;
   canReassignTemplate?: boolean;
+  canWriteApplications?: boolean;
+  canWriteEquivalences?: boolean;
   showCompleteness?: boolean;
   showProductStatus?: boolean;
 }) {
@@ -2094,6 +2314,9 @@ export function ProductDetailView({
   const [activeTab, setActiveTab] = useState<DetailTab>('technical');
   const [unitSystem, setUnitSystem] = useState<MeasurementSystem>('metric');
   const [editOpen, setEditOpen] = useState(false);
+  const [relationsEditor, setRelationsEditor] = useState<
+    'applications' | 'homologs' | 'oem' | null
+  >(null);
   const [inlineEditRequest, setInlineEditRequest] = useState(0);
   const [inlineDirty, setInlineDirty] = useState(false);
   const canEditDirect = canReassignTemplate && showCompleteness;
@@ -2422,27 +2645,61 @@ export function ProductDetailView({
     if (!product) return null;
     if (activeTab === 'applications') {
       return (
-        <ApplicationsPanel
-          productId={product.id}
-          unifiedCode={unifiedCode}
-          applications={applications}
-          loading={applicationsLoading}
-          error={applicationsError}
-        />
+        <div className="space-y-3">
+          {canWriteApplications && unifiedCode ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRelationsEditor('applications')}
+            >
+              Gestionar aplicaciones
+            </Button>
+          ) : null}
+          <ApplicationsPanel
+            productId={product.id}
+            unifiedCode={unifiedCode}
+            applications={applications}
+            loading={applicationsLoading}
+            error={applicationsError}
+          />
+        </div>
       );
     }
     if (activeTab === 'equivalences') {
       return (
-        <EquivalencesPanel
-          product={product}
-          sheet={attributeSheet}
-          unifiedCode={unifiedCode}
-          homologs={homologs}
-          oemCodes={oemCodes}
-          oemError={oemError}
-          loading={homologsLoading}
-          error={homologsError}
-        />
+        <div className="space-y-3">
+          {canWriteEquivalences && unifiedCode ? (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRelationsEditor('oem')}
+              >
+                Gestionar OEM
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRelationsEditor('homologs')}
+              >
+                Gestionar homólogos
+              </Button>
+            </div>
+          ) : null}
+          <EquivalencesPanel
+            product={product}
+            sheet={attributeSheet}
+            unifiedCode={unifiedCode}
+            homologs={homologs}
+            oemCodes={oemCodes}
+            oemError={oemError}
+            loading={homologsLoading}
+            error={homologsError}
+          />
+        </div>
       );
     }
     if (activeTab === 'documents') {
@@ -2480,6 +2737,8 @@ export function ProductDetailView({
     canWriteAssets,
     handleAssetUploaded,
     canReassignTemplate,
+    canWriteApplications,
+    canWriteEquivalences,
     showCompleteness,
     changeUnitSystem,
     homologs,
@@ -2595,6 +2854,23 @@ export function ProductDetailView({
 
   return (
     <>
+      {relationsEditor &&
+      unifiedCode &&
+      (relationsEditor === 'applications' ? canWriteApplications : canWriteEquivalences) ? (
+        <ProductRelationsDrawer
+          key={`${product.id}:${relationsEditor}`}
+          kind={relationsEditor}
+          unifiedCode={unifiedCode}
+          applications={applications}
+          homologs={homologs}
+          oemCodes={oemCodes}
+          onClose={() => setRelationsEditor(null)}
+          onSaved={() => {
+            setSaveNotice('Relación guardada para el código unificador.');
+            reload();
+          }}
+        />
+      ) : null}
       {attributeSheet || technicalSheet ? (
         <>
           {attributeSheet ? (

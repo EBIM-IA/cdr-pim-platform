@@ -22,6 +22,8 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
       productId={id}
       canWriteAssets={actor?.capabilities.includes('catalog:write') ?? false}
       canReassignTemplate={actor?.capabilities.includes('attributes:write') ?? false}
+      canWriteApplications={actor?.capabilities.includes('applications:write') ?? false}
+      canWriteEquivalences={actor?.capabilities.includes('equivalences:write') ?? false}
       showCompleteness={isAdministrator(roles)}
       showProductStatus={!isSalesOnly(roles)}
     />

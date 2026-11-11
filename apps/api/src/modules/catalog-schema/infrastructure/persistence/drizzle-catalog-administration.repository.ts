@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Uuid } from '@cdr/shared';
+import { ValidationError, type Uuid } from '@cdr/shared';
 import { and, asc, eq, sql } from 'drizzle-orm';
 
 import type { Database } from '../../../../database/drizzle.client';
@@ -21,6 +21,7 @@ import {
   attributeTemplates,
   catalogCategories,
   productTemplateAssignments,
+  productAttributeValues,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
   templateAssetRequirements,
@@ -199,7 +200,10 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
           position: templateAttributeAssignments.position,
-          updatedAt: templateAttributeAssignments.updatedAt,
+          updatedAt:
+            sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
+              templateAttributeAssignments.updatedAt,
+            ),
         })
         .from(templateAttributeAssignments)
         .innerJoin(
@@ -225,6 +229,40 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         return { kind: 'version_conflict', actualUpdatedAt: assignment.updatedAt } as const;
       }
       assertTemplatePublicationSelection(assignment.key, input.publishable);
+      if (
+        (input.label !== undefined && input.label !== assignment.label) ||
+        (input.dataType !== undefined && input.dataType !== assignment.dataType) ||
+        (input.unit !== undefined && input.unit !== assignment.unit)
+      ) {
+        if (assignment.sourceAuthority !== 'pim')
+          throw new ValidationError('Los campos base ERP son de solo lectura');
+        if (input.dataType !== undefined && input.dataType !== assignment.dataType) {
+          const populated = await transaction
+            .select({ productId: productAttributeValues.productId })
+            .from(productAttributeValues)
+            .where(eq(productAttributeValues.attributeDefinitionId, input.attributeDefinitionId))
+            .limit(1);
+          if (populated.length)
+            throw new ValidationError(
+              'El tipo no puede cambiar mientras existan valores registrados; crea otro atributo',
+            );
+          if (input.dataType === 'enum' && assignment.allowedValues.length === 0)
+            throw new ValidationError(
+              'Una lista necesita valores permitidos; crea un atributo de lista',
+            );
+        }
+        await transaction
+          .update(attributeDefinitions)
+          .set({
+            ...(input.label !== undefined ? { label: input.label } : {}),
+            ...(input.dataType !== undefined ? { dataType: input.dataType } : {}),
+            ...(input.unit !== undefined ? { unit: input.unit } : {}),
+            updatedAt: input.audit.occurredAt,
+          })
+          .where(eq(attributeDefinitions.id, input.attributeDefinitionId));
+        // Reads use the later definition/assignment timestamp as their optimistic token.
+        // Shared metadata edits therefore invalidate other templates without locking their rows.
+      }
 
       await transaction
         .update(templateAttributeAssignments)
@@ -287,7 +325,10 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
           position: templateAttributeAssignments.position,
-          updatedAt: templateAttributeAssignments.updatedAt,
+          updatedAt:
+            sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
+              templateAttributeAssignments.updatedAt,
+            ),
         })
         .from(templateAttributeAssignments)
         .innerJoin(
@@ -348,7 +389,10 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         publishable: templateAttributeAssignments.publishable,
         active: templateAttributeAssignments.active,
         position: templateAttributeAssignments.position,
-        updatedAt: templateAttributeAssignments.updatedAt,
+        updatedAt:
+          sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
+            templateAttributeAssignments.updatedAt,
+          ),
       })
       .from(templateAttributeAssignments)
       .innerJoin(
@@ -443,6 +487,9 @@ function stripAttributeId(
 
 function assignmentConfiguration(attribute: AdminTemplateAttribute) {
   return {
+    label: attribute.label,
+    dataType: attribute.dataType,
+    unit: attribute.unit,
     active: attribute.active,
     required: attribute.required,
     replicable: attribute.replicable,

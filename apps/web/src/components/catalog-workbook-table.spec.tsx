@@ -334,6 +334,49 @@ describe('CatalogWorkbookTable', () => {
   });
 });
 
+it('navigates with arrows, starts editing with F2 or typing, and commits on Tab', async () => {
+  const { container } = render(<CatalogWorkbookTable canEdit />);
+  const button = await screen.findByRole('button', { name: 'Editar Descripción técnica de SKU-1' });
+  const cell = button.closest('td')!;
+  cell.focus();
+  fireEvent.keyDown(cell, { key: 'F2' });
+  let input = screen.getByRole('textbox', { name: 'Editar Descripción técnica de SKU-1' });
+  expect(input).toHaveValue('C3');
+  fireEvent.keyDown(input, { key: 'Escape' });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('textbox', { name: 'Editar Descripción técnica de SKU-1' }),
+    ).not.toBeInTheDocument(),
+  );
+  fireEvent.keyDown(cell, { key: 'N' });
+  input = screen.getByRole('textbox', { name: 'Editar Descripción técnica de SKU-1' });
+  expect(input).toHaveValue('N');
+  fireEvent.change(input, { target: { value: 'Nuevo' } });
+  fireEvent.keyDown(input, { key: 'Tab' });
+  await waitFor(() =>
+    expect(mocks.patchAttribute).toHaveBeenCalledWith(productOne, 'descripcion_tecnica', {
+      value: 'Nuevo',
+      expectedVersion: 2,
+    }),
+  );
+  const first = container.querySelector<HTMLElement>(
+    '[data-workbook-row="0"][data-workbook-column="0"]',
+  )!;
+  fireEvent.keyDown(first, { key: 'ArrowDown' });
+  expect(
+    container.querySelector('[data-workbook-row="1"][data-workbook-column="0"]'),
+  ).toHaveFocus();
+});
+
+it('highlights literal search matches without treating the search as a regular expression', async () => {
+  const { container } = render(<CatalogWorkbookTable canEdit q="SKU-1 C3" />);
+  await screen.findByRole('link', { name: 'SKU-1' });
+  await screen.findByRole('button', { name: 'Editar Descripción técnica de SKU-1' });
+  expect([...container.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(
+    expect.arrayContaining(['SKU-1', 'C3']),
+  );
+});
+
 describe('parseWorkbookDraft', () => {
   it('parses typed values without turning blank cells into destructive clears', () => {
     expect(parseWorkbookDraft(descriptionColumn, '')).toEqual({ kind: 'noop' });

@@ -15,7 +15,7 @@ const actor: AuthenticatedActor = {
 };
 
 describe('AiController', () => {
-  it('returns an explicitly unpersisted commercial proposal and delegates the actor', async () => {
+  it('persists a commercial proposal for review before responding and delegates the actor', async () => {
     const execute = vi.fn().mockResolvedValue({
       productId: '10000000-0000-4000-8000-000000000001',
       sku: '6202-2RS',
@@ -28,6 +28,10 @@ describe('AiController', () => {
     const controller = new AiController(
       { execute } as unknown as GenerateCommercialProposalUseCase,
       { execute: vi.fn() } as unknown as ExtractAssetCandidatesUseCase,
+      {
+        captureCommercial: vi.fn().mockResolvedValue(['10000000-0000-4000-8000-000000000003']),
+        captureExtraction: vi.fn(),
+      },
     );
 
     await expect(
@@ -37,7 +41,7 @@ describe('AiController', () => {
         actor,
       ),
     ).resolves.toMatchObject({
-      persisted: false,
+      persisted: true,
       requiresHumanReview: true,
       usage: { inputTokens: 20, outputTokens: 8 },
     });

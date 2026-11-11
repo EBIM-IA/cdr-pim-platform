@@ -1,4 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  SEARCH_TELEMETRY,
+  type SearchTelemetryPort,
+} from '../../catalog-schema/domain/ports/search-telemetry.port';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 
 import {
   EMBEDDING_PROVIDER,
@@ -34,6 +38,7 @@ export class SemanticSearchUseCase {
     @Inject(PRODUCT_VECTOR_INDEX) private readonly index: ProductVectorIndexPort,
     @Inject(PRODUCT_SEARCH_READ_MODEL)
     private readonly deterministicSearch: ProductSearchReadModelPort,
+    @Optional() @Inject(SEARCH_TELEMETRY) private readonly telemetry?: SearchTelemetryPort,
   ) {}
 
   async execute(
@@ -62,6 +67,7 @@ export class SemanticSearchUseCase {
       if (!hits.has(hit.productId)) hits.set(hit.productId, hit);
     }
 
+    await this.telemetry?.record(query, Math.min(hits.size, limit), 'semantic');
     return {
       model: semantic.model,
       dimensions: semantic.dimensions,

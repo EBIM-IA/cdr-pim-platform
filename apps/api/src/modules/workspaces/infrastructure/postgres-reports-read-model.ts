@@ -5,7 +5,7 @@ import type {
   WorkspaceQuery,
   WorkspaceRow,
 } from '@cdr/contracts';
-import { ValidationError } from '@cdr/shared';
+import { NotFoundError, ValidationError } from '@cdr/shared';
 
 import type { Sql } from '../../../database/drizzle.client';
 
@@ -68,9 +68,9 @@ const dateNotice = {
 const noBaseline = {
   id: 'general-report-no-baseline',
   severity: 'warning' as const,
-  title: 'Baseline histórico no disponible',
+  title: 'Sin corte histórico seleccionado',
   message:
-    'Los valores anteriores permanecen vacíos: no existe un corte histórico comparable persistido. Los conteos actuales usan relaciones activas y valores vigentes.',
+    'Selecciona un corte histórico persistido para comparar. Sin selección, los valores anteriores permanecen vacíos. Los conteos actuales usan relaciones activas y valores vigentes.',
 };
 const fields = [
   textColumn('sku', 'Código artículo'),
@@ -315,7 +315,10 @@ export class PostgresReportsReadModel {
         (SELECT COALESCE(ROUND(AVG(completeness)),0)::int FROM report_products) AS quality,
         (SELECT COUNT(*)::int FROM report_products WHERE eligible) AS publishable,
         (SELECT COUNT(DISTINCT member.group_id)::int FROM equivalence_group_members member JOIN report_products product ON product.id=member.product_id) AS unifiers,
-        (SELECT COUNT(*)::int FROM audit_entries WHERE ${dateFilter('occurred_at')}) AS audit`,
+        (SELECT COUNT(*)::int FROM audit_entries WHERE ${dateFilter('occurred_at')}) AS audit,
+        (SELECT COUNT(*)::int FROM quality_review_items WHERE kind='duplicate' AND status='pending') AS duplicates,
+        (SELECT COUNT(*)::int FROM ax_inbound_batches WHERE ${dateFilter('received_at')}) AS integrations,
+        (SELECT COUNT(*)::int FROM search_events WHERE ${dateFilter('occurred_at')}) AS searches`,
         this.parameters(query),
       ),
       this.sql<
@@ -369,9 +372,9 @@ export class PostgresReportsReadModel {
         },
         {
           key: 'duplicates',
-          value: null,
-          status: 'unavailable',
-          detail: 'No hay alertas de duplicados persistidas ni decisiones humanas registradas.',
+          value: count.duplicates!,
+          status: 'available',
+          detail: 'Alertas de duplicados persistidas pendientes de decisión humana.',
         },
         {
           key: 'unifiers',
@@ -388,10 +391,10 @@ export class PostgresReportsReadModel {
         },
         {
           key: 'integrations',
-          value: null,
-          status: 'unavailable',
+          value: count.integrations!,
+          status: 'available',
           detail:
-            'No existe telemetría persistida de errores o reintentos de conectores productivos.',
+            'Lotes AX recibidos de forma durable en el periodo; no acredita aplicación al catálogo.',
         },
         {
           key: 'traceability',
@@ -401,9 +404,10 @@ export class PostgresReportsReadModel {
         },
         {
           key: 'searches',
-          value: null,
-          status: 'unavailable',
-          detail: 'No existe historial persistido de consultas o búsquedas sin resultado.',
+          value: count.searches!,
+          status: 'available',
+          detail:
+            'Consultas ejecutadas y registradas desde la activación de telemetría; no se reconstruye historial anterior.',
         },
         {
           key: 'catalog',
@@ -412,6 +416,38 @@ export class PostgresReportsReadModel {
           detail: 'Productos reales del catálogo, incluidos los pendientes de clasificación.',
         },
       ],
+    };
+  }
+
+  async searchReport(query: WorkspaceQuery): Promise<NonNullable<WorkspaceDto['searchReport']>> {
+    const params = [query.q?.trim() ?? '', query.from ?? null, query.to ?? null];
+    const where = `($1 = '' OR query ILIKE '%' || $1 || '%') AND ($2::date IS NULL OR occurred_at >= ($2::date::timestamp AT TIME ZONE 'UTC')) AND ($3::date IS NULL OR occurred_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC'))`;
+    const [counts, terms, unsuccessfulTerms] = await Promise.all([
+      this.sql.unsafe<
+        { total: number; withResults: number; withoutResults: number; semantic: number }[]
+      >(
+        `SELECT COUNT(*)::int AS total, COUNT(*) FILTER(WHERE result_count > 0)::int AS "withResults", COUNT(*) FILTER(WHERE result_count=0)::int AS "withoutResults", COUNT(*) FILTER(WHERE channel='semantic')::int AS semantic FROM search_events WHERE ${where}`,
+        params,
+      ),
+      this.sql.unsafe<{ query: string; count: number; withoutResults: number; lastAt: Date }[]>(
+        `SELECT query,COUNT(*)::int AS count,COUNT(*) FILTER(WHERE result_count=0)::int AS "withoutResults",MAX(occurred_at) AS "lastAt" FROM search_events WHERE ${where} GROUP BY query ORDER BY COUNT(*) DESC,query LIMIT 50`,
+        params,
+      ),
+      this.sql.unsafe<{ query: string; count: number; withoutResults: number; lastAt: Date }[]>(
+        `SELECT query,COUNT(*)::int AS count,COUNT(*)::int AS "withoutResults",MAX(occurred_at) AS "lastAt" FROM search_events WHERE ${where} AND result_count=0 GROUP BY query ORDER BY COUNT(*) DESC,query LIMIT 50`,
+        params,
+      ),
+    ]);
+    return {
+      total: counts[0]?.total ?? 0,
+      withResults: counts[0]?.withResults ?? 0,
+      withoutResults: counts[0]?.withoutResults ?? 0,
+      semantic: counts[0]?.semantic ?? 0,
+      terms: terms.map((term) => ({ ...term, lastAt: new Date(term.lastAt).toISOString() })),
+      unsuccessfulTerms: unsuccessfulTerms.map((term) => ({
+        ...term,
+        lastAt: new Date(term.lastAt).toISOString(),
+      })),
     };
   }
 
@@ -429,6 +465,23 @@ export class PostgresReportsReadModel {
       FROM scoped_changes GROUP BY 1,2 ORDER BY 1,2`,
       this.parameters(query),
     );
+    // Client closed totals have no SKU-level detail. They are used only for unscoped complete months.
+    const history =
+      query.categoryId || query.q?.trim()
+        ? []
+        : await this.sql<
+            { year: number; month: number; products: number }[]
+          >`SELECT year,month,total AS products FROM report_closed_periods ORDER BY year,month`;
+    for (const period of history) {
+      const start = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
+      const end = new Date(Date.UTC(period.year, period.month, 0)).toISOString().slice(0, 10);
+      if ((query.from && query.from > start) || (query.to && query.to < end)) continue;
+      const index = recorded.findIndex(
+        (row) => row.year === period.year && row.month === period.month,
+      );
+      if (index >= 0) recorded[index] = period;
+      else recorded.push(period);
+    }
     const years = new Set<number>([...clientPeriodYears, ...recorded.map((row) => row.year)]);
     const fromYear = query.from ? Number(query.from.slice(0, 4)) : null;
     const toYear = query.to ? Number(query.to.slice(0, 4)) : null;
@@ -515,7 +568,7 @@ export class PostgresReportsReadModel {
           severity: 'info',
           title: 'Resultado mensual real',
           message:
-            'Formato del cliente: meses por año, promedio y total. Solo se contabilizan productos únicos con auditoría real por mes UTC. Las celdas sin historial permanecen vacías, también en los resúmenes; no equivalen a cero. Promedio y total usan únicamente meses con registro. Los cambios de unificador se asignan a sus miembros actuales.',
+            'Formato del cliente: meses por año, promedio y total. Un cierre mensual importado del cliente tiene prioridad sobre observaciones del PIM para el mismo mes, sin sumarlos. Los cierres se usan solo sin categoría ni búsqueda y cuando las fechas incluyen el mes completo. Los demás valores cuentan productos únicos con auditoría real por mes UTC. Las celdas sin historial permanecen vacías, también en los resúmenes; no equivalen a cero. Promedio y total usan únicamente meses con registro. Los cambios de unificador se asignan a sus miembros actuales.',
         },
       ],
       actions: [
@@ -638,6 +691,24 @@ export class PostgresReportsReadModel {
       ),
     ]);
     const totalRows = totalResult[0]?.total ?? 0;
+    const baselineRows =
+      format === 'general_results' && query.baselineId
+        ? await this.sql<
+            {
+              product_id: string;
+              applications: number;
+              oem: number;
+              homologs: number;
+              attributes: number;
+            }[]
+          >`SELECT product_id::text, applications,oem,homologs,attributes FROM report_baseline_products WHERE baseline_id=${query.baselineId}::uuid AND product_id=ANY(${rawRows.map((row) => row.id)}::uuid[])`
+        : [];
+    const baseline = new Map(baselineRows.map((row) => [row.product_id, row]));
+    if (format === 'general_results' && query.baselineId) {
+      const exists = await this
+        .sql`SELECT id FROM report_baselines WHERE id=${query.baselineId}::uuid`;
+      if (!exists.length) throw new NotFoundError('Report baseline', query.baselineId);
+    }
     const rows: WorkspaceRow[] = rawRows.map((row) => {
       let id = String(row.id),
         cells: Record<string, Cell>;
@@ -667,13 +738,13 @@ export class PostgresReportsReadModel {
           completeness: row.completeness,
           requiredMissing: row.required_missing,
           optionalMissing: row.optional_missing,
-          previousApplications: null,
+          previousApplications: baseline.get(row.id)?.applications ?? null,
           currentApplications: row.applications,
-          previousOem: null,
+          previousOem: baseline.get(row.id)?.oem ?? null,
           currentOem: row.oem,
-          previousHomologs: null,
+          previousHomologs: baseline.get(row.id)?.homologs ?? null,
           currentHomologs: row.homologs,
-          previousAttributes: null,
+          previousAttributes: baseline.get(row.id)?.attributes ?? null,
           currentAttributes: row.current_attributes,
         };
       } else if (format === 'documents_by_sku') {
@@ -725,13 +796,24 @@ export class PostgresReportsReadModel {
     });
     const notices: WorkspaceDto['notices'] = [dateNotice];
     if (format === 'general_results')
-      notices.push(noBaseline, {
-        id: 'general-report-definition',
-        severity: 'info',
-        title: 'Ítems actualizados',
-        message:
-          'Cada SKU con auditoría real dentro del periodo se cuenta una sola vez. Un cambio de aplicación, OEM u homólogo se aplica a los miembros actuales de su código unificador.',
-      });
+      notices.push(
+        query.baselineId
+          ? {
+              id: 'general-baseline',
+              severity: 'info',
+              title: 'Corte histórico seleccionado',
+              message:
+                'Las columnas anteriores corresponden al corte persistido seleccionado. Un SKU que no existía en ese corte conserva valores anteriores vacíos.',
+            }
+          : noBaseline,
+        {
+          id: 'general-report-definition',
+          severity: 'info',
+          title: 'Ítems actualizados',
+          message:
+            'La meta mensual aprobada es de 250 ítems y el resultado compara los SKU únicos del filtro con esa meta; al elegir varios meses, no es un promedio mensual. Cada SKU con auditoría real dentro del periodo se cuenta una sola vez. Un cambio de aplicación, OEM u homólogo se aplica a los miembros actuales de su código unificador.',
+        },
+      );
     if (format === 'attribute_changes' || format === 'edited_information')
       notices.push({
         id: 'audit-reason-unavailable',
@@ -761,6 +843,24 @@ export class PostgresReportsReadModel {
                 label: 'Ítems actualizados',
                 value: totalRows,
                 format: 'integer' as const,
+              },
+              {
+                key: 'monthly-goal',
+                label: 'Meta mensual',
+                value: 250,
+                format: 'integer' as const,
+              },
+              {
+                key: 'goal-result',
+                label: 'Resultado',
+                value: `${totalRows}/250`,
+                format: 'text' as const,
+              },
+              {
+                key: 'goal-percent',
+                label: 'Resultado %',
+                value: `${Math.round((totalRows / 250) * 100)}%`,
+                format: 'text' as const,
               },
             ]
           : []),

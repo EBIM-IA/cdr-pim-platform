@@ -1149,7 +1149,7 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
       ) : catalog === 'Nombre amigable del producto' ? (
         <ProductNameSettings />
       ) : catalog !== 'Prefijos y sufijos' ? (
-        <SettingsParameterCatalog catalog={catalog} />
+        <SettingsParameterCatalog catalog={catalog} canManage={canManage} />
       ) : (
         <div className="min-w-0 space-y-4">
           <Card className="p-5">

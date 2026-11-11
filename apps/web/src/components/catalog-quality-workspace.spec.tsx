@@ -12,6 +12,26 @@ import { listProductAssets } from '@/lib/product-assets-api';
 
 import { CatalogQualityWorkspace } from './catalog-quality-workspace';
 
+vi.mock('@/lib/quality-governance-api', () => ({
+  getQualityCompleteness: vi.fn().mockResolvedValue([
+    {
+      kind: 'template',
+      key: 'global-template',
+      label: 'Plantilla global',
+      categoryId: null,
+      productCount: 45000,
+      average: 82,
+    },
+    {
+      kind: 'line',
+      key: 'global-line',
+      label: 'Línea global',
+      categoryId: null,
+      productCount: 45000,
+      average: 82,
+    },
+  ]),
+}));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchCatalogWorkbook: vi.fn(),
   fetchProductAttributeSheet: vi.fn(),
@@ -226,4 +246,15 @@ describe('CatalogQualityWorkspace', () => {
       `/products/${first.id}?edit=enrichment`,
     );
   });
+});
+
+it('shows completeness over the entire catalog and switches between template and line', async () => {
+  render(<CatalogQualityWorkspace workspace={workspace} />);
+  expect(await screen.findByText('Plantilla global')).toBeInTheDocument();
+  expect(screen.getByText('45000 SKU')).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Agrupar por' }), {
+    target: { value: 'line' },
+  });
+  expect(screen.getByText('Línea global')).toBeInTheDocument();
+  expect(screen.queryByText('Plantilla global')).not.toBeInTheDocument();
 });

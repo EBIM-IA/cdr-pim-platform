@@ -23,6 +23,7 @@ import {
 } from '../../identity/domain/entities/role';
 import type { WorkspaceReadModelPort } from '../domain/ports/workspace-read-model.port';
 import { PostgresReportsReadModel } from './postgres-reports-read-model';
+import { PostgresAxInboxReadModel } from './postgres-ax-inbox-read-model';
 import {
   PRODUCT_CATALOG_QUERY,
   type ProductCatalogQueryPort,
@@ -140,7 +141,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       case 'publication':
         return this.readPublication(query);
       case 'integrations':
-        return this.readIntegrations();
+        return this.readIntegrations(query);
       case 'reports':
         return this.readReports(query);
       case 'administration':
@@ -1055,7 +1056,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         info(
           'ai-candidates-human-review',
           'Generación asistida disponible sin escritura automática',
-          'La API puede generar propuestas comerciales y extraer candidatos desde un activo existente. Ambos resultados son temporales, no modifican el catálogo y requieren revisión humana.',
+          'La API puede generar propuestas comerciales y extraer candidatos desde un activo existente. Los candidatos se conservan en la bandeja de revisión y requieren una decisión humana con motivo antes de aplicar cambios al catálogo.',
         ),
       ],
       actions: [
@@ -1074,11 +1075,27 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           method: 'POST',
           endpoint: '/api/v1/ai/assets/:assetId/extraction-candidates',
         },
-        blockedAction(
-          'persist-ai-candidate',
-          'Aprobar y persistir candidato',
-          'La persistencia y aprobación auditada de candidatos todavía no está implementada; generar o extraer nunca sobrescribe el catálogo.',
-        ),
+        {
+          id: 'persist-ai-candidate',
+          label: 'Aprobar candidato con motivo',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/quality/reviews/:id/decision',
+        },
+        {
+          id: 'review-queue',
+          label: 'Consultar bandeja de revisión',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: '/api/v1/quality/reviews',
+        },
+        {
+          id: 'detect-duplicates',
+          label: 'Detectar posibles duplicados',
+          availability: 'supported',
+          method: 'POST',
+          endpoint: '/api/v1/quality/duplicates/detect',
+        },
       ],
     });
   }
@@ -1235,7 +1252,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
-  private async readIntegrations(): Promise<WorkspaceDto> {
+  private async readIntegrations(query: WorkspaceQuery): Promise<WorkspaceDto> {
+    const axInbox = await new PostgresAxInboxReadModel(this.sql).read(query);
     // The query proves the configured PostgreSQL connection is live for this projection.
     await this.sql`SELECT 1`;
     const aiProviders = resolveAiCapabilityProviders(this.env);
@@ -1273,8 +1291,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         id: 'ax',
         values: {
           system: 'Dynamics AX',
-          configured: false,
-          state: 'Adaptador real no implementado',
+          configured:
+            this.env.AX_INTEGRATION_AUTH_MODE === 'static_bearer' &&
+            !!this.env.AX_INTEGRATION_TOKEN,
+          state: 'Receptor PUSH durable · aplicación al catálogo pendiente de reglas aprobadas',
         },
       },
       {
@@ -1302,75 +1322,81 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     ];
     const configured = rows.filter((row) => row.values.configured === true).length;
 
-    return this.response('integrations', {
-      operationalStatus: 'partial',
-      metrics: [
-        integerMetric('configured-components', 'Componentes configurados', configured),
-        integerMetric('blocked-external-systems', 'Sistemas externos bloqueados', 3),
-        textMetric('environment', 'Entorno', this.env.APP_ENV),
-      ],
-      columns: [
-        { key: 'system', label: 'Sistema', type: 'text' },
-        { key: 'configured', label: 'Configurado', type: 'status' },
-        { key: 'state', label: 'Estado real', type: 'status' },
-      ],
-      rows,
-      notices: [
-        info(
-          'no-connectivity-test',
-          'No se invocaron adaptadores externos',
-          'La vista revela solo capacidades y configuración validada, nunca secretos. Los adaptadores reales de AX, PrestaShop y pedidos no se ejecutan.',
-        ),
-        axMockEnabled
-          ? warning(
-              'ax-mock-local',
-              'Mock AX local habilitado',
-              'El receptor draft-0 valida lotes con autenticación de máquina e idempotencia, los conserva solo en memoria y nunca modifica el catálogo. No demuestra conectividad con Dynamics AX.',
-            )
-          : info(
-              'ax-mock-disabled',
-              'Mock AX local deshabilitado',
-              'Es el estado seguro por defecto. Para pruebas de contrato locales se habilita explícitamente con AX_MOCK_MODE=local y una credencial dedicada; QAS y PRD lo rechazan.',
-            ),
-      ],
-      actions: [
-        refreshAction('integrations'),
-        axMockEnabled
-          ? {
-              id: 'receive-ax-mock-batch',
-              label: 'Recibir lote en mock AX',
-              availability: 'supported',
-              method: 'POST',
-              endpoint: '/api/v1/integrations/ax/mock/batches',
-            }
-          : blockedAction(
-              'receive-ax-mock-batch',
-              'Mock AX local',
-              'El receptor provisional está deshabilitado. Solo puede activarse en local/test con una credencial de máquina dedicada.',
-            ),
-        blockedAction(
-          'sync-ax',
-          'Integración AX de producción',
-          'Faltan confirmar PUSH o PULL, transporte, mapeo, autenticación, reintentos y conectividad. El mock local no resuelve estas decisiones.',
-        ),
-        blockedAction(
-          'publish-prestashop',
-          'Probar PrestaShop',
-          'Faltan versión, API habilitada, credenciales y mapeo.',
-        ),
-      ],
-    });
+    return {
+      axInbox,
+      ...this.response('integrations', {
+        operationalStatus: 'partial',
+        metrics: [
+          integerMetric('ax-received-batches', 'Lotes AX recibidos', axInbox.totalBatches),
+          integerMetric('ax-received-records', 'Registros AX recibidos', axInbox.totalRecords),
+          integerMetric('configured-components', 'Componentes configurados', configured),
+          integerMetric('blocked-external-systems', 'Sistemas externos bloqueados', 3),
+          textMetric('environment', 'Entorno', this.env.APP_ENV),
+        ],
+        columns: [
+          { key: 'system', label: 'Sistema', type: 'text' },
+          { key: 'configured', label: 'Configurado', type: 'status' },
+          { key: 'state', label: 'Estado real', type: 'status' },
+        ],
+        rows,
+        notices: [
+          info(
+            'no-connectivity-test',
+            'No se invocaron adaptadores externos',
+            'La vista revela solo capacidades y configuración validada, nunca secretos. Los adaptadores reales de AX, PrestaShop y pedidos no se ejecutan.',
+          ),
+          axMockEnabled
+            ? warning(
+                'ax-mock-local',
+                'Mock AX local habilitado',
+                'El receptor draft-0 valida lotes con autenticación de máquina e idempotencia, los conserva solo en memoria y nunca modifica el catálogo. No demuestra conectividad con Dynamics AX.',
+              )
+            : info(
+                'ax-mock-disabled',
+                'Mock AX local deshabilitado',
+                'Es el estado seguro por defecto. Para pruebas de contrato locales se habilita explícitamente con AX_MOCK_MODE=local y una credencial dedicada; QAS y PRD lo rechazan.',
+              ),
+        ],
+        actions: [
+          refreshAction('integrations'),
+          axMockEnabled
+            ? {
+                id: 'receive-ax-mock-batch',
+                label: 'Recibir lote en mock AX',
+                availability: 'supported',
+                method: 'POST',
+                endpoint: '/api/v1/integrations/ax/mock/batches',
+              }
+            : blockedAction(
+                'receive-ax-mock-batch',
+                'Mock AX local',
+                'El receptor provisional está deshabilitado. Solo puede activarse en local/test con una credencial de máquina dedicada.',
+              ),
+          blockedAction(
+            'sync-ax',
+            'Integración AX de producción',
+            'Faltan confirmar PUSH o PULL, transporte, mapeo, autenticación, reintentos y conectividad. El mock local no resuelve estas decisiones.',
+          ),
+          blockedAction(
+            'publish-prestashop',
+            'Probar PrestaShop',
+            'Faltan versión, API habilitada, credenciales y mapeo.',
+          ),
+        ],
+      }),
+    };
   }
 
   private async readReports(query: WorkspaceQuery): Promise<WorkspaceDto> {
     const reports = new PostgresReportsReadModel(this.sql);
     const format = query.report ?? 'summary';
     if (format !== 'summary') return reports.read(format, query);
-    const [summary, metadata] = await Promise.all([
+    const [summary, metadata, searchReport] = await Promise.all([
       this.readReportSummary(),
       reports.metadata(query),
+      reports.searchReport(query),
     ]);
-    return { ...summary, ...metadata };
+    return { ...summary, ...metadata, searchReport };
   }
 
   private async readReportSummary(): Promise<WorkspaceDto> {
@@ -1419,6 +1445,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           completion: number;
           publishable: number;
           activeTemplates: number;
+          duplicates: number;
+          withoutImage: number;
+          withoutTechnicalSheet: number;
+          sourceConflicts: number;
         }[]
       >`
         WITH readiness AS (
@@ -1447,7 +1477,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
             WHERE status <> 'archived' AND template_id IS NOT NULL AND completed = required
           )::int AS "publishable",
           (SELECT COUNT(*)::int FROM attribute_templates WHERE status = 'active')
-            AS "activeTemplates"
+            AS "activeTemplates",
+          (SELECT COUNT(*)::int FROM quality_review_items WHERE kind='duplicate' AND status='pending') AS duplicates,
+          (SELECT COUNT(*)::int FROM products p WHERE NOT EXISTS (SELECT 1 FROM product_assets a WHERE a.product_id=p.id AND a.type_code='FOTO' AND a.deleted_at IS NULL)) AS "withoutImage",
+          (SELECT COUNT(*)::int FROM products p WHERE NOT EXISTS (SELECT 1 FROM product_assets a WHERE a.product_id=p.id AND a.type_code='FT' AND a.deleted_at IS NULL)) AS "withoutTechnicalSheet",
+          (SELECT COUNT(DISTINCT q.product_id)::int FROM quality_review_items q WHERE q.kind='attribute' AND q.status='pending' AND (SELECT COUNT(DISTINCT candidate->'value') FROM jsonb_array_elements(q.data->'candidates') candidate)>1) AS "sourceConflicts"
         FROM readiness
       `,
     ]);
@@ -1456,6 +1490,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       completion: 0,
       publishable: 0,
       activeTemplates: 0,
+      duplicates: 0,
+      withoutImage: 0,
+      withoutTechnicalSheet: 0,
+      sourceConflicts: 0,
     };
     const rows: WorkspaceRow[] = [
       {
@@ -1500,6 +1538,18 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         integerMetric('completion', 'Completitud media (%)', dashboardCounts.completion),
         integerMetric('publishable', 'Elegibilidad base', dashboardCounts.publishable),
         integerMetric('active-templates', 'Plantillas activas', dashboardCounts.activeTemplates),
+        integerMetric('duplicates', 'Alertas de posibles duplicados', dashboardCounts.duplicates),
+        integerMetric('without-image', 'Sin imagen', dashboardCounts.withoutImage),
+        integerMetric(
+          'without-technical-sheet',
+          'Sin ficha técnica',
+          dashboardCounts.withoutTechnicalSheet,
+        ),
+        integerMetric(
+          'source-conflicts',
+          'Con conflicto de fuente',
+          dashboardCounts.sourceConflicts,
+        ),
         integerMetric('blocked-external-systems', 'Sistemas externos bloqueados', 3),
         ...(products.updatedAt
           ? [

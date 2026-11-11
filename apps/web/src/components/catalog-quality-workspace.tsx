@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  QualityCompletenessDto,
   CatalogAttributeValue,
   CatalogWorkbookProductDto,
   ProductAssetDto,
@@ -17,8 +18,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { getQualityCompleteness } from '@/lib/quality-governance-api';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -90,6 +92,9 @@ export interface CatalogQualityWorkspaceProps {
 }
 
 export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspaceProps) {
+  const [completenessGroups, setCompletenessGroups] = useState<QualityCompletenessDto>([]);
+  const [groupKind, setGroupKind] = useState<'template' | 'line'>('template');
+  const [groupError, setGroupError] = useState('');
   const [query, setQuery] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
   const [products, setProducts] = useState<CatalogWorkbookProductDto[]>([]);
@@ -105,6 +110,24 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
   const [revision, setRevision] = useState(0);
   const [rulesOpen, setRulesOpen] = useState(false);
   const initialSheet = useRef<QualitySheet | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setGroupError('');
+    void getQualityCompleteness(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setCompletenessGroups(result);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setGroupError(
+            error instanceof Error
+              ? error.message
+              : 'No fue posible consultar la completitud global.',
+          );
+      });
+    return () => controller.abort();
+  }, [workspace.generatedAt]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -201,29 +224,7 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
   const notReady = completeness !== null && completeness < 100;
   const productHref = selected ? `/products/${encodeURIComponent(selected.id)}` : '/products';
   const findings = selected ? workspace.rows.find((row) => row.id === selected.id) : undefined;
-  const groups = useMemo(() => {
-    const grouped = new Map<
-      string,
-      { id: string; templateId: string; name: string; values: number[] }
-    >();
-    for (const product of products) {
-      if (!product.template || product.completeness === null) continue;
-      const group = grouped.get(product.template.id) ?? {
-        id: product.category?.id ?? '',
-        templateId: product.template.id,
-        name: product.template.name,
-        values: [],
-      };
-      group.values.push(product.completeness);
-      grouped.set(product.template.id, group);
-    }
-    return [...grouped.values()].map((group) => ({
-      ...group,
-      average: Math.round(
-        group.values.reduce((sum, value) => sum + value, 0) / group.values.length,
-      ),
-    }));
-  }, [products]);
+  const groups = completenessGroups.filter((group) => group.kind === groupKind);
   const options =
     selected && !products.some((product) => product.id === selected.id)
       ? [selected, ...products]
@@ -597,32 +598,49 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
           )}
         </>
       ) : null}
+      {groupError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        >
+          {groupError}
+        </p>
+      )}
       {groups.length ? (
         <Card className="p-4">
-          <h2 className="text-base font-semibold">
-            Completitud por plantilla · resultados de esta búsqueda
-          </h2>
+          <h2 className="text-base font-semibold">Completitud del catálogo completo</h2>
+          <label className="mt-3 block text-xs font-semibold">
+            Agrupar por
+            <select
+              value={groupKind}
+              onChange={(event) => setGroupKind(event.target.value as typeof groupKind)}
+              className="ml-2 rounded-md border bg-white p-2"
+            >
+              <option value="template">Plantilla</option>
+              <option value="line">Línea</option>
+            </select>
+          </label>
           <div className="mt-3 divide-y">
             {groups.map((group) => (
               <div
-                key={group.templateId}
+                key={group.key}
                 className="grid items-center gap-3 py-3 sm:grid-cols-[minmax(180px,1fr)_minmax(100px,1fr)_50px_70px]"
               >
                 <Link
                   className="text-sm underline"
-                  href={`/products?category=${encodeURIComponent(group.id)}`}
+                  href={`/products?category=${encodeURIComponent(group.categoryId ?? '')}`}
                 >
-                  {group.name}
+                  {group.label}
                 </Link>
-                <Progress value={group.average} label={`Completitud media de ${group.name}`} />
+                <Progress value={group.average} label={`Completitud media de ${group.label}`} />
                 <span className="text-sm">{group.average}%</span>
-                <small className="text-muted-foreground">{group.values.length} SKU</small>
+                <small className="text-muted-foreground">{group.productCount} SKU</small>
               </div>
             ))}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Promedios de los {products.length} productos mostrados de {total}; no representan los
-            productos de otras páginas.
+            Promedios calculados sobre todos los SKU persistidos, incluidos atributos y archivos
+            obligatorios. Los filtros de búsqueda del detalle no reducen este reporte.
           </p>
         </Card>
       ) : null}

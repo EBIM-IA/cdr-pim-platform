@@ -1206,4 +1206,56 @@ describe('DrizzleDynamicCatalogRepository', () => {
       .where(eq(products.id, productIds.required));
     expect(requiredProduct?.status).toBe('in_review');
   });
+  it('persists an explicit draft or review destination and the reason atomically with attribute values', async () => {
+    const [product] = await database.db.select().from(products).where(eq(products.sku, 'D1672'));
+    const productId = assertUuid(product!.id);
+    const sheet = await repository.getProductSheet(productId, ['ADMINISTRADOR']);
+    const attribute = sheet!.schema.attributes.find(
+      (column) =>
+        column.sourceAuthority === 'pim' && column.permissions.edit && column.dataType === 'text',
+    )!;
+    const update = async (
+      statusTarget: 'draft' | 'in_review',
+      value: string,
+      expectedVersion: number,
+    ) =>
+      repository.updateAttributes({
+        productId,
+        updates: [{ attributeKey: attribute.key, value, expectedVersion }],
+        source: AttributeValueSource.Manual,
+        roles: ['ADMINISTRADOR'],
+        now: new Date(),
+        reason: 'Completado desde ficha fabricante',
+        statusTarget,
+        audit: { actorId: 'admin-control', correlationId: newUuid() },
+      });
+    const first = await update(
+      'draft',
+      'Dato en borrador',
+      sheet!.product.attributes[attribute.key]?.version ?? 0,
+    );
+    expect(first.kind).toBe('updated');
+    const [draft] = await database.db.select().from(products).where(eq(products.id, productId));
+    expect(draft!.status).toBe('draft');
+    const current = await repository.getProductSheet(productId, ['ADMINISTRADOR']);
+    await update(
+      'in_review',
+      'Dato para revisar',
+      current!.product.attributes[attribute.key]!.version,
+    );
+    const [review] = await database.db.select().from(products).where(eq(products.id, productId));
+    expect(review!.status).toBe('in_review');
+    const changes = await new PostgresAuditAdapter(database.db).listChanges({
+      page: 1,
+      pageSize: 100,
+      resourceId: productId,
+      actorId: 'admin-control',
+    });
+    expect(
+      changes.items.some((item) => item.field === 'status' && item.after === 'in_review'),
+    ).toBe(true);
+    expect(changes.items.every((item) => item.reason === 'Completado desde ficha fabricante')).toBe(
+      true,
+    );
+  });
 });

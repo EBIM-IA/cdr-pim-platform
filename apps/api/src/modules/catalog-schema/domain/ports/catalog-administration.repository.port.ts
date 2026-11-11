@@ -27,6 +27,9 @@ export interface CatalogAdministrationRepositoryPort {
   updateTemplateAttribute(input: {
     templateId: Uuid;
     attributeDefinitionId: Uuid;
+    label?: string;
+    dataType?: AdminTemplateAttribute['dataType'];
+    unit?: string | null;
     active?: boolean;
     required?: boolean;
     replicable?: boolean;

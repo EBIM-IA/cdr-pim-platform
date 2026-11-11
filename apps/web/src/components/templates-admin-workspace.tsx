@@ -11,6 +11,10 @@ import { Pencil, RefreshCw, Search, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  AddTemplateAttributeDrawer,
+  TemplateInheritanceSimulator,
+} from '@/components/template-design-tools';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -47,6 +51,9 @@ const permissionLabels: Record<Permission, string> = {
 };
 
 export interface AttributeDraft {
+  label?: string;
+  dataType?: AdminTemplateAttributeDto['dataType'];
+  unit?: string;
   active: boolean;
   required: boolean;
   replicable: boolean;
@@ -71,6 +78,9 @@ export function buildTemplateAttributeUpdateInput(
     expectedUpdatedAt,
   };
 
+  if (draft.label !== undefined) input.label = draft.label;
+  if (draft.dataType !== undefined) input.dataType = draft.dataType;
+  if (draft.unit !== undefined) input.unit = draft.unit || null;
   if (canManageRoleAccess) input.roleAccess = draft.roleAccess;
   return input;
 }
@@ -110,6 +120,9 @@ export function updateRolePermission(
 
 function toDraft(attribute: AdminTemplateAttributeDto): AttributeDraft {
   return {
+    ...(attribute.sourceAuthority === 'pim'
+      ? { label: attribute.label, dataType: attribute.dataType, unit: attribute.unit ?? '' }
+      : {}),
     active: attribute.active,
     required: attribute.required,
     replicable: attribute.replicable,
@@ -164,6 +177,7 @@ function AttributeSwitch({
 }
 
 export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTemplate: boolean }) {
+  const [addingAttribute, setAddingAttribute] = useState(false);
   const [categories, setCategories] = useState<AdminCatalogCategoryDto[]>([]);
   const [pendingCategoryId, setPendingCategoryId] = useState('');
   const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
@@ -491,8 +505,8 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
             </Button>
             <Button
               variant="outline"
-              disabled
-              title="La creación de atributos aún no está disponible"
+              disabled={!canManageTemplate || !template || template.status === 'retired'}
+              onClick={() => setAddingAttribute(true)}
             >
               Añadir atributo
             </Button>
@@ -832,6 +846,9 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                     </div>
                   ))}
                 </dl>
+                {canManageTemplate ? (
+                  <TemplateInheritanceSimulator key={template.id} templateId={template.id} />
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <span className="text-[10px] text-muted-foreground">
                     Vista consultiva de la configuración vigente; no recibe ni crea productos en AX.
@@ -857,6 +874,16 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
               Selecciona una plantilla para consultar su definición.
             </Card>
           )}
+          {addingAttribute && template ? (
+            <AddTemplateAttributeDrawer
+              template={template}
+              onClose={() => setAddingAttribute(false)}
+              onSaved={(updated) => {
+                setTemplate(updated);
+                void loadTemplates();
+              }}
+            />
+          ) : null}
           {canManageTemplate && editing && draft ? (
             <WorkspaceDrawer
               title="Configurar atributo"
@@ -884,6 +911,62 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
                   </p>
                 ) : null}
 
+                {editing.sourceAuthority === 'pim' ? (
+                  <fieldset disabled={saving} className="mb-5 grid gap-3 sm:grid-cols-3">
+                    <legend className="mb-2 text-sm font-semibold">Definición compartida</legend>
+                    <label className="grid gap-1 text-xs">
+                      Nombre
+                      <Input
+                        required
+                        value={draft.label ?? ''}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current ? { ...current, label: event.target.value } : current,
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs">
+                      Tipo
+                      <select
+                        className="h-11 rounded border px-2"
+                        value={draft.dataType}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  dataType: event.target
+                                    .value as AdminTemplateAttributeDto['dataType'],
+                                }
+                              : current,
+                          )
+                        }
+                      >
+                        {Object.entries(typeLabels).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-1 text-xs">
+                      Unidad
+                      <Input
+                        value={draft.unit ?? ''}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current ? { ...current, unit: event.target.value } : current,
+                          )
+                        }
+                      />
+                    </label>
+                    <p className="text-xs text-muted-foreground sm:col-span-3">
+                      Nombre, tipo y unidad se comparten entre las plantillas que usan esta clave.
+                      El tipo solo puede cambiar antes de registrar valores.
+                    </p>
+                  </fieldset>
+                ) : null}
                 <fieldset disabled={saving}>
                   <legend className="mb-2 text-sm font-semibold">Comportamiento</legend>
                   <div className="grid gap-2 sm:grid-cols-2">

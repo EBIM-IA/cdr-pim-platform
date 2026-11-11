@@ -20,7 +20,6 @@ import {
   Database,
   ExternalLink,
   FileSearch,
-  GitCompareArrows,
   Layers3,
   ListChecks,
   LoaderCircle,
@@ -41,6 +40,9 @@ import {
   useState,
 } from 'react';
 
+import { CommercialReviewHistory } from '@/components/commercial-review-history';
+import { QualityGovernanceWorkspace } from '@/components/quality-governance-workspace';
+import { decideQualityReview, updateQualitySourcePriority } from '@/lib/quality-governance-api';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -49,7 +51,7 @@ import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { extractAssetCandidates, generateCommercialProposal } from '@/lib/ai-api';
 import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { fetchProduct, fetchProducts } from '@/lib/catalog-api';
-import { fetchProductAttributeSheet, patchProductAttributes } from '@/lib/dynamic-catalog-api';
+import { fetchProductAttributeSheet } from '@/lib/dynamic-catalog-api';
 import { listProductAssets, productAssetDownloadUrl } from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
 
@@ -125,16 +127,6 @@ function FlowStep({
         <small className="mt-0.5 block leading-relaxed text-muted-foreground">{description}</small>
       </span>
     </li>
-  );
-}
-
-function EmptyMetric({ label, note }: { label: string; note: string }) {
-  return (
-    <Card className="min-h-28 p-4">
-      <small className="text-muted-foreground">{label}</small>
-      <strong className="mt-2 block text-2xl text-slate-400">—</strong>
-      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
-    </Card>
   );
 }
 
@@ -300,6 +292,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [decisionReason, setDecisionReason] = useState('');
   const extractionRef = useRef<AbortController | null>(null);
   const saveRef = useRef<AbortController | null>(null);
 
@@ -401,75 +394,44 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   };
 
   const applyCandidates = async () => {
-    if (!product || !sheet || !result) return;
-    const updates: Array<{
-      attributeKey: string;
-      value: CatalogAttributeValue;
-      expectedVersion: number;
-    }> = [];
-    const errors: string[] = [];
-    for (const candidate of result.candidates) {
-      if (!selectedCandidates[candidate.key]) continue;
-      const definition = editableDefinitions.find(
-        (column) => column.key.toLocaleLowerCase('es') === candidate.key.toLocaleLowerCase('es'),
-      );
-      if (!definition) continue;
-      const parsed = coerceExtractedValue(definition, candidate.value);
-      if (!parsed.ok) {
-        errors.push(parsed.message);
-        continue;
-      }
-      updates.push({
-        attributeKey: definition.key,
-        value: parsed.value,
-        expectedVersion: sheet.product.attributes[definition.key]?.version ?? 0,
-      });
-    }
-    if (errors.length > 0) {
-      setSaveError(errors.join(' '));
-      return;
-    }
-    if (updates.length === 0) {
-      setSaveError('Selecciona al menos un candidato editable y válido.');
-      return;
-    }
-
-    saveRef.current?.abort();
-    const controller = new AbortController();
-    saveRef.current = controller;
+    if (!product || !sheet || !result || !decisionReason.trim()) return;
     setSaving(true);
     setSaveError(null);
     setSaveNotice(null);
+    let saved = 0;
     try {
-      const updated = await patchProductAttributes(product.id, { updates }, controller.signal);
-      if (saveRef.current !== controller) return;
-      setSheet((current) => {
-        if (!current || current.product.id !== updated.productId) return current;
-        const attributes = { ...current.product.attributes };
-        for (const attribute of updated.attributes) {
-          attributes[attribute.attributeKey] = {
-            value: attribute.value,
-            version: attribute.version,
-            source: attribute.source,
-            updatedAt: attribute.updatedAt,
-          };
-        }
-        return { ...current, product: { ...current.product, attributes } };
-      });
-      setSelectedCandidates({});
+      for (const [index, candidate] of result.candidates.entries()) {
+        if (!selectedCandidates[candidate.key] && !rejectedCandidates[candidate.key]) continue;
+        const reviewId = result.reviewIds?.[index];
+        if (!reviewId)
+          throw new Error(
+            'Esta extracción no tiene revisión persistida. Ejecuta una nueva extracción.',
+          );
+        const definition = editableDefinitions.find((column) => column.key === candidate.key);
+        const parsed = definition ? coerceExtractedValue(definition, candidate.value) : null;
+        if (selectedCandidates[candidate.key] && (!parsed || !parsed.ok))
+          throw new Error(parsed && !parsed.ok ? parsed.message : 'El atributo ya no es editable.');
+        await decideQualityReview(reviewId, {
+          version: 1,
+          action: rejectedCandidates[candidate.key] ? 'reject' : 'approve',
+          chosenIndex: 0,
+          reason: decisionReason.trim(),
+        });
+        saved += 1;
+        setSelectedCandidates((current) => ({ ...current, [candidate.key]: false }));
+        setRejectedCandidates((current) => ({ ...current, [candidate.key]: false }));
+      }
+      setSheet(await fetchProductAttributeSheet(product.id));
       setResult(null);
       setSaveNotice(
-        `${updates.length} ${updates.length === 1 ? 'atributo fue aplicado' : 'atributos fueron aplicados'} mediante una confirmación humana y atómica.`,
+        `${saved} decisiones guardadas. Cada aprobación aplica el atributo y su trazabilidad de forma atómica.`,
       );
     } catch (requestError) {
-      if (isAbortError(requestError) || saveRef.current !== controller) return;
       setSaveError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'No fue posible aplicar los candidatos seleccionados.',
+        `${saved ? `${saved} decisiones ya guardadas. ` : ''}${requestError instanceof Error ? requestError.message : 'No fue posible guardar la revisión.'}`,
       );
     } finally {
-      if (saveRef.current === controller) setSaving(false);
+      setSaving(false);
     }
   };
 
@@ -485,7 +447,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
       ) : (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
           La IA propone; los valores actuales se conservan hasta que aceptes una propuesta y
-          confirmes su aplicación. Descartar una sugerencia solo afecta esta revisión.
+          confirmes su aplicación. Los candidatos y rechazos se conservan en la bandeja con motivo.
         </div>
       )}
       <ProductSelector
@@ -607,7 +569,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           {result ? (
             <div className="mt-5 space-y-3">
               <div className="flex flex-wrap gap-2">
-                <StatusBadge tone="warning">No persistida</StatusBadge>
+                <StatusBadge tone="info">Guardada en bandeja</StatusBadge>
                 <StatusBadge tone="info">Revisión humana obligatoria</StatusBadge>
               </div>
               {result.candidates.length === 0 ? (
@@ -708,7 +670,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                         {accepted ? (
                           <StatusBadge tone="warning">Aceptada · pendiente de aplicar</StatusBadge>
                         ) : rejected ? (
-                          <StatusBadge tone="neutral">Descartada en esta revisión</StatusBadge>
+                          <StatusBadge tone="neutral">Rechazo pendiente de guardar</StatusBadge>
                         ) : null}
                       </div>
                     </div>
@@ -747,6 +709,18 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
               </p>
             ) : null}
           </div>
+          {result && (
+            <label className="mt-4 block text-xs font-semibold">
+              Motivo de las decisiones
+              <textarea
+                aria-label="Motivo de las decisiones IA"
+                value={decisionReason}
+                onChange={(event) => setDecisionReason(event.target.value)}
+                maxLength={2000}
+                className="mt-2 min-h-20 w-full rounded-lg border p-3 text-sm"
+              />
+            </label>
+          )}
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
             {extracting ? (
               <Button variant="outline" onClick={() => extractionRef.current?.abort()}>
@@ -764,14 +738,22 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
             )}
             <Button
               onClick={() => void applyCandidates()}
-              disabled={saving || !result || !Object.values(selectedCandidates).some(Boolean)}
+              disabled={
+                saving ||
+                !result ||
+                !decisionReason.trim() ||
+                !(
+                  Object.values(selectedCandidates).some(Boolean) ||
+                  Object.values(rejectedCandidates).some(Boolean)
+                )
+              }
             >
               {saving ? (
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
               ) : (
                 <CheckCircle2 className="size-4" aria-hidden="true" />
               )}
-              Aplicar seleccionados
+              Guardar decisiones
             </Button>
           </div>
         </Card>
@@ -882,8 +864,8 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
         />
       ) : (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-          Revisa y edita la propuesta antes de utilizarla. Los borradores de esta pantalla son
-          temporales y no cambian la descripción del producto.
+          Cada propuesta generada se guarda como versión para revisión. Abre la bandeja para
+          aprobarla o rechazarla con motivo.
         </div>
       )}
       <ProductSelector
@@ -946,7 +928,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
               <h4 className="text-sm font-semibold text-violet-950">Propuesta IA</h4>
               <div className="flex flex-wrap justify-end gap-2">
                 <StatusBadge tone={result ? 'warning' : 'neutral'}>
-                  {result ? 'No persistida' : 'Sin generar'}
+                  {result ? 'Guardada en bandeja' : 'Sin generar'}
                 </StatusBadge>
                 {result ? <StatusBadge tone="info">Revisión humana</StatusBadge> : null}
                 {draft !== null ? (
@@ -1053,6 +1035,14 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
           </div>
         </div>
       </Card>
+      {product && (
+        <CommercialReviewHistory
+          key={product.id}
+          productId={product.id}
+          generatedReviewId={result?.reviewIds?.[0]}
+          editedText={draft}
+        />
+      )}
       {editingDraft !== null ? (
         <WorkspaceDrawer title="Editar propuesta comercial" onClose={() => setEditingDraft(null)}>
           <div className="space-y-4">
@@ -1102,7 +1092,8 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
               </section>
             ) : null}
             <p className="text-xs text-muted-foreground">
-              Las propuestas de esta revisión no están guardadas ni aprobadas en el producto.
+              La propuesta original está guardada en el historial. Su aprobación y las ediciones
+              confirmadas se registran con motivo.
             </p>
           </div>
         </WorkspaceDrawer>
@@ -1168,155 +1159,11 @@ export function coerceExtractedValue(
   return { ok: true, value };
 }
 
-function DuplicatesWorkspace({ workspace }: { workspace: WorkspaceDto }) {
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <EmptyMetric label="Alertas abiertas" note="Sin alertas disponibles" />
-        <EmptyMetric label="Resueltas" note="Sin decisiones registradas" />
-        <EmptyMetric label="Ya agrupados por ERP" note="Sin comparación disponible" />
-        <Card className="min-h-28 p-4">
-          <small className="text-muted-foreground">Fusiones automáticas</small>
-          <strong className="mt-2 block text-2xl text-emerald-600">0</strong>
-          <p className="mt-1 text-xs text-muted-foreground">El PIM nunca fusiona SKU</p>
-        </Card>
-      </div>
-      <BlockingNotice
-        workspace={workspace}
-        title="Sin alertas de duplicados disponibles"
-        fallback="No hay pares de productos disponibles para comparar. Cuando existan alertas, revisa sus diferencias antes de tomar una decisión."
-      />
-      <Card className="overflow-hidden">
-        <div className="border-b p-5">
-          <div className="flex items-center gap-3">
-            <GitCompareArrows className="size-5 text-primary" aria-hidden="true" />
-            <div>
-              <h3 className="font-semibold text-cdr-ink">Alertas para revisión humana</h3>
-              <p className="text-xs text-muted-foreground">
-                Duplicado probable no equivale a código unificador y nunca modifica la identidad.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left text-xs">
-            <thead className="border-b bg-slate-50 tracking-wide text-muted-foreground">
-              <tr>
-                {[
-                  'SKU A',
-                  'SKU B',
-                  'Motivo de similitud',
-                  'Similitud',
-                  'Código unificador',
-                  'Estado',
-                  'Acción',
-                ].map((heading) => (
-                  <th key={heading} className="px-4 py-3 font-semibold">
-                    {heading}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">
-                  <GitCompareArrows
-                    className="mx-auto mb-3 size-8 text-slate-300"
-                    aria-hidden="true"
-                  />
-                  <strong className="block text-sm text-cdr-ink">Sin candidatos disponibles</strong>
-                  <span className="mt-1 block">
-                    No hay pares con información de similitud disponibles para revisión.
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div className="border-t bg-amber-50 px-5 py-3 text-xs leading-relaxed text-amber-950">
-          Cada SKU conserva su código de artículo. Una corrección de agrupación debe originarse en
-          ERP y llegar mediante el código unificador.
-        </div>
-      </Card>
-    </div>
-  );
+function DuplicatesWorkspace(_props: { workspace: WorkspaceDto }) {
+  return <QualityGovernanceWorkspace mode="duplicates" />;
 }
-
-function ReviewWorkspace({ workspace }: { workspace: WorkspaceDto }) {
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <EmptyMetric label="Pendientes" note="Sin solicitudes disponibles" />
-        <EmptyMetric label="Aprobadas" note="Sin decisiones registradas" />
-        <EmptyMetric label="Con ajuste" note="Sin ajustes registrados" />
-        <EmptyMetric label="Creadas en la sesión" note="Sin solicitudes registradas" />
-      </div>
-      <BlockingNotice
-        workspace={workspace}
-        title="Sin solicitudes para revisar"
-        fallback="Las solicitudes aparecerán aquí cuando estén disponibles para revisión. No hay cambios pendientes que puedas aprobar desde esta vista."
-      />
-      <div className="flex flex-wrap gap-2" aria-label="Filtros de estado">
-        {['Pendientes', 'Aprobadas', 'Con ajuste', 'Todas'].map((label, index) => (
-          <Button key={label} variant={index === 0 ? 'default' : 'outline'} size="sm" disabled>
-            {label} · —
-          </Button>
-        ))}
-      </div>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-        <Card className="overflow-hidden">
-          <div className="border-b p-5">
-            <div className="flex items-center gap-3">
-              <ListChecks className="size-5 text-primary" aria-hidden="true" />
-              <h3 className="font-semibold text-cdr-ink">Solicitudes</h3>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[620px] text-left text-xs">
-              <thead className="border-b bg-slate-50 tracking-wide text-muted-foreground">
-                <tr>
-                  {['Solicitud', 'SKU', 'Solicitante', 'Prioridad', 'Estado', 'Acción'].map(
-                    (heading) => (
-                      <th key={heading} className="px-4 py-3 font-semibold">
-                        {heading}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">
-                    No hay solicitudes disponibles. Selecciona una solicitud cuando aparezca para
-                    revisar sus cambios y evidencia.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
-        <Card className="p-5">
-          <h3 className="font-semibold text-cdr-ink">Revisión individual</h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Al seleccionar una solicitud se compararán valor anterior, propuesta, evidencia,
-            solicitante y trazabilidad.
-          </p>
-          <div className="mt-6 grid gap-3 rounded-xl border bg-slate-50 p-4 text-xs text-muted-foreground">
-            <span>Registro: —</span>
-            <span>Solicitante: —</span>
-            <span>Prioridad: —</span>
-            <span>Estado: —</span>
-          </div>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="outline" disabled>
-              Solicitar ajuste
-            </Button>
-            <Button disabled>Aprobar</Button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
+function ReviewWorkspace(_props: { workspace: WorkspaceDto }) {
+  return <QualityGovernanceWorkspace />;
 }
 
 const ERP_SOURCE_FIELDS = [
@@ -1376,6 +1223,32 @@ function SourcesWorkspace({
     categories[0];
   const selectedSources = sourcePriorityEntries(selectedCategory?.sourcePriority ?? {});
   const pendingCount = categories.length - configuredCategories.length;
+  const [editingPriority, setEditingPriority] = useState(false);
+  const [priorityDraft, setPriorityDraft] = useState<CategorySourcePriorityDto>({});
+  const [priorityReason, setPriorityReason] = useState('');
+  const [priorityBusy, setPriorityBusy] = useState(false);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
+  const savePriority = async () => {
+    if (!selectedCategory) return;
+    setPriorityBusy(true);
+    setPriorityError(null);
+    try {
+      await updateQualitySourcePriority({
+        categoryId: selectedCategory.id,
+        expectedUpdatedAt: selectedCategory.updatedAt,
+        priority: priorityDraft,
+        reason: priorityReason,
+      });
+      setCategories(await listAdminCategories(true));
+      setEditingPriority(false);
+    } catch (error) {
+      setPriorityError(
+        error instanceof Error ? error.message : 'No se pudieron guardar las reglas.',
+      );
+    } finally {
+      setPriorityBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -1421,6 +1294,66 @@ function SourcesWorkspace({
             : `${configuredCategories.length} configuradas · ${pendingCount} pendientes`}
         </StatusBadge>
       </Card>
+      {editingPriority && selectedCategory && (
+        <WorkspaceDrawer
+          title={`Prioridad de fuentes · ${selectedCategory.name}`}
+          onClose={() => setEditingPriority(false)}
+          busy={priorityBusy}
+          unsavedChanges={!!priorityReason}
+        >
+          <p className="mb-4 text-sm text-muted-foreground">
+            Define el orden confirmado para esta categoría. Los campos vacíos conservan su prioridad
+            como pendiente.
+          </p>
+          {(['fabricante', 'archivo', 'tecdoc', 'manual'] as const).map((source) => (
+            <label key={source} className="mb-3 flex items-center justify-between text-sm">
+              {SOURCE_LABELS[source]}
+              <select
+                aria-label={`Prioridad ${SOURCE_LABELS[source]}`}
+                value={priorityDraft[source] ?? ''}
+                onChange={(event) =>
+                  setPriorityDraft((current) => {
+                    const next = { ...current };
+                    if (event.target.value) next[source] = Number(event.target.value);
+                    else delete next[source];
+                    return next;
+                  })
+                }
+                className="rounded-md border p-2"
+              >
+                <option value="">Pendiente</option>
+                {[1, 2, 3, 4].map((rank) => (
+                  <option key={rank} value={rank}>
+                    {rank}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <label className="mt-4 block text-sm font-semibold">
+            Motivo
+            <textarea
+              aria-label="Motivo del cambio de prioridad"
+              value={priorityReason}
+              onChange={(event) => setPriorityReason(event.target.value)}
+              className="mt-2 min-h-24 w-full rounded-lg border p-3"
+              maxLength={2000}
+            />
+          </label>
+          {priorityError && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {priorityError}
+            </p>
+          )}
+          <Button
+            className="mt-4"
+            disabled={priorityBusy || !priorityReason.trim()}
+            onClick={() => void savePriority()}
+          >
+            Guardar reglas
+          </Button>
+        </WorkspaceDrawer>
+      )}
       {conflict ? (
         <Card className="p-5">
           <div className="flex items-center gap-3">
@@ -1543,7 +1476,15 @@ function SourcesWorkspace({
                               </StatusBadge>
                             </td>
                             <td className="px-2 py-2.5">
-                              <Button size="sm" variant="outline" disabled>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPriorityDraft(selectedCategory?.sourcePriority ?? {});
+                                  setPriorityReason('');
+                                  setEditingPriority(true);
+                                }}
+                              >
                                 Editar
                               </Button>
                             </td>
@@ -1566,8 +1507,17 @@ function SourcesWorkspace({
                 pendientes; no se completa su precedencia por inferencia.
               </p>
               <div className="mt-3 flex justify-end">
-                <Button size="sm" variant="outline" disabled>
-                  Guardar reglas
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setPriorityDraft(selectedCategory?.sourcePriority ?? {});
+                    setPriorityReason('');
+                    setEditingPriority(true);
+                  }}
+                  disabled={!selectedCategory}
+                >
+                  Editar reglas
                 </Button>
               </div>
             </div>
@@ -1680,7 +1630,7 @@ const renderers: Record<QualitySecondaryView, (workspace: WorkspaceDto) => React
   duplicates: (workspace) => <DuplicatesWorkspace workspace={workspace} />,
   review: (workspace) => <ReviewWorkspace workspace={workspace} />,
   sources: (workspace) => <SourcesWorkspace workspace={workspace} />,
-  conflict: (workspace) => <SourcesWorkspace workspace={workspace} conflict />,
+  conflict: () => <QualityGovernanceWorkspace mode="conflict" />,
 };
 
 /**

@@ -1,4 +1,8 @@
-import { adminCatalogCategorySchema, adminCategoryListQuerySchema } from '@cdr/contracts';
+import {
+  adminCatalogCategorySchema,
+  adminCategoryListQuerySchema,
+  createCatalogCategorySchema,
+} from '@cdr/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -22,5 +26,15 @@ export async function GET(request: NextRequest) {
     method: 'GET',
     path: `/catalog/admin/categories?${params.toString()}`,
     outputSchema: z.array(adminCatalogCategorySchema),
+  });
+}
+
+export async function POST(request: NextRequest) {
+  return proxyPrivateApi({
+    request,
+    method: 'POST',
+    path: '/catalog/admin/categories',
+    inputSchema: createCatalogCategorySchema,
+    outputSchema: adminCatalogCategorySchema,
   });
 }

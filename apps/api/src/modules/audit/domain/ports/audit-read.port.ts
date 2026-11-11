@@ -26,6 +26,7 @@ export interface AuditChangeRecord {
   readonly source: string;
   readonly correlationId: string;
   readonly occurredAt: Date;
+  readonly reason?: string | null;
 }
 
 export interface AuditChangePage {

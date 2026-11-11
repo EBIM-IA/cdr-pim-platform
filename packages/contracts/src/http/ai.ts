@@ -26,16 +26,22 @@ export const aiUsageSchema = z.object({
   outputTokens: z.number().int().nonnegative().nullable(),
 });
 
-export const aiCommercialProposalResponseSchema = z.object({
-  productId: uuidSchema,
-  sku: z.string().min(1).max(64),
-  channel: aiCommercialChannelSchema,
-  model: z.string().min(1).max(200),
-  proposal: z.string().min(1).max(20_000),
-  usage: aiUsageSchema,
-  persisted: z.literal(false),
-  requiresHumanReview: z.literal(true),
-});
+export const aiCommercialProposalResponseSchema = z
+  .object({
+    productId: uuidSchema,
+    sku: z.string().min(1).max(64),
+    channel: aiCommercialChannelSchema,
+    model: z.string().min(1).max(200),
+    proposal: z.string().min(1).max(20_000),
+    usage: aiUsageSchema,
+    persisted: z.boolean(),
+    reviewIds: z.array(uuidSchema).optional(),
+    requiresHumanReview: z.literal(true),
+  })
+  .refine(
+    (result) => !result.persisted || result.reviewIds !== undefined,
+    'Los candidatos persistidos necesitan referencias de revisión.',
+  );
 export type AiCommercialProposalResponse = z.infer<typeof aiCommercialProposalResponseSchema>;
 
 const expectedAttributeKeySchema = z
@@ -61,14 +67,20 @@ export const aiExtractionCandidateSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export const aiExtractionCandidatesResponseSchema = z.object({
-  assetId: uuidSchema,
-  productId: uuidSchema,
-  sku: z.string().min(1).max(64),
-  filename: z.string().min(1).max(180),
-  model: z.string().min(1).max(200),
-  candidates: z.array(aiExtractionCandidateSchema).max(AI_EXTRACTION_MAX_CANDIDATES),
-  persisted: z.literal(false),
-  requiresHumanReview: z.literal(true),
-});
+export const aiExtractionCandidatesResponseSchema = z
+  .object({
+    assetId: uuidSchema,
+    productId: uuidSchema,
+    sku: z.string().min(1).max(64),
+    filename: z.string().min(1).max(180),
+    model: z.string().min(1).max(200),
+    candidates: z.array(aiExtractionCandidateSchema).max(AI_EXTRACTION_MAX_CANDIDATES),
+    persisted: z.boolean(),
+    reviewIds: z.array(uuidSchema).optional(),
+    requiresHumanReview: z.literal(true),
+  })
+  .refine(
+    (result) => !result.persisted || result.reviewIds !== undefined,
+    'Los candidatos persistidos necesitan referencias de revisión.',
+  );
 export type AiExtractionCandidatesResponse = z.infer<typeof aiExtractionCandidatesResponseSchema>;

@@ -1,3 +1,4 @@
+import { QualityModule } from '../quality/quality.module';
 import { Module } from '@nestjs/common';
 import { EcommerceDescriptionUseCases } from './application/ecommerce-description.use-cases';
 import { EcommerceDescriptionController } from './presentation/ecommerce-description.controller';
@@ -34,7 +35,7 @@ import { AiController } from './presentation/ai.controller';
  * `fake` is the default so a developer with no API key, and CI, both get a working system.
  */
 @Module({
-  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule],
+  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule, QualityModule],
   controllers: [AiController, EcommerceDescriptionController],
   providers: [
     EcommerceDescriptionUseCases,

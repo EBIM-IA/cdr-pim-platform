@@ -6,6 +6,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ProductThumbnail } from '@/components/product-thumbnail';
 import { Button } from '@/components/ui/button';
+import {
+  downloadTechnicalSheetPdf,
+  technicalSheetDocument,
+  technicalSheetMedia,
+  technicalSheetLogo,
+  technicalSheetBrand,
+} from '@/lib/technical-sheet-export';
+import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
 import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
 import type { Product } from '@/lib/types';
 import { displayMeasurement, type MeasurementSystem } from '@/lib/units';
@@ -36,56 +44,6 @@ function printableValue(
   return `${String(value)}${unit ? ` ${unit}` : ''}`;
 }
 
-function printPreview(): void {
-  const source = document.getElementById('technical-sheet-document');
-  if (!source) return;
-
-  const popup = window.open('', '_blank', 'width=980,height=760');
-  if (!popup) {
-    throw new Error('El navegador bloqueó la ventana de impresión. Habilita ventanas emergentes.');
-  }
-  popup.opener = null;
-
-  popup.document.title = source.getAttribute('data-file-name') ?? 'Ficha técnica CDR';
-  const style = popup.document.createElement('style');
-  style.textContent = `
-    @page { size: A4; margin: 12mm; }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #1d1d1f; font-family: Arial, Helvetica, sans-serif; }
-    .sheet { min-height: 270mm; border-top: 6px solid #ea5b0c; padding: 18px 22px 24px; }
-    .sheet-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #dfe3e8; padding-bottom: 14px; }
-    .sheet-logo { width: 180px; height: auto; }
-    .sheet-kicker { color: #ea5b0c; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-    h1 { margin: 6px 0 0; font-size: 25px; line-height: 1.15; }
-    .sheet-code { margin: 7px 0 0; color: #596273; font-family: monospace; font-size: 12px; }
-    .sheet-summary { display: grid; grid-template-columns: 190px 1fr; gap: 22px; margin-top: 20px; }
-    .sheet-art { display: grid; place-items: center; min-height: 145px; color: #596273; background: #f4f5f6; border-radius: 10px; overflow: hidden; }
-    .sheet-art figure { width: 100%; margin: 0; background: transparent; }
-    .sheet-art svg { display: block; width: 86%; max-height: 145px; margin: auto; }
-    .sheet-description { color: #596273; font-size: 11px; line-height: 1.6; }
-    .sheet-base { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; margin: 16px 0 0; }
-    .sheet-base div, .sheet-attribute { break-inside: avoid; }
-    dt { color: #737b88; font-size: 9px; }
-    dd { margin: 3px 0 0; font-size: 11px; font-weight: 700; }
-    .sheet-section-title { margin: 24px 0 9px; color: #ea5b0c; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-    .sheet-attributes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid #dfe3e8; border-radius: 8px; overflow: hidden; }
-    .sheet-attribute { min-height: 47px; padding: 9px 11px; border-bottom: 1px solid #e8ebef; }
-    .sheet-attribute:nth-child(odd) { border-right: 1px solid #e8ebef; }
-    .sheet-footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #dfe3e8; color: #737b88; font-size: 8px; line-height: 1.45; }
-    .no-print { display: none !important; }
-  `;
-  popup.document.head.append(style);
-  const clone = source.cloneNode(true) as HTMLElement;
-  clone.removeAttribute('id');
-  popup.document.body.append(clone);
-  popup.document.close();
-  popup.focus();
-  window.setTimeout(() => {
-    popup.print();
-    popup.close();
-  }, 250);
-}
-
 export function TechnicalSheetPreview({
   open,
   product,
@@ -96,6 +54,21 @@ export function TechnicalSheetPreview({
   commercialCopy,
 }: TechnicalSheetPreviewProps) {
   const [printError, setPrintError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [brandInfo, setBrandInfo] = useState<{ brandLogo?: string; brandDescription?: string }>({});
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    void technicalSheetBrand(product.brand, controller.signal)
+      .then(setBrandInfo)
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          setPrintError(
+            failure instanceof Error ? failure.message : 'No se pudo consultar la marca.',
+          );
+      });
+    return () => controller.abort();
+  }, [open, product.brand]);
   const closePreview = useCallback(() => {
     setPrintError(null);
     onClose();
@@ -176,20 +149,41 @@ export function TechnicalSheetPreview({
           <div className="flex items-center gap-2">
             <Button
               type="button"
+              disabled={downloading}
               onClick={() => {
                 setPrintError(null);
-                try {
-                  printPreview();
-                } catch (error) {
-                  setPrintError(
-                    error instanceof Error
-                      ? error.message
-                      : 'No fue posible abrir la impresión de la ficha técnica.',
-                  );
-                }
+                setDownloading(true);
+                void Promise.all([
+                  fetchProductTechnicalSheet(product.id),
+                  technicalSheetLogo(),
+                  technicalSheetMedia(assets),
+                  technicalSheetBrand(product.brand),
+                ])
+                  .then(async ([current, cdrLogo, media, brand]) => {
+                    await downloadTechnicalSheetPdf({
+                      ...technicalSheetDocument(current, unitSystem),
+                      cdrLogo,
+                      media,
+                      ...brand,
+                      ...(commercialCopy
+                        ? { name: commercialCopy.titulo, description: commercialCopy.descripcion }
+                        : product.description
+                          ? { description: product.description }
+                          : {}),
+                    });
+                  })
+                  .catch((error: unknown) => {
+                    setPrintError(
+                      error instanceof Error
+                        ? error.message
+                        : 'No fue posible generar la ficha PDF.',
+                    );
+                  })
+                  .finally(() => setDownloading(false));
               }}
             >
-              <Download aria-hidden="true" className="size-4" /> Descargar PDF
+              <Download aria-hidden="true" className="size-4" />{' '}
+              {downloading ? 'Generando PDF…' : 'Descargar PDF'}
             </Button>
             <Button
               type="button"
@@ -221,7 +215,7 @@ export function TechnicalSheetPreview({
             <header className="sheet-header flex items-center justify-between gap-6 border-b pb-4">
               {/* The official asset is served locally; no third-party request is needed to print. */}
               <img
-                className="sheet-logo h-auto w-44"
+                className="sheet-logo h-auto w-44 rounded bg-[#222222] p-2"
                 src="/brand/cdr-logo.png"
                 alt="Casa del Rulimán"
               />
@@ -269,6 +263,22 @@ export function TechnicalSheetPreview({
                 </dl>
               </div>
             </div>
+
+            {brandInfo.brandLogo || brandInfo.brandDescription ? (
+              <section className="mt-5 border-t pt-4">
+                <h2 className="text-xs font-bold text-primary">Información de marca</h2>
+                {brandInfo.brandLogo ? (
+                  <img
+                    src={brandInfo.brandLogo}
+                    alt={`Logo de ${product.brand}`}
+                    className="mt-2 max-h-14 max-w-36 object-contain"
+                  />
+                ) : null}
+                {brandInfo.brandDescription ? (
+                  <p className="mt-2 text-xs text-muted-foreground">{brandInfo.brandDescription}</p>
+                ) : null}
+              </section>
+            ) : null}
 
             <h2 className="sheet-section-title mt-7 text-xs font-extrabold uppercase tracking-[.08em] text-primary">
               Especificaciones publicables

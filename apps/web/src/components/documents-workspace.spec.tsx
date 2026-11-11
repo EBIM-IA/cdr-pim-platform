@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   processProductAssetZip: vi.fn(),
   deleteProductAsset: vi.fn(),
   exportXlsx: vi.fn(),
+  downloadTechnicalSheetsZip: vi.fn(),
   listProductAssetsBatch: vi.fn(),
   fetchCatalogWorkbook: vi.fn(),
 }));
@@ -35,6 +36,10 @@ vi.mock('@/lib/catalog-api', () => ({ fetchProduct: mocks.fetchProduct }));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchCatalogCategories: mocks.fetchCatalogCategories,
   fetchCatalogWorkbook: mocks.fetchCatalogWorkbook,
+}));
+vi.mock('@/lib/technical-sheet-export', () => ({
+  downloadTechnicalSheetsZip: mocks.downloadTechnicalSheetsZip,
+  MAX_TECHNICAL_SHEETS_PER_ZIP: 250,
 }));
 vi.mock('@/lib/tabular-export', () => ({ downloadXlsx: mocks.exportXlsx }));
 
@@ -109,6 +114,7 @@ const allCatalog = () => ({
 });
 
 beforeEach(() => {
+  mocks.downloadTechnicalSheetsZip.mockResolvedValue(undefined);
   vi.resetAllMocks();
   window.history.replaceState({}, '', '/documents');
   mocks.fetchDocumentsCatalog.mockResolvedValue(allCatalog());
@@ -136,6 +142,35 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('DocumentsWorkspace', () => {
+  it('downloads one permission-filtered PDF per filtered SKU for a read-only catalog user', async () => {
+    render(<DocumentsWorkspace canWrite={false} />);
+    await screen.findByText(asset.filename);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar SKU' }), {
+      target: { value: product.sku },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }));
+    await waitFor(() =>
+      expect(mocks.downloadTechnicalSheetsZip).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: product.id })],
+        expect.any(Object),
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          onProgress: expect.any(Function),
+        }),
+      ),
+    );
+    await screen.findByText(/1 fichas técnicas descargadas/u);
+  });
+  it('reports a ZIP generation failure without claiming that sheets were downloaded', async () => {
+    mocks.downloadTechnicalSheetsZip.mockRejectedValue(
+      new Error('No se pudo generar la ficha del SKU 6205'),
+    );
+    render(<DocumentsWorkspace canWrite />);
+    await screen.findByText(asset.filename);
+    fireEvent.click(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }));
+    await screen.findByText('No se pudo generar la ficha del SKU 6205');
+    expect(screen.queryByText(/fichas técnicas descargadas/u)).not.toBeInTheDocument();
+  });
   it('reorders column headings, filters and exported values together and restores the saved order', async () => {
     window.localStorage.clear();
     const view = render(<DocumentsWorkspace canWrite />);

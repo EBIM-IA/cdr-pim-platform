@@ -200,7 +200,7 @@ export class DynamicCatalogController {
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<UpdatedProductAttributesBatchDto> {
     return toUpdatedProductAttributesBatchDto(
-      await this.updateAttributes.execute({ productId, updates: body.updates }, actor),
+      await this.updateAttributes.execute({ productId, ...body }, actor),
     );
   }
 }

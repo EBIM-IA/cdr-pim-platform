@@ -68,6 +68,7 @@ export interface CommercialProposalCandidate {
   readonly channel: AiCommercialChannel;
   readonly model: string;
   readonly proposal: string;
+  readonly technicalDescription: string | null;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
 }
@@ -143,6 +144,7 @@ export class GenerateCommercialProposalUseCase {
       channel: input.channel,
       model: result.model,
       proposal,
+      technicalDescription: snapshot.description,
       inputTokens: result.inputTokens ?? null,
       outputTokens: result.outputTokens ?? null,
     };
@@ -225,6 +227,9 @@ export interface ExtractionCandidates {
   readonly filename: string;
   readonly model: string;
   readonly candidates: readonly ExtractedAttribute[];
+  readonly baseline: Readonly<
+    Record<string, { value: string | number | boolean | null; version: number }>
+  >;
 }
 
 @Injectable()
@@ -266,7 +271,10 @@ export class ExtractAssetCandidatesUseCase {
       });
     }
 
-    const eligibleAttributes = await this.eligibleAttributes(snapshot.productId, actor);
+    const { keys: eligibleAttributes, baseline } = await this.eligibleAttributes(
+      snapshot.productId,
+      actor,
+    );
     const requestedAttributes = uniqueAttributeKeys(input.expectedAttributes);
     const expectedAttributes = intersectEligibleAttributes(requestedAttributes, eligibleAttributes);
     if (expectedAttributes.length === 0) {
@@ -315,13 +323,17 @@ export class ExtractAssetCandidatesUseCase {
       filename: snapshot.filename,
       model: result.model,
       candidates,
+      baseline,
     };
   }
 
   private async eligibleAttributes(
     productId: string,
     actor: AuthenticatedActor,
-  ): Promise<string[]> {
+  ): Promise<{
+    keys: string[];
+    baseline: Record<string, { value: string | number | boolean | null; version: number }>;
+  }> {
     const roles = [...new Set(actor.roles.map(normalizeBusinessRole))];
     const sheet = await this.dynamicCatalog.getProductSheet(assertUuid(productId), roles);
     if (!sheet) {
@@ -329,11 +341,23 @@ export class ExtractAssetCandidatesUseCase {
         productId,
       });
     }
-    return uniqueAttributeKeys(
+    const keys = uniqueAttributeKeys(
       sheet.schema.attributes
         .filter((definition) => definition.permissions.edit)
         .map((definition) => definition.key),
     );
+    return {
+      keys,
+      baseline: Object.fromEntries(
+        keys.map((key) => [
+          key,
+          {
+            value: sheet.product.attributes[key]?.value ?? null,
+            version: sheet.product.attributes[key]?.version ?? 0,
+          },
+        ]),
+      ),
+    };
   }
 }
 

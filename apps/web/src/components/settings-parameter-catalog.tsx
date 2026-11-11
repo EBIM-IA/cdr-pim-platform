@@ -1,14 +1,29 @@
 'use client';
 
-import type { CatalogWorkbookResultDto } from '@cdr/contracts';
+import type {
+  CatalogParameterDto,
+  CatalogWorkbookResultDto,
+  SaveCatalogParameterInput,
+} from '@cdr/contracts';
+import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
-
 import { StatusBadge } from '@/components/status-badge';
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { listCatalogParameters, saveCatalogParameter } from '@/lib/catalog-parameters-api';
 
+const kinds: Record<string, CatalogParameterDto['kind']> = {
+  'Unidades de medida': 'unit',
+  Materiales: 'material',
+  Sellos: 'seal',
+  'Tipos de identificador': 'identifier',
+  Marcas: 'brand',
+  'Tipos de aplicación': 'application',
+  Sinónimos: 'synonym',
+};
 const identifiers = [
   ['sku', 'Código del artículo'],
   ['erp_item_id', 'Identificador ERP'],
@@ -17,52 +32,121 @@ const identifiers = [
   ['upc', 'UPC'],
   ['internal_legacy', 'Identificador interno anterior'],
 ];
+type ParameterRow = Omit<CatalogParameterDto, 'id' | 'updatedAt'> & { id?: string };
+const normalize = (value: string) => value.trim().toLocaleLowerCase('es');
 
-export function SettingsParameterCatalog({ catalog }: { catalog: string }) {
+export function SettingsParameterCatalog({
+  catalog,
+  canManage = false,
+}: {
+  catalog: string;
+  canManage?: boolean;
+}) {
+  const kind = kinds[catalog] ?? 'unit';
   const [data, setData] = useState<CatalogWorkbookResultDto | null>(null);
+  const [parameters, setParameters] = useState<CatalogParameterDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
   const [brand, setBrand] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState<SaveCatalogParameterInput | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    void fetchCatalogWorkbook({ page: 1, pageSize: 1, filter: [] }, controller.signal)
-      .then(setData)
-      .catch(() => {
-        if (!controller.signal.aborted) setError('No pudimos cargar los parámetros del catálogo.');
+    setLoading(true);
+    setError('');
+    setParameters([]);
+    setDraft(null);
+    void Promise.all([
+      fetchCatalogWorkbook({ page: 1, pageSize: 1, filter: [] }, controller.signal),
+      listCatalogParameters(kind, controller.signal),
+    ])
+      .then(([workbook, rows]) => {
+        if (!controller.signal.aborted) {
+          setData(workbook);
+          setParameters(rows);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          setError(
+            failure instanceof Error ? failure.message : 'No pudimos cargar los parámetros.',
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [kind, refresh]);
   useEffect(() => {
     setQuery('');
+    setBrand('');
+    setNotice('');
   }, [catalog]);
   const rows = useMemo(() => {
-    if (catalog === 'Tipos de identificador') return identifiers;
-    if (catalog === 'Marcas')
-      return (data?.facets.brands ?? []).map((value) => [value, 'Marca del catálogo']);
-    if (catalog === 'Tipos de aplicación')
-      return (data?.facets.applicationTypes ?? []).map((value) => [value, 'Aplicación registrada']);
-    if (catalog === 'Unidades de medida')
-      return [
+    let observed: string[][] = [];
+    if (kind === 'identifier') observed = identifiers;
+    if (kind === 'brand')
+      observed = (data?.facets.brands ?? []).map((value) => [value, 'Marca del catálogo']);
+    if (kind === 'application')
+      observed = (data?.facets.applicationTypes ?? []).map((value) => [
+        value,
+        'Aplicación registrada',
+      ]);
+    if (kind === 'unit')
+      observed = [
         ...new Set(
           (data?.columns ?? [])
             .map((column) => column.unit)
-            .filter((value): value is string => !!value),
+            .filter((value): value is string => Boolean(value)),
         ),
       ]
         .sort()
         .map((value) => [value, 'Unidad de atributo de plantilla']);
-    const expression =
-      catalog === 'Materiales' ? /material/i : catalog === 'Sellos' ? /sello|sellado|seal/i : null;
-    if (!expression) return [];
-    const values = (data?.columns ?? [])
-      .filter((column) => expression.test(column.key) || expression.test(column.label))
-      .flatMap((column) => column.allowedValues.map((value) => [value, column.label]));
-    return [...new Map(values.map((value) => [value.join('|'), value])).values()];
-  }, [catalog, data]);
+    if (kind === 'material' || kind === 'seal') {
+      const expression = kind === 'material' ? /material/i : /sello|sellado|seal/i;
+      observed = (data?.columns ?? [])
+        .filter((column) => expression.test(column.key) || expression.test(column.label))
+        .flatMap((column) => column.allowedValues.map((value) => [value, column.label]));
+    }
+    const merged = new Map<string, ParameterRow>();
+    observed.forEach(([value, description]) => {
+      if (value)
+        merged.set(normalize(value), {
+          kind,
+          value,
+          description: description ?? '',
+          target: null,
+          logoDataUrl: null,
+          active: true,
+          version: 0,
+        });
+    });
+    parameters.forEach((parameter) => merged.set(normalize(parameter.value), parameter));
+    return [...merged.values()].sort((left, right) => left.value.localeCompare(right.value, 'es'));
+  }, [data, kind, parameters]);
   const shown = rows.filter((row) =>
-    row.join(' ').toLocaleLowerCase('es').includes(query.toLocaleLowerCase('es')),
+    [row.value, row.description, row.target ?? '']
+      .join(' ')
+      .toLocaleLowerCase('es')
+      .includes(query.toLocaleLowerCase('es')),
   );
-  const currentBrand = brand || data?.facets.brands[0] || '';
+  const selectedBrand = rows.find((row) => row.value === brand) ?? rows[0];
+  const edit = (row?: ParameterRow) => {
+    setError('');
+    setDraft({
+      ...(row?.id ? { id: row.id } : {}),
+      kind,
+      value: row?.value ?? '',
+      description: row?.description ?? '',
+      target: row?.target ?? null,
+      logoDataUrl: row?.logoDataUrl ?? null,
+      active: row?.active ?? true,
+      expectedVersion: row?.version ?? 0,
+    });
+  };
   return (
     <div className="min-w-0 space-y-4">
       <Card className="overflow-hidden">
@@ -70,18 +154,16 @@ export function SettingsParameterCatalog({ catalog }: { catalog: string }) {
           <div>
             <h3 className="text-sm font-semibold">{catalog}</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              {catalog === 'Sinónimos'
-                ? 'Términos alternativos para encontrar productos.'
-                : 'Valores vigentes del catálogo y sus plantillas.'}
+              {kind === 'synonym'
+                ? 'Términos alternativos aplicados en la búsqueda del catálogo.'
+                : 'Parámetros configurados y valores observados en productos y plantillas.'}
             </p>
           </div>
-          <Button
-            size="sm"
-            disabled
-            title="El mantenimiento de estos parámetros está pendiente de habilitar"
-          >
-            Agregar parámetro
-          </Button>
+          {canManage ? (
+            <Button size="sm" disabled={loading} onClick={() => edit()}>
+              Agregar parámetro
+            </Button>
+          ) : null}
         </div>
         <div className="p-4">
           <label>
@@ -98,11 +180,21 @@ export function SettingsParameterCatalog({ catalog }: { catalog: string }) {
               {error}
             </p>
           ) : null}
+          {notice ? (
+            <p role="status" className="mt-3 text-xs text-emerald-800">
+              {notice}
+            </p>
+          ) : null}
           <div className="mt-3 overflow-auto">
             <table className="w-full min-w-[450px] text-left text-xs">
               <thead className="bg-slate-50">
                 <tr>
-                  {['Valor', 'Descripción', 'Vigencia', 'Acción'].map((label) => (
+                  {[
+                    'Valor',
+                    kind === 'synonym' ? 'Buscar también' : 'Descripción',
+                    'Vigencia',
+                    'Acción',
+                  ].map((label) => (
                     <th key={label} className="p-2.5">
                       {label}
                     </th>
@@ -111,35 +203,46 @@ export function SettingsParameterCatalog({ catalog }: { catalog: string }) {
               </thead>
               <tbody>
                 {shown.map((row) => (
-                  <tr key={row.join('|')} className="border-t">
+                  <tr key={row.id ?? row.value} className="border-t">
                     <th scope="row" className="p-2.5 text-left font-medium">
-                      {catalog === 'Marcas' ? (
+                      {kind === 'brand' ? (
                         <button
                           type="button"
                           className="text-primary hover:underline"
-                          onClick={() => setBrand(row[0] ?? '')}
+                          onClick={() => setBrand(row.value)}
                         >
-                          {row[0]}
+                          {row.value}
                         </button>
                       ) : (
-                        row[0]
+                        row.value
                       )}
+                      <small className="mt-1 block font-normal text-muted-foreground">
+                        {row.id ? 'Configurado en PIM' : 'Observado en catálogo'}
+                      </small>
                     </th>
-                    <td className="p-2.5 text-muted-foreground">{row[1]}</td>
-                    <td className="p-2.5">
-                      <StatusBadge tone="success">Vigente</StatusBadge>
+                    <td className="p-2.5 text-muted-foreground">
+                      {kind === 'synonym' ? row.target : row.description}
                     </td>
                     <td className="p-2.5">
-                      <Button size="sm" variant="outline" disabled>
-                        Editar
-                      </Button>
+                      <StatusBadge tone={row.active ? 'success' : 'neutral'}>
+                        {row.active ? 'Vigente' : 'Inactivo'}
+                      </StatusBadge>
+                    </td>
+                    <td className="p-2.5">
+                      {canManage ? (
+                        <Button size="sm" variant="outline" onClick={() => edit(row)}>
+                          Editar
+                        </Button>
+                      ) : (
+                        'Consulta'
+                      )}
                     </td>
                   </tr>
                 ))}
                 {!shown.length ? (
                   <tr>
                     <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                      {!data && !error
+                      {loading
                         ? 'Cargando parámetros…'
                         : query
                           ? 'Sin coincidencias.'
@@ -151,37 +254,184 @@ export function SettingsParameterCatalog({ catalog }: { catalog: string }) {
             </table>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            {shown.length} valores · Consulta de parámetros vigentes. El mantenimiento está
-            pendiente de habilitar.
+            {shown.length} valores · Los cambios se guardan con auditoría y control de versión. Los
+            valores observados conservan sus asignaciones en productos.
           </p>
         </div>
       </Card>
-      {catalog === 'Marcas' ? (
+      {kind === 'brand' && selectedBrand ? (
         <Card className="p-4">
-          <h3 className="text-sm font-semibold">
-            Datos de marca para PDF · {currentBrand || 'Selecciona una marca'}
-          </h3>
+          <h3 className="text-sm font-semibold">Datos de marca para PDF · {selectedBrand.value}</h3>
           <div className="mt-4 grid gap-4 sm:grid-cols-[130px_minmax(0,1fr)]">
             <div className="grid min-h-28 place-items-center rounded-lg border border-dashed text-xs text-muted-foreground">
-              Sin logo registrado
+              {selectedBrand.logoDataUrl ? (
+                <Image
+                  src={selectedBrand.logoDataUrl}
+                  alt={`Logo ${selectedBrand.value}`}
+                  width={120}
+                  height={100}
+                  unoptimized
+                  className="max-h-28 object-contain"
+                />
+              ) : (
+                'Sin logo registrado'
+              )}
             </div>
-            <dl className="space-y-3 text-xs">
-              <div>
-                <dt className="text-muted-foreground">Marca</dt>
-                <dd className="mt-1 font-semibold">{currentBrand || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Datos para la ficha PDF</dt>
-                <dd className="mt-1">Configuración pendiente de habilitar</dd>
-              </div>
-            </dl>
+            <p className="whitespace-pre-wrap text-sm">
+              {selectedBrand.description || 'Sin información adicional para la ficha PDF'}
+            </p>
           </div>
-          <div className="mt-4 flex justify-end">
-            <Button size="sm" variant="outline" disabled>
+          {canManage ? (
+            <Button
+              className="mt-4"
+              size="sm"
+              variant="outline"
+              onClick={() => edit(selectedBrand)}
+            >
               Editar datos de marca
             </Button>
-          </div>
+          ) : null}
         </Card>
+      ) : null}
+      {draft ? (
+        <WorkspaceDrawer
+          title={draft.id ? 'Editar parámetro' : 'Agregar parámetro'}
+          busy={saving}
+          unsavedChanges
+          onClose={() => setDraft(null)}
+        >
+          <form
+            className="space-y-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSaving(true);
+              setError('');
+              try {
+                await saveCatalogParameter(draft);
+                setNotice('Parámetro guardado y auditado.');
+                setDraft(null);
+                setRefresh((value) => value + 1);
+              } catch (failure) {
+                setError(
+                  failure instanceof Error ? failure.message : 'No se pudo guardar el parámetro',
+                );
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {error ? (
+              <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">
+                {error}
+              </p>
+            ) : null}
+            <fieldset className="space-y-4" disabled={saving}>
+              <label className="grid gap-1.5 text-sm">
+                {kind === 'synonym' ? 'Término de búsqueda' : 'Valor'}
+                <Input
+                  required
+                  maxLength={200}
+                  value={draft.value}
+                  onChange={(event) => setDraft({ ...draft, value: event.target.value })}
+                />
+              </label>
+              {kind === 'synonym' ? (
+                <label className="grid gap-1.5 text-sm">
+                  Buscar también
+                  <Input
+                    required
+                    maxLength={200}
+                    value={draft.target ?? ''}
+                    onChange={(event) => setDraft({ ...draft, target: event.target.value || null })}
+                  />
+                </label>
+              ) : null}
+              <label className="grid gap-1.5 text-sm">
+                {kind === 'brand' ? 'Información para la ficha PDF' : 'Descripción'}
+                <textarea
+                  className="min-h-24 rounded-md border p-3"
+                  maxLength={4000}
+                  value={draft.description}
+                  onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={draft.active}
+                  onChange={(event) => setDraft({ ...draft, active: event.target.checked })}
+                />
+                Vigente
+              </label>
+              {kind === 'brand' ? (
+                <div className="space-y-3">
+                  <label className="grid gap-2 text-sm">
+                    Logo PNG o JPEG · máximo 500 KB
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        if (
+                          !['image/png', 'image/jpeg'].includes(file.type) ||
+                          file.size > 500_000
+                        ) {
+                          setError('Selecciona PNG o JPEG de hasta 500 KB');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          if (typeof reader.result === 'string')
+                            setDraft((current) =>
+                              current
+                                ? { ...current, logoDataUrl: String(reader.result) }
+                                : current,
+                            );
+                        };
+                        reader.onerror = () => setError('No se pudo leer el logo');
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                  {draft.logoDataUrl ? (
+                    <>
+                      <Image
+                        src={draft.logoDataUrl}
+                        alt="Logo seleccionado"
+                        width={120}
+                        height={90}
+                        unoptimized
+                        className="object-contain"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDraft({ ...draft, logoDataUrl: null })}
+                      >
+                        Quitar logo
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </fieldset>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setDraft(null)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Guardando…' : 'Guardar parámetro'}
+              </Button>
+            </div>
+          </form>
+        </WorkspaceDrawer>
       ) : null}
     </div>
   );

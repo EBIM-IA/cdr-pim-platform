@@ -263,6 +263,16 @@ export type UpdatedProductAttributeDto = z.infer<typeof updatedProductAttributeS
 
 export const updateProductAttributesBatchSchema = z
   .object({
+    reason: z
+      .string()
+      .trim()
+      .max(2000)
+      .refine(
+        (value) => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value),
+        'Unicode no válido',
+      )
+      .optional(),
+    statusTarget: z.enum(['draft', 'in_review']).optional(),
     updates: z
       .array(
         z.object({
@@ -407,6 +417,9 @@ export type AdminTemplateListQuery = z.infer<typeof adminTemplateListQuerySchema
 
 export const updateTemplateAttributeSchema = z
   .object({
+    label: z.string().trim().min(1).max(200).optional(),
+    dataType: dynamicAttributeDataTypeSchema.optional(),
+    unit: z.string().trim().max(50).nullable().optional(),
     active: z.boolean().optional(),
     required: z.boolean().optional(),
     replicable: z.boolean().optional(),
@@ -419,6 +432,9 @@ export const updateTemplateAttributeSchema = z
   })
   .superRefine((value, context) => {
     const hasChange =
+      value.label !== undefined ||
+      value.dataType !== undefined ||
+      value.unit !== undefined ||
       value.active !== undefined ||
       value.required !== undefined ||
       value.replicable !== undefined ||
@@ -443,3 +459,120 @@ export const updateTemplateAttributeSchema = z
     }
   });
 export type UpdateTemplateAttributeInput = z.infer<typeof updateTemplateAttributeSchema>;
+
+export const createCatalogCategorySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  slug: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  parentId: uuidSchema.nullable().default(null),
+  position: z.number().int().min(0).default(0),
+});
+export type CreateCatalogCategoryInput = z.infer<typeof createCatalogCategorySchema>;
+export const moveCatalogCategorySchema = z.object({
+  parentId: uuidSchema.nullable(),
+  expectedUpdatedAt: z.string().datetime(),
+});
+export type MoveCatalogCategoryInput = z.infer<typeof moveCatalogCategorySchema>;
+export const configureCategoryTemplateSchema = z
+  .object({
+    mode: z.enum(['assign', 'copy', 'empty']),
+    sourceTemplateId: uuidSchema.optional(),
+    name: z.string().trim().min(1).max(200),
+    expectedUpdatedAt: z.string().datetime(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.mode !== 'empty' && !value.sourceTemplateId)
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Selecciona una plantilla de origen',
+        path: ['sourceTemplateId'],
+      });
+  });
+export type ConfigureCategoryTemplateInput = z.infer<typeof configureCategoryTemplateSchema>;
+export const addTemplateAttributeSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .regex(/^[a-z][a-z0-9_]*$/),
+    label: z.string().trim().min(1).max(200),
+    dataType: dynamicAttributeDataTypeSchema,
+    unit: z.string().trim().max(50).nullable().default(null),
+    allowedValues: z.array(z.string().trim().min(1).max(200)).max(500).default([]),
+    expectedUpdatedAt: z.string().datetime(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.dataType === 'enum' && value.allowedValues.length === 0)
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Una lista requiere valores permitidos',
+        path: ['allowedValues'],
+      });
+  });
+export type AddTemplateAttributeInput = z.infer<typeof addTemplateAttributeSchema>;
+export const templateInheritancePreviewSchema = z.object({
+  unifiedCode: z.string(),
+  sourceSkus: z.array(z.string()),
+  attributes: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      required: z.boolean(),
+      replicable: z.boolean(),
+      value: catalogAttributeValueSchema.nullable(),
+      conflict: z.boolean(),
+    }),
+  ),
+});
+export type TemplateInheritancePreviewDto = z.infer<typeof templateInheritancePreviewSchema>;
+
+export const categorySkuAssignmentInputRowSchema = z.object({
+  sku: z.string().trim().min(1).max(100),
+  categorySlug: z.string().trim().min(1).max(100),
+  variantKey: z.string().trim().min(1).max(100).optional(),
+});
+export const previewCategorySkuAssignmentsSchema = z.object({
+  rows: z.array(categorySkuAssignmentInputRowSchema).min(1).max(1000),
+});
+export type PreviewCategorySkuAssignmentsInput = z.infer<
+  typeof previewCategorySkuAssignmentsSchema
+>;
+export const categorySkuAssignmentPreviewRowSchema = categorySkuAssignmentInputRowSchema.extend({
+  expectedTemplateId: uuidSchema.nullable(),
+  targetTemplateId: uuidSchema.nullable(),
+  error: z.string().nullable(),
+});
+export const categorySkuAssignmentPreviewSchema = z.object({
+  rows: z.array(categorySkuAssignmentPreviewRowSchema),
+});
+export type CategorySkuAssignmentPreviewDto = z.infer<typeof categorySkuAssignmentPreviewSchema>;
+export const confirmCategorySkuAssignmentsSchema = z.object({
+  rows: z
+    .array(
+      categorySkuAssignmentInputRowSchema.extend({
+        expectedTemplateId: uuidSchema.nullable(),
+        targetTemplateId: uuidSchema,
+      }),
+    )
+    .min(1)
+    .max(1000),
+});
+export type ConfirmCategorySkuAssignmentsInput = z.infer<
+  typeof confirmCategorySkuAssignmentsSchema
+>;
+export const confirmedCategorySkuAssignmentsSchema = z.object({ changed: z.number().int().min(0) });
+export const categorySkuAssignmentExportSchema = z.array(
+  z.object({
+    sku: z.string(),
+    categorySlug: z.string().nullable(),
+    categoryPath: z.string().nullable(),
+    variantKey: z.string().nullable(),
+  }),
+);
+export type CategorySkuAssignmentExportDto = z.infer<typeof categorySkuAssignmentExportSchema>;

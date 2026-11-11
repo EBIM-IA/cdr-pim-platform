@@ -1,3 +1,4 @@
+import { SEARCH_TELEMETRY, type SearchTelemetryPort } from '../domain/ports/search-telemetry.port';
 import {
   ECOMMERCE_DESCRIPTION,
   type EcommerceDescriptionPort,
@@ -8,7 +9,7 @@ import {
   ecommerceFingerprint,
   ecommerceVariantKey,
 } from '../domain/entities/ecommerce-facts';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type {
   ProductExperienceDto,
   ProductNameConfig,
@@ -70,6 +71,7 @@ export class ProductNamingUseCases {
     @Inject(PRODUCT_REPOSITORY) private readonly products: ProductRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(ECOMMERCE_DESCRIPTION) private readonly descriptions: EcommerceDescriptionPort,
+    @Optional() @Inject(SEARCH_TELEMETRY) private readonly telemetry?: SearchTelemetryPort,
   ) {}
 
   getSettings(): Promise<ProductNameSettingsDto> {
@@ -187,6 +189,7 @@ export class ProductNamingUseCases {
         item?.category?.name ?? exactSheet?.schema.category.name ?? '',
       )[0]!;
     });
+    await this.telemetry?.record(query.q, items.length, 'variants');
     return {
       items,
       totalProducts: result.total,
