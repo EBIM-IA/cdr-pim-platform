@@ -12,8 +12,12 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 export function configureBodyParsers(app: NestExpressApplication): void {
   app.useBodyParser('json', { limit: '2mb', type: isImportPreviewJson });
   app.useBodyParser('json', {
+    limit: '4mb',
+    type: (request) => isJson(request) && isCatalogHome(request),
+  });
+  app.useBodyParser('json', {
     limit: '100kb',
-    type: (request) => isJson(request) && !isImportPreview(request),
+    type: (request) => isJson(request) && !isImportPreview(request) && !isCatalogHome(request),
   });
   app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
 }
@@ -28,4 +32,8 @@ function isImportPreview(request: IncomingMessage): boolean {
 
 function isJson(request: IncomingMessage): boolean {
   return (request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json');
+}
+
+function isCatalogHome(request: IncomingMessage): boolean {
+  return request.url?.split('?', 1)[0] === `${API_PREFIX}/catalog/home`;
 }

@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePersistentColumnOrder } from '@/components/column-order';
 import {
@@ -359,13 +359,19 @@ export function CatalogWorkbookTable({
   const table = useExcelTableRows({
     rows,
     columns,
-    initialSort: { key: 'base:sku', direction: 'asc' },
+    initialSort: { key: showCompleteness ? 'base:sku' : 'base:unifier', direction: 'asc' },
   });
   const serializedColumnFilters = useMemo(
     () => serializeWorkbookColumnFilters(table.filters, columnExpressions),
     [columnExpressions, table.filters],
   );
   const serializedColumnFilterKey = serializedColumnFilters.join('\u001f');
+  // Column filters are already applied by the server. Keep its grouped order even when
+  // the spreadsheet helper locally sorts the visible page by a secondary column.
+  const visibleRowIds = new Set(table.visibleRows.map((row) => row.id));
+  const displayRows = showCompleteness
+    ? table.visibleRows
+    : rows.filter((row) => visibleRowIds.has(row.id));
   const serializedSort = serializeWorkbookSort(table.sort);
 
   useEffect(
@@ -392,6 +398,7 @@ export function CatalogWorkbookTable({
         pageSize,
         filter: [],
         columnFilter: serializedColumnFilters,
+        groupByUnifiedCode: !showCompleteness,
         ...(serializedSort ? { sort: serializedSort } : {}),
         ...(q ? { q } : {}),
         ...(brand ? { brand } : {}),
@@ -503,6 +510,7 @@ export function CatalogWorkbookTable({
           pageSize: WORKBOOK_EXPORT_PAGE_SIZE,
           filter: [],
           columnFilter: serializedColumnFilters,
+          groupByUnifiedCode: !showCompleteness,
           ...(serializedSort ? { sort: serializedSort } : {}),
           ...(q ? { q } : {}),
           ...(brand ? { brand } : {}),
@@ -625,7 +633,7 @@ export function CatalogWorkbookTable({
       nextColumn = orderedColumns.length - 1;
       nextRow -= 1;
     }
-    if (nextRow < 0 || nextRow >= table.visibleRows.length) return null;
+    if (nextRow < 0 || nextRow >= displayRows.length) return null;
     return { row: nextRow, column: nextColumn };
   };
   const editKey = async (
@@ -671,34 +679,57 @@ export function CatalogWorkbookTable({
     );
   }
 
+  const consultation = !canEdit && !showCompleteness;
+  const showFilterSummary =
+    !consultation ||
+    table.filteredColumnKeys.length > 0 ||
+    Object.values(columnExpressions).some((expression) => expression.trim()) ||
+    (table.sort && (table.sort.key !== 'base:unifier' || table.sort.direction !== 'asc'));
+
   return (
     <Card className="min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-[11px] text-muted-foreground">
-        <div className="flex flex-wrap items-center gap-4">
-          <span>Identidad y base ERP · solo lectura</span>
-          <span>Haz clic en una celda PIM editable y pulsa Enter para guardar.</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="size-3 rounded-sm border bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_3px,#e2e8f0_3px,#e2e8f0_4px)]"
-            />
-            Tramado: no aplica a la plantilla
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="cdr-missing-swatch size-3 rounded-sm border" />
-            Rosado: atributo obligatorio sin valor
-          </span>
-        </div>
+        {consultation ? (
+          <p>
+            {formatNumber(total)} {total === 1 ? 'artículo' : 'artículos'} · agrupados por código
+            unificador
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-4">
+            <span>
+              {showCompleteness
+                ? 'Identidad y base ERP · solo lectura'
+                : 'Artículos agrupados por código unificador'}
+            </span>
+            <span>
+              {canEdit
+                ? 'Haz clic en una celda PIM editable y pulsa Enter para guardar.'
+                : 'Selecciona un artículo para consultar su ficha.'}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className="size-3 rounded-sm border bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_3px,#e2e8f0_3px,#e2e8f0_4px)]"
+              />
+              Tramado: no aplica a la plantilla
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="cdr-missing-swatch size-3 rounded-sm border" />
+              Rosado: atributo obligatorio sin valor
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Button
             type="button"
             size="sm"
             variant="ghost"
+            aria-label="Actualizar"
             onClick={() => setRevision((value) => value + 1)}
             disabled={loading}
           >
             <RefreshCw aria-hidden="true" className={cn('size-3.5', loading && 'animate-spin')} />
-            Actualizar
+            <span className={consultation ? 'sr-only' : undefined}>Actualizar</span>
           </Button>
           {canEdit ? (
             <>
@@ -730,9 +761,10 @@ export function CatalogWorkbookTable({
             disabled={columnOrder.isDefaultOrder}
             onClick={columnOrder.resetOrder}
             title="Restaurar el orden original de las columnas"
+            aria-label="Restaurar columnas"
           >
             <Columns3 aria-hidden="true" className="size-4" />
-            Restaurar columnas
+            <span className={consultation ? 'sr-only' : undefined}>Restaurar columnas</span>
           </Button>
         </div>
       </div>
@@ -754,30 +786,32 @@ export function CatalogWorkbookTable({
         </div>
       ) : null}
 
-      <ExcelTableFilterBar
-        filteredColumns={[
-          ...new Set([
-            ...table.filteredColumnKeys,
-            ...Object.entries(columnExpressions)
-              .filter(([, expression]) => Boolean(expression.trim()))
-              .map(([key]) => key),
-          ]),
-        ].map((key) => columnLabels.get(key) ?? key)}
-        sort={
-          table.sort
-            ? {
-                label: columnLabels.get(table.sort.key) ?? table.sort.key,
-                direction: table.sort.direction,
-              }
-            : undefined
-        }
-        visibleCount={table.visibleRows.length}
-        totalCount={total}
-        onClear={() => {
-          table.clear();
-          setColumnExpressions({});
-        }}
-      />
+      {showFilterSummary ? (
+        <ExcelTableFilterBar
+          filteredColumns={[
+            ...new Set([
+              ...table.filteredColumnKeys,
+              ...Object.entries(columnExpressions)
+                .filter(([, expression]) => Boolean(expression.trim()))
+                .map(([key]) => key),
+            ]),
+          ].map((key) => columnLabels.get(key) ?? key)}
+          sort={
+            table.sort
+              ? {
+                  label: columnLabels.get(table.sort.key) ?? table.sort.key,
+                  direction: table.sort.direction,
+                }
+              : undefined
+          }
+          visibleCount={displayRows.length}
+          totalCount={total}
+          onClear={() => {
+            table.clear();
+            setColumnExpressions({});
+          }}
+        />
+      ) : null}
 
       <div ref={scrollArea} className="scrollbar-thin max-w-full overflow-auto">
         <table
@@ -789,20 +823,22 @@ export function CatalogWorkbookTable({
             Tabla dinámica del catálogo con atributos de las plantillas activas
           </caption>
           <thead className="sticky top-0 z-10 border-b bg-white text-[11px] text-muted-foreground">
-            <tr className="border-b text-[10px] text-muted-foreground">
-              {groupedOrderedColumns.map((segment, index) => (
-                <th
-                  key={`${segment.group}:${index}`}
-                  colSpan={segment.count}
-                  className={cn('px-3 py-2.5', index > 0 && 'border-l', 'bg-white')}
-                >
-                  {workbookGroupLabels[segment.group]}
+            {!consultation ? (
+              <tr className="border-b text-[10px] text-muted-foreground">
+                {groupedOrderedColumns.map((segment, index) => (
+                  <th
+                    key={`${segment.group}:${index}`}
+                    colSpan={segment.count}
+                    className={cn('px-3 py-2.5', index > 0 && 'border-l', 'bg-white')}
+                  >
+                    {workbookGroupLabels[segment.group]}
+                  </th>
+                ))}
+                <th className="bg-slate-50 px-3 py-2.5">
+                  <span className="sr-only">Acciones</span>
                 </th>
-              ))}
-              <th className="bg-slate-50 px-3 py-2.5">
-                <span className="sr-only">Acciones</span>
-              </th>
-            </tr>
+              </tr>
+            ) : null}
             <tr>
               {orderedColumns.map((column, index) => (
                 <ExcelTableHeader
@@ -860,254 +896,270 @@ export function CatalogWorkbookTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {table.visibleRows.map((row, rowIndex) => (
-              <tr
-                key={row.id}
-                aria-selected={selectedRowId === row.id}
-                onClick={() => setSelectedRowId(row.id)}
-                onFocusCapture={() => setSelectedRowId(row.id)}
-                className={cn(
-                  'group/row hover:bg-orange-50/40',
-                  selectedRowId === row.id && 'bg-[#fff1e6]',
-                )}
-              >
-                {orderedColumns.map((column, index) => {
-                  if (!column.attribute) {
-                    const value = column.getValue(row);
-                    return (
-                      <td
-                        key={column.key}
-                        data-cell-state="not-applicable"
-                        tabIndex={0}
-                        data-workbook-row={rowIndex}
-                        data-workbook-column={index}
-                        onKeyDown={(event) => navigateCell(event, rowIndex, index)}
-                        className={cn(
-                          'max-w-[280px] border-r px-3 py-2.5',
-                          column.key === 'base:sku' &&
-                            'sticky left-0 z-10 border-r bg-white group-hover/row:bg-orange-50',
-                          column.key === 'base:sku' &&
-                            selectedRowId === row.id &&
-                            'bg-[#fff1e6] shadow-[inset_3px_0_0_var(--color-primary)]',
-                          index > 0 &&
-                            orderedColumns[index - 1]?.group !== column.group &&
-                            'border-l-2 border-l-slate-200',
-                        )}
-                      >
-                        {column.key === 'base:sku' ? (
-                          <Link
-                            href={`/products/${encodeURIComponent(row.id)}`}
-                            className="whitespace-nowrap font-semibold hover:text-primary"
-                          >
-                            <SearchMatch value={row.sku} query={q} />
-                          </Link>
-                        ) : column.key === 'base:status' ? (
-                          <span className="flex min-w-max items-center gap-2">
-                            <StatusBadge tone={statusTone(row.status as ProductStatus)}>
-                              {statusLabel(row.status as ProductStatus)}
-                            </StatusBadge>
-                            {showCompleteness ? (
-                              <span className="font-semibold tabular-nums">
-                                {row.completeness === null
-                                  ? 'Sin indicador'
-                                  : `${row.completeness}%`}
-                              </span>
-                            ) : null}
-                          </span>
-                        ) : (
-                          <span
-                            className={cn(
-                              'line-clamp-2',
-                              (column.key === 'base:provider' || column.key === 'base:unifier') &&
-                                'font-mono text-[11px]',
-                            )}
-                          >
-                            <SearchMatch value={displayCell(value)} query={q} />
-                          </span>
-                        )}
-                      </td>
-                    );
-                  }
-                  const attribute = column.attribute;
-                  const cell = row.attributes[attribute.key];
-                  if (!row.template || !cell || !cell.applicable) {
-                    return (
-                      <td
-                        key={column.key}
-                        aria-label={`${attribute.label}: no aplica`}
-                        tabIndex={0}
-                        data-workbook-row={rowIndex}
-                        data-workbook-column={index}
-                        onKeyDown={(event) => navigateCell(event, rowIndex, index)}
-                        className={cn(
-                          'min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500',
-                          index > 0 &&
-                            orderedColumns[index - 1]?.group !== column.group &&
-                            'border-l-2 border-l-slate-200',
-                        )}
-                      >
-                        No aplica
-                      </td>
-                    );
-                  }
-                  const isEditing =
-                    editing?.productId === row.id && editing.attributeKey === attribute.key;
-                  const editable = canEdit && cell.permissions.edit;
-                  return (
-                    <td
-                      key={column.key}
-                      tabIndex={isEditing ? -1 : 0}
-                      data-workbook-row={rowIndex}
-                      data-workbook-column={index}
-                      onKeyDown={(event) => {
-                        if (isEditing) return;
-                        if (
-                          editable &&
-                          (event.key === 'F2' ||
-                            event.key === 'Enter' ||
-                            (event.key.length === 1 &&
-                              !event.ctrlKey &&
-                              !event.metaKey &&
-                              !event.altKey))
-                        ) {
-                          event.preventDefault();
-                          setNotice(null);
-                          setEditing({
-                            productId: row.id,
-                            attributeKey: attribute.key,
-                            version: cell.version,
-                            draft: event.key.length === 1 ? event.key : editableDraft(cell.value),
-                          });
-                        } else navigateCell(event, rowIndex, index);
-                      }}
-                      data-cell-state={cell.required && cell.value === null ? 'missing' : undefined}
-                      className={cn(
-                        'min-w-36 border-r px-2 py-1.5',
-                        index > 0 &&
-                          orderedColumns[index - 1]?.group !== column.group &&
-                          'border-l-2 border-l-slate-200',
-                        cell.required && cell.value === null && 'bg-red-50',
-                      )}
+            {displayRows.map((row, rowIndex) => (
+              <Fragment key={row.id}>
+                {!showCompleteness &&
+                (rowIndex === 0 || displayRows[rowIndex - 1]?.unifiedCode !== row.unifiedCode) ? (
+                  <tr className="bg-[#f1f1ed]">
+                    <th
+                      scope="rowgroup"
+                      colSpan={orderedColumns.length + 1}
+                      className="px-4 py-3 text-left text-xs font-bold"
                     >
-                      {isEditing ? (
-                        <span className="flex min-w-40 items-center gap-1">
-                          {attribute.dataType === 'enum' ? (
-                            <Select
-                              label="Valor"
-                              aria-label={`Editar ${attribute.label} de ${row.sku}`}
-                              value={editing.draft}
-                              onChange={(event) =>
-                                setEditing({ ...editing, draft: event.target.value })
-                              }
-                              onKeyDown={(event) => {
-                                void editKey(event, attribute, rowIndex, index);
-                              }}
-                              autoFocus
-                            >
-                              <option value="">Sin cambio</option>
-                              {!attribute.required ? <option value="-">— Vaciar</option> : null}
-                              {attribute.allowedValues.map((value) => (
-                                <option key={value} value={value}>
-                                  {value}
-                                </option>
-                              ))}
-                            </Select>
-                          ) : attribute.dataType === 'boolean' ? (
-                            <Select
-                              label="Valor"
-                              aria-label={`Editar ${attribute.label} de ${row.sku}`}
-                              value={editing.draft}
-                              onChange={(event) =>
-                                setEditing({ ...editing, draft: event.target.value })
-                              }
-                              onKeyDown={(event) => {
-                                void editKey(event, attribute, rowIndex, index);
-                              }}
-                              autoFocus
-                            >
-                              <option value="">Sin cambio</option>
-                              {!attribute.required ? <option value="-">— Vaciar</option> : null}
-                              <option value="Sí">Sí</option>
-                              <option value="No">No</option>
-                            </Select>
-                          ) : (
-                            <Input
-                              autoFocus
-                              type="text"
-                              aria-label={`Editar ${attribute.label} de ${row.sku}`}
-                              value={editing.draft}
-                              placeholder={
-                                attribute.required
-                                  ? 'Valor obligatorio'
-                                  : 'Vacío=no cambia · -=vacía'
-                              }
-                              onChange={(event) =>
-                                setEditing({ ...editing, draft: event.target.value })
-                              }
-                              onKeyDown={(event) => {
-                                void editKey(event, attribute, rowIndex, index);
-                              }}
-                              className="h-8 min-w-36 text-xs"
-                            />
+                      Código unificador · {row.unifiedCode || 'Sin código unificador'}
+                    </th>
+                  </tr>
+                ) : null}
+                <tr
+                  key={row.id}
+                  aria-selected={selectedRowId === row.id}
+                  onClick={() => setSelectedRowId(row.id)}
+                  onFocusCapture={() => setSelectedRowId(row.id)}
+                  className={cn(
+                    'group/row hover:bg-orange-50/40',
+                    selectedRowId === row.id && 'bg-[#fff1e6]',
+                  )}
+                >
+                  {orderedColumns.map((column, index) => {
+                    if (!column.attribute) {
+                      const value = column.getValue(row);
+                      return (
+                        <td
+                          key={column.key}
+                          data-cell-state="not-applicable"
+                          tabIndex={0}
+                          data-workbook-row={rowIndex}
+                          data-workbook-column={index}
+                          onKeyDown={(event) => navigateCell(event, rowIndex, index)}
+                          className={cn(
+                            'max-w-[280px] border-r px-3 py-2.5',
+                            column.key === 'base:sku' &&
+                              'sticky left-0 z-10 border-r bg-white group-hover/row:bg-orange-50',
+                            column.key === 'base:sku' &&
+                              selectedRowId === row.id &&
+                              'bg-[#fff1e6] shadow-[inset_3px_0_0_var(--color-primary)]',
+                            index > 0 &&
+                              orderedColumns[index - 1]?.group !== column.group &&
+                              'border-l-2 border-l-slate-200',
                           )}
-                          <button
-                            type="button"
-                            aria-label={`Guardar ${attribute.label}`}
-                            disabled={saving}
-                            onClick={() => void saveEdit(attribute)}
-                            className="grid size-7 shrink-0 place-items-center rounded-md text-emerald-700 hover:bg-emerald-100"
-                          >
-                            <Check aria-hidden="true" className="size-4" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Cancelar ${attribute.label}`}
-                            disabled={saving}
-                            onClick={() => setEditing(null)}
-                            className="grid size-7 shrink-0 place-items-center rounded-md hover:bg-slate-100"
-                          >
-                            <X aria-hidden="true" className="size-4" />
-                          </button>
-                        </span>
-                      ) : editable ? (
-                        <button
-                          type="button"
-                          onClick={() => {
+                        >
+                          {column.key === 'base:sku' ? (
+                            <Link
+                              href={`/products/${encodeURIComponent(row.id)}`}
+                              className="whitespace-nowrap font-semibold hover:text-primary"
+                            >
+                              <SearchMatch value={row.sku} query={q} />
+                            </Link>
+                          ) : column.key === 'base:status' ? (
+                            <span className="flex min-w-max items-center gap-2">
+                              <StatusBadge tone={statusTone(row.status as ProductStatus)}>
+                                {statusLabel(row.status as ProductStatus)}
+                              </StatusBadge>
+                              {showCompleteness ? (
+                                <span className="font-semibold tabular-nums">
+                                  {row.completeness === null
+                                    ? 'Sin indicador'
+                                    : `${row.completeness}%`}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                'line-clamp-2',
+                                (column.key === 'base:provider' || column.key === 'base:unifier') &&
+                                  'font-mono text-[11px]',
+                              )}
+                            >
+                              <SearchMatch value={displayCell(value)} query={q} />
+                            </span>
+                          )}
+                        </td>
+                      );
+                    }
+                    const attribute = column.attribute;
+                    const cell = row.attributes[attribute.key];
+                    if (!row.template || !cell || !cell.applicable) {
+                      return (
+                        <td
+                          key={column.key}
+                          aria-label={`${attribute.label}: no aplica`}
+                          tabIndex={0}
+                          data-workbook-row={rowIndex}
+                          data-workbook-column={index}
+                          onKeyDown={(event) => navigateCell(event, rowIndex, index)}
+                          className={cn(
+                            'min-w-32 border-r bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_5px,#e2e8f0_5px,#e2e8f0_6px)] px-3 py-2.5 text-center text-[10px] italic text-slate-500',
+                            index > 0 &&
+                              orderedColumns[index - 1]?.group !== column.group &&
+                              'border-l-2 border-l-slate-200',
+                          )}
+                        >
+                          No aplica
+                        </td>
+                      );
+                    }
+                    const isEditing =
+                      editing?.productId === row.id && editing.attributeKey === attribute.key;
+                    const editable = canEdit && cell.permissions.edit;
+                    return (
+                      <td
+                        key={column.key}
+                        tabIndex={isEditing ? -1 : 0}
+                        data-workbook-row={rowIndex}
+                        data-workbook-column={index}
+                        onKeyDown={(event) => {
+                          if (isEditing) return;
+                          if (
+                            editable &&
+                            (event.key === 'F2' ||
+                              event.key === 'Enter' ||
+                              (event.key.length === 1 &&
+                                !event.ctrlKey &&
+                                !event.metaKey &&
+                                !event.altKey))
+                          ) {
+                            event.preventDefault();
                             setNotice(null);
                             setEditing({
                               productId: row.id,
                               attributeKey: attribute.key,
                               version: cell.version,
-                              draft: editableDraft(cell.value),
+                              draft: event.key.length === 1 ? event.key : editableDraft(cell.value),
                             });
-                          }}
-                          className="group flex min-h-5 w-full items-center justify-between gap-2 rounded px-1 text-left hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
-                          aria-label={`Editar ${attribute.label} de ${row.sku}`}
-                        >
-                          <span>
+                          } else navigateCell(event, rowIndex, index);
+                        }}
+                        data-cell-state={
+                          cell.required && cell.value === null ? 'missing' : undefined
+                        }
+                        className={cn(
+                          'min-w-36 border-r px-2 py-1.5',
+                          index > 0 &&
+                            orderedColumns[index - 1]?.group !== column.group &&
+                            'border-l-2 border-l-slate-200',
+                          cell.required && cell.value === null && 'bg-red-50',
+                        )}
+                      >
+                        {isEditing ? (
+                          <span className="flex min-w-40 items-center gap-1">
+                            {attribute.dataType === 'enum' ? (
+                              <Select
+                                label="Valor"
+                                aria-label={`Editar ${attribute.label} de ${row.sku}`}
+                                value={editing.draft}
+                                onChange={(event) =>
+                                  setEditing({ ...editing, draft: event.target.value })
+                                }
+                                onKeyDown={(event) => {
+                                  void editKey(event, attribute, rowIndex, index);
+                                }}
+                                autoFocus
+                              >
+                                <option value="">Sin cambio</option>
+                                {!attribute.required ? <option value="-">— Vaciar</option> : null}
+                                {attribute.allowedValues.map((value) => (
+                                  <option key={value} value={value}>
+                                    {value}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : attribute.dataType === 'boolean' ? (
+                              <Select
+                                label="Valor"
+                                aria-label={`Editar ${attribute.label} de ${row.sku}`}
+                                value={editing.draft}
+                                onChange={(event) =>
+                                  setEditing({ ...editing, draft: event.target.value })
+                                }
+                                onKeyDown={(event) => {
+                                  void editKey(event, attribute, rowIndex, index);
+                                }}
+                                autoFocus
+                              >
+                                <option value="">Sin cambio</option>
+                                {!attribute.required ? <option value="-">— Vaciar</option> : null}
+                                <option value="Sí">Sí</option>
+                                <option value="No">No</option>
+                              </Select>
+                            ) : (
+                              <Input
+                                autoFocus
+                                type="text"
+                                aria-label={`Editar ${attribute.label} de ${row.sku}`}
+                                value={editing.draft}
+                                placeholder={
+                                  attribute.required
+                                    ? 'Valor obligatorio'
+                                    : 'Vacío=no cambia · -=vacía'
+                                }
+                                onChange={(event) =>
+                                  setEditing({ ...editing, draft: event.target.value })
+                                }
+                                onKeyDown={(event) => {
+                                  void editKey(event, attribute, rowIndex, index);
+                                }}
+                                className="h-8 min-w-36 text-xs"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              aria-label={`Guardar ${attribute.label}`}
+                              disabled={saving}
+                              onClick={() => void saveEdit(attribute)}
+                              className="grid size-7 shrink-0 place-items-center rounded-md text-emerald-700 hover:bg-emerald-100"
+                            >
+                              <Check aria-hidden="true" className="size-4" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Cancelar ${attribute.label}`}
+                              disabled={saving}
+                              onClick={() => setEditing(null)}
+                              className="grid size-7 shrink-0 place-items-center rounded-md hover:bg-slate-100"
+                            >
+                              <X aria-hidden="true" className="size-4" />
+                            </button>
+                          </span>
+                        ) : editable ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNotice(null);
+                              setEditing({
+                                productId: row.id,
+                                attributeKey: attribute.key,
+                                version: cell.version,
+                                draft: editableDraft(cell.value),
+                              });
+                            }}
+                            className="group flex min-h-5 w-full items-center justify-between gap-2 rounded px-1 text-left hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                            aria-label={`Editar ${attribute.label} de ${row.sku}`}
+                          >
+                            <span>
+                              <SearchMatch value={displayCell(cell.value)} query={q} />
+                            </span>
+                            <Pencil
+                              aria-hidden="true"
+                              className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                            />
+                          </button>
+                        ) : (
+                          <span className="block min-h-5 px-1 py-0.5">
                             <SearchMatch value={displayCell(cell.value)} query={q} />
                           </span>
-                          <Pencil
-                            aria-hidden="true"
-                            className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
-                          />
-                        </button>
-                      ) : (
-                        <span className="block min-h-5 px-1 py-0.5">
-                          <SearchMatch value={displayCell(cell.value)} query={q} />
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-                <td className="whitespace-nowrap px-3 py-2.5">
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href={`/products/${encodeURIComponent(row.id)}`}>Abrir</Link>
-                  </Button>
-                </td>
-              </tr>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className="whitespace-nowrap px-3 py-2.5">
+                    <Button asChild variant="ghost" size="sm">
+                      <Link href={`/products/${encodeURIComponent(row.id)}`}>Abrir</Link>
+                    </Button>
+                  </td>
+                </tr>
+              </Fragment>
             ))}
-            {table.visibleRows.length === 0 ? (
+            {displayRows.length === 0 ? (
               <tr>
                 <td
                   colSpan={orderedColumns.length + 1}
@@ -1131,7 +1183,7 @@ export function CatalogWorkbookTable({
           {total === 0
             ? '0 productos'
             : `${formatNumber((page - 1) * pageSize + 1)}–${formatNumber(Math.min(page * pageSize, total))} de ${formatNumber(total)}`}{' '}
-          · filtros de columna y exportación aplican a toda la consulta
+          · filtros de columna{showCompleteness ? ' y exportación' : ''} aplican a toda la consulta
         </span>
         <div className="flex items-center gap-2">
           <Select

@@ -1,3 +1,4 @@
+import { catalogHomeSettings } from '../../modules/catalog-schema/infrastructure/persistence/catalog-home-settings.tables';
 import { unifiedCodeRequests } from '../../modules/equivalences/infrastructure/persistence/unified-code-requests.tables';
 import { catalogParameters } from '../../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
 import {
@@ -76,6 +77,7 @@ export const schema = {
   qualityReviewItems,
   ecommerceDescriptions,
   productNameSettings,
+  catalogHomeSettings,
   fileCleanupCandidates,
   fileInventoryCursors,
   fileMaintenanceLeases,
@@ -118,6 +120,7 @@ export {
   productAttributeDrafts,
   qualityReviewItems,
   productNameSettings,
+  catalogHomeSettings,
   fileCleanupCandidates,
   fileInventoryCursors,
   fileMaintenanceLeases,

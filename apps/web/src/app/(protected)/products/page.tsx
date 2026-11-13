@@ -43,8 +43,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       canViewQuality={actor?.capabilities.includes('menu:ai-quality:view') ?? false}
       canViewImports={actor?.capabilities.includes('menu:imports:view') ?? false}
       showCompleteness={administrator}
-      showProductStatus={!salesOnly}
-      showTableDescriptionAndTemplate={!salesOnly}
+      showProductStatus={administrator}
+      showTableDescriptionAndTemplate={administrator}
     />
   );
 }

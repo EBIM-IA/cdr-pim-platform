@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductsCatalog } from '@/components/products-catalog';
 import type { Product } from '@/lib/types';
 
+vi.mock('@/lib/unified-products', () => ({ fetchUnifiedMembers: async () => [] }));
+vi.mock('@/lib/operational-api', () => ({ listApplications: async () => [] }));
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/products',
@@ -141,6 +144,8 @@ describe('ProductsCatalog table view', () => {
   it('opens the reference catalog list and forwards write capability to the table', async () => {
     render(<ProductsCatalog canEditAttributes />);
 
+    expect(screen.getByRole('button', { name: 'Tabla' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
     expect(await screen.findByText('SKU-FAG')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Catálogo' })).toHaveAttribute(
       'aria-pressed',
@@ -186,6 +191,7 @@ describe('ProductsCatalog table view', () => {
 
   it('collapses advanced filters without losing their values or active count', async () => {
     render(<ProductsCatalog />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
     await screen.findByText('SKU-FAG');
     const filtersButton = screen.getByRole('button', { name: /Filtros/u });
@@ -230,6 +236,7 @@ describe('ProductsCatalog table view', () => {
       pageSize: 25,
     });
     render(<ProductsCatalog initialSearch="Sin coincidencias" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
     expect(await screen.findByText('Sin resultados para estos criterios')).toBeVisible();
     expect(screen.getByRole('navigation', { name: 'Paginación del catálogo' })).toBeVisible();
@@ -238,6 +245,7 @@ describe('ProductsCatalog table view', () => {
 
   it('filters the catalog list with the persisted category id instead of guessing by name', async () => {
     render(<ProductsCatalog />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
     fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
     const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
@@ -270,10 +278,11 @@ describe('ProductsCatalog table view', () => {
       total: 1,
     });
     render(<ProductsCatalog canEditAttributes showCompleteness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
     const link = await screen.findByRole('link', { name: 'SKU-PENDING' });
     const row = within(link.closest('li') as HTMLLIElement);
     expect(row.getAllByText('Pendiente de clasificación').length).toBeGreaterThan(0);
-    expect(row.getByRole('link', { name: 'Ver producto' })).toHaveAttribute(
+    expect(row.getByRole('link', { name: 'Ver ficha' })).toHaveAttribute(
       'href',
       `/products/${products[0]!.id}`,
     );
@@ -283,6 +292,7 @@ describe('ProductsCatalog table view', () => {
 
   it('selects real parent category IDs from the hierarchy', async () => {
     render(<ProductsCatalog />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
     fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
     const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
     fireEvent.focus(category);
@@ -299,6 +309,7 @@ describe('ProductsCatalog table view', () => {
   it('applies category links from the dashboard on the initial catalog request', async () => {
     window.history.replaceState({}, '', '/products?category=33333333-3333-4333-8333-333333333333');
     render(<ProductsCatalog />);
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
     await waitFor(() =>
       expect(mocks.fetchWorkbook).toHaveBeenCalledWith(

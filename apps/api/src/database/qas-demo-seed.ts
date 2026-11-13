@@ -332,7 +332,10 @@ export async function runQasDemoSeed(
                 template_id: templateId,
                 attribute_definition_id: definitionId,
                 role,
-                can_view: attribute.roles[role].canView,
+                can_view:
+                  attribute.key === 'codigo_unificador' && role === 'VENTAS'
+                    ? true
+                    : attribute.roles[role].canView,
                 can_edit: attribute.roles[role].canEdit,
                 can_import: attribute.roles[role].canImport,
                 can_export: attribute.roles[role].canExport,

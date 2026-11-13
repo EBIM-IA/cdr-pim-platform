@@ -57,6 +57,7 @@ describe('migration runner', () => {
         'ax_inbound_batches',
         'ax_inbound_records',
         'catalog_categories',
+        'catalog_home_settings',
         'catalog_parameters',
         'catalog_product_readiness',
         'cdr_schema_migrations',

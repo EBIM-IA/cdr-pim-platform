@@ -12,6 +12,7 @@ import { catalogBusinessRoles } from './catalog-business-roles';
 import { parseFilter } from './list-catalog-grid.use-case';
 
 export interface ListCatalogWorkbookQuery {
+  readonly groupByUnifiedCode?: boolean;
   readonly categoryId?: string;
   readonly page: number;
   readonly pageSize: number;
@@ -34,6 +35,7 @@ export class ListCatalogWorkbookUseCase {
 
   execute(query: ListCatalogWorkbookQuery, actor: AuthenticatedActor) {
     return this.catalog.listWorkbook({
+      groupByUnifiedCode: query.groupByUnifiedCode,
       categoryId: query.categoryId ? assertUuid(query.categoryId, 'categoryId') : undefined,
       roles: catalogBusinessRoles(actor),
       page: query.page,

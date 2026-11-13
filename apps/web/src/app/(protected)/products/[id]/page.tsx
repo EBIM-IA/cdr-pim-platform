@@ -25,6 +25,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
       canWriteApplications={actor?.capabilities.includes('applications:write') ?? false}
       canWriteEquivalences={actor?.capabilities.includes('equivalences:write') ?? false}
       showCompleteness={isAdministrator(roles)}
+      consumerMode={!isAdministrator(roles)}
       showProductStatus={!isSalesOnly(roles)}
     />
   );

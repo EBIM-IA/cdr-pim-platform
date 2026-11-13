@@ -23,11 +23,13 @@ export function CatalogSearch({
   value,
   onChange,
   onSearch,
+  appearance = 'default',
 }: {
   value: string;
   onChange: (value: string) => void;
   onSearch: (query: string, filter?: { categoryId?: string; brand?: string }) => void;
   showDescription?: boolean;
+  appearance?: 'default' | 'home';
 }) {
   const id = useId();
   const router = useRouter();
@@ -144,6 +146,7 @@ export function CatalogSearch({
   return (
     <div
       ref={root}
+      data-appearance={appearance}
       className="flex min-w-0 flex-[1_1_320px] gap-2"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
@@ -166,7 +169,11 @@ export function CatalogSearch({
           value={value}
           autoComplete="off"
           maxLength={300}
-          placeholder="Código, marca, categoría, medida o aplicación…"
+          placeholder={
+            appearance === 'home'
+              ? 'Escribe el producto, el vehículo y el año, un código o una medida'
+              : 'Código, marca, categoría, medida o aplicación…'
+          }
           className="h-9 w-full rounded-md border bg-slate-50 pl-9 pr-9 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-search-cancel-button]:appearance-none"
           onChange={(event) => {
             onChange(event.target.value);
@@ -260,9 +267,9 @@ export function CatalogSearch({
           </div>
         ) : null}
       </div>
-      <Button type="button" size="sm" onClick={() => choose(choices[0]!)}>
+      <Button type="button" size="sm" aria-label="Buscar" onClick={() => choose(choices[0]!)}>
         <Search aria-hidden="true" className="size-3.5" />
-        Buscar
+        <span>Buscar</span>
       </Button>
     </div>
   );

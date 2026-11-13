@@ -1035,6 +1035,11 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
           attributeDefinitionId: definitionIdByKey.get(attribute.key) as string,
           role,
           ...attribute.roles[role],
+          // Approved November 12: sales identify product groups by this code.
+          canView:
+            attribute.key === 'codigo_unificador' && role === 'VENTAS'
+              ? true
+              : attribute.roles[role].canView,
         })),
       );
     });

@@ -709,7 +709,14 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
       )
       .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
       .where(where)
-      .orderBy(workbookOrder, asc(products.sku))
+      .orderBy(
+        ...(options.groupByUnifiedCode
+          ? [asc(workbookBaseColumnSql('base:unifier', workbookSchema.columns))]
+          : []),
+        workbookOrder,
+        asc(products.sku),
+        asc(products.id),
+      )
       .limit(options.pageSize)
       .offset((options.page - 1) * options.pageSize);
     const totals = await this.db
@@ -1873,7 +1880,7 @@ function workbookBaseColumnSql(key: string, columns: readonly CatalogWorkbookCol
   }
   if (key === 'base:unifier') {
     const attribute = columns.find((column) => column.key === 'codigo_unificador');
-    return attribute ? workbookAttributeDisplaySql(attribute) : sql`NULL`;
+    return attribute ? workbookAttributeDisplaySql(attribute) : sql`NULL::text`;
   }
   throw new ValidationError('Unknown workbook base column', { column: key });
 }

@@ -48,7 +48,8 @@
   --color-cdr-red: #dc5555;
   --shadow-card: 0 1px 2px rgb(16 24 40 / 4%);
   --shadow-sidebar: 8px 0 24px rgb(16 24 40 / 10%);
-  --font-sans: 'Aptos Narrow', Aptos, 'Arial Narrow', 'Roboto Condensed', Arial, sans-serif;
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 @layer base {
@@ -69,7 +70,14 @@
     max-width: 100%;
     overflow-x: hidden;
     overflow-x: clip;
-    font-family: 'Aptos Narrow', Aptos, 'Arial Narrow', 'Roboto Condensed', Arial, sans-serif;
+    font-family:
+      'Inter',
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
     font-size: 14px;
   }
 
@@ -659,4 +667,373 @@ html.cdr-resizing-column * {
     bottom: 12px;
     left: 12px;
   }
+}
+
+/* Shared navigation and product context match the November 12 designer reference. */
+.cdr-topbar {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 0 24px;
+  background: #1c1c1a;
+  color: #c9c9c4;
+}
+.cdr-top-logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.cdr-top-measure {
+  position: absolute;
+  display: flex;
+  visibility: hidden;
+  pointer-events: none;
+  width: max-content;
+}
+.cdr-top-logo img {
+  width: 38px;
+  height: 38px;
+}
+.cdr-top-nav {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+}
+.cdr-top-desktop {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 56px;
+}
+.cdr-top-link {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 56px;
+  padding: 0 11px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cdr-top-link:hover {
+  color: #fff;
+}
+.cdr-top-link.is-active {
+  color: #fff;
+  font-weight: 600;
+  border-bottom-color: #ea5b0c;
+}
+.cdr-top-account {
+  position: relative;
+  flex: none;
+}
+.cdr-top-more {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+.cdr-top-user {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cdr-top-user strong {
+  color: #fff;
+  font-weight: 600;
+}
+.cdr-top-user svg {
+  margin-left: 4px;
+  width: 14px;
+  height: 14px;
+}
+.cdr-top-user:hover,
+.cdr-top-user[aria-expanded='true'] {
+  background: #ffffff14;
+}
+.cdr-top-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  width: 280px;
+  max-height: 75dvh;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #e3e6e9;
+  border-radius: 12px;
+  background: #fff;
+  color: #191919;
+  box-shadow: 0 12px 32px #1d293533;
+}
+.cdr-top-dropdown .cdr-top-link {
+  justify-content: flex-start;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  white-space: normal;
+}
+.cdr-top-dropdown .cdr-top-link:hover,
+.cdr-top-dropdown .cdr-top-link.is-active {
+  color: #191919;
+  background: #f3f4f5;
+}
+.cdr-top-dropdown button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cdr-top-dropdown button:hover {
+  background: #f3f4f5;
+}
+.cdr-top-mobile,
+.cdr-top-burger {
+  display: none;
+}
+.cdr-main {
+  min-height: calc(100dvh - 56px);
+}
+.cdr-footer,
+.cdr-footer.is-collapsed {
+  left: 0 !important;
+}
+.cdr-review-tools {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 35;
+}
+.cdr-review-tools summary {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #ffffff26;
+  border-radius: 50%;
+  background: #1c1c1a;
+  color: #fff;
+  box-shadow: 0 6px 18px -6px #0000008c;
+  opacity: 0.82;
+  cursor: pointer;
+  list-style: none;
+}
+.cdr-review-tools[open] {
+  bottom: 48px;
+}
+.cdr-sticky-product {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
+  min-height: 56px;
+  padding: 0 32px;
+  border-bottom: 1px solid #e4e4e0;
+  background: #f5f5f3;
+  box-shadow: 0 6px 14px -10px #0000004d;
+  transform: translateY(-110%);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    transform 280ms ease,
+    opacity 220ms ease,
+    visibility 280ms;
+}
+.cdr-sticky-product.is-visible {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+}
+.cdr-sticky-product > a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 46%;
+  min-height: 56px;
+  color: #1c1c1a;
+}
+.cdr-sticky-thumbnail {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid #e4e4e0;
+  border-radius: 8px;
+  background: #fff;
+}
+.cdr-sticky-thumbnail > :is(figure, img) {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+  background-image: none;
+}
+.cdr-sticky-identity {
+  min-width: 0;
+  padding-right: 16px;
+  border-right: 1px solid #e4e4e0;
+  line-height: 1.2;
+}
+.cdr-sticky-identity strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+.cdr-sticky-product small {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5c5c58;
+}
+.cdr-sticky-product > div {
+  gap: 22px;
+}
+.cdr-sticky-product > div > :is(a, button) {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 44px;
+  margin-bottom: -1px;
+  padding: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #5c5c58;
+  cursor: pointer;
+}
+.cdr-sticky-product [aria-current='location'],
+.cdr-sticky-product [aria-pressed='true'] {
+  color: #1c1c1a;
+  border-bottom-color: #ea5b0c;
+}
+@media (max-width: 720px) {
+  .cdr-topbar {
+    min-height: 54px;
+    padding: 0 12px;
+    gap: 12px;
+  }
+  .cdr-top-logo img {
+    width: 32px;
+    height: 32px;
+  }
+  .cdr-top-burger {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    color: #fff;
+  }
+  .cdr-top-desktop {
+    display: none;
+  }
+  .cdr-top-nav.is-open .cdr-top-mobile {
+    display: grid;
+    position: absolute;
+    top: 54px;
+    left: 0;
+    right: 0;
+    max-height: 75dvh;
+    overflow: auto;
+    background: #1c1c1a;
+    padding: 6px 0 10px;
+    box-shadow: 0 12px 24px #0004;
+  }
+  .cdr-top-mobile .cdr-top-link {
+    justify-content: flex-start;
+    min-height: 42px;
+    padding: 12px 20px;
+    border: 0;
+    border-left: 3px solid transparent;
+  }
+  .cdr-top-mobile .cdr-top-link.is-active {
+    border-left-color: #ea5b0c;
+  }
+  .cdr-top-username {
+    display: none;
+  }
+  .cdr-top-account-panel {
+    width: min(280px, 90vw);
+  }
+  .cdr-sticky-product {
+    display: block;
+    padding: 0 16px;
+  }
+  .cdr-sticky-product > a {
+    max-width: 100%;
+    min-height: 48px;
+  }
+  .cdr-sticky-identity {
+    border-right: 0;
+  }
+  .cdr-sticky-product > div {
+    gap: 18px;
+    border-top: 1px solid #eeeeea;
+  }
+  .cdr-sticky-product > div > :is(a, button) {
+    font-size: 14px;
+  }
+  .cdr-review-tools {
+    right: 12px;
+    bottom: 12px;
+  }
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/inter-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/inter-500.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/inter-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/inter-700.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/inter-800.ttf') format('truetype');
 }

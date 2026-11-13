@@ -51,7 +51,7 @@ describe('AppShell navigation', () => {
     expect(screen.queryByRole('link', { name: 'Equivalencias' })).not.toBeInTheDocument();
   });
 
-  it('integrates the authorized catalogs workspace in the sidebar, map and reference pager', () => {
+  it('integrates the authorized catalogs workspace in the top menu, map and optional reference pager', () => {
     render(
       <AppShell actor={actor}>
         <p>Contenido</p>
@@ -66,10 +66,12 @@ describe('AppShell navigation', () => {
     expect(
       screen.getByText('Pantalla 35 de 35 · ref. #37 · Catálogos de productos'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mapa · 35 rutas' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Mapa · 35 rutas' }).closest('details'),
+    ).not.toHaveAttribute('open');
 
     fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pantallas' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Índice de pantallas' }));
 
     expect(screen.getByText('Mapa de pantallas · 35 rutas')).toBeInTheDocument();
     expect(screen.getByText(/Inicio de sesión más 34 rutas autenticadas/u)).toBeInTheDocument();
@@ -95,7 +97,7 @@ describe('AppShell navigation', () => {
     expect(within(navigation).queryByRole('link', { name: 'Catálogos' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pantallas' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Índice de pantallas' }));
 
     expect(screen.queryByRole('link', { name: 'Catálogos de productos' })).not.toBeInTheDocument();
   });
@@ -146,10 +148,10 @@ describe('AppShell navigation', () => {
       </AppShell>,
     );
 
-    expect(screen.getByRole('link', { name: /Anterior/u })).toHaveAttribute(
-      'href',
-      '/reports?view=searches',
-    );
+    expect(screen.queryByRole('link', { name: /Anterior/u })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Herramientas de revisión' }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Siguiente/u })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Administración' })).not.toBeInTheDocument();
   });

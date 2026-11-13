@@ -34,6 +34,7 @@ export type CatalogTemplateSelector =
   { readonly templateId: Uuid } | { readonly variantKey: string };
 
 export interface CatalogWorkbookOptions {
+  readonly groupByUnifiedCode?: boolean;
   readonly categoryId?: Uuid;
   readonly roles: readonly string[];
   readonly page: number;

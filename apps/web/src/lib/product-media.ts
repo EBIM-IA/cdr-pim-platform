@@ -33,8 +33,19 @@ export function productImageUrl(value: string): string | undefined {
 export function productGallerySlides(
   assets: readonly ProductAssetDto[],
   attributes: readonly { key: string; label: string; value: unknown }[],
-  type: 'FOTO' | 'PLANO' = 'FOTO',
+  type: 'FOTO' | 'PLANO' | 'ALL' = 'FOTO',
 ): ProductGallerySlide[] {
+  if (type === 'ALL')
+    return [
+      ...new Map(
+        [
+          ...productGallerySlides(assets, attributes, 'FOTO').filter(
+            (slide) => slide.id !== 'technical-drawing',
+          ),
+          ...productGallerySlides(assets, attributes, 'PLANO'),
+        ].map((slide) => [slide.id, slide]),
+      ).values(),
+    ];
   const uploaded = assets
     .filter((asset) => asset.type === type)
     .sort((a, b) => (a.position ?? 999) - (b.position ?? 999));

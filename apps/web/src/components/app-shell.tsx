@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AuthCapability } from '@cdr/contracts';
 import {
   BarChart3,
@@ -17,12 +17,9 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
-  PanelLeftClose,
-  ChevronUp,
+  ChevronDown,
   UsersRound,
   PackageSearch,
-  Ruler,
-  Search,
   ShieldCheck,
   Sparkles,
   Users,
@@ -37,6 +34,7 @@ import { TableActionTooltip } from '@/components/table-action-tooltip';
 import { Button } from '@/components/ui/button';
 import type { AuthActor } from '@/lib/auth';
 import { logoutSession } from '@/lib/bff-client';
+import { isAdministrator } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 interface NavigationItem {
@@ -47,7 +45,7 @@ interface NavigationItem {
 }
 
 const pageSequence = [
-  { reference: 4, href: '/', label: 'Dashboard', capability: 'menu:home:view' },
+  { reference: 4, href: '/', label: 'Inicio', capability: 'menu:home:view' },
   { reference: 5, href: '/products', label: 'Productos', capability: 'menu:products:view' },
   {
     reference: 6,
@@ -322,7 +320,7 @@ const screenIndex = [
   {
     label: 'Catálogo',
     links: [
-      ['Dashboard', '/', 'menu:home:view'],
+      ['Inicio', '/', 'menu:home:view'],
       ['Productos', '/products', 'menu:products:view'],
       ['Detalle de Producto', '/products', 'menu:products:view'],
       ['Editar Enriquecimiento', '/products', 'menu:products:view'],
@@ -381,14 +379,7 @@ const uxStates = [
   ['Conflicto', 'Advierte sobre concurrencia o fuentes antes de sobrescribir.'],
 ] as const;
 
-const SIDEBAR_PREFERENCE_KEY = 'cdr:pim:sidebar';
-
-function Sidebar({
-  open,
-  collapsed,
-  onClose,
-  onToggle,
-  labelledBy,
+function TopNavigation({
   actor,
   onOpenIndex,
   onOpenStates,
@@ -396,11 +387,6 @@ function Sidebar({
   loggingOut,
   logoutError,
 }: {
-  open: boolean;
-  collapsed: boolean;
-  onClose: () => void;
-  onToggle: () => void;
-  labelledBy: string;
   actor: AuthActor;
   onOpenIndex: () => void;
   onOpenStates: () => void;
@@ -409,312 +395,245 @@ function Sidebar({
   logoutError: string | null;
 }) {
   const pathname = usePathname();
-  const homeHref =
-    navigation.find((item) => actor.capabilities.includes(item.capability))?.href ??
-    '#main-content';
-  const searchHref = actor.capabilities.includes('menu:ai-quality:view')
-    ? '/quality?view=search'
-    : actor.capabilities.includes('menu:products:view')
-      ? '/products'
-      : null;
-  const closeButton = useRef<HTMLButtonElement>(null);
-  const accountButton = useRef<HTMLButtonElement>(null);
-  const accountPanel = useRef<HTMLDivElement>(null);
-  const sidebar = useRef<HTMLElement>(null);
-  const [desktop, setDesktop] = useState(false);
+  const admin = isAdministrator(actor.roles);
+  const [open, setOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const accountId = useId();
-  const roleLabel = actor.roles.length > 0 ? actor.roles.join(' · ') : 'Sin rol asignado';
-
+  const [limit, setLimit] = useState(5);
+  const root = useRef<HTMLElement>(null);
+  const accountTrigger = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const items = useMemo(
+    () =>
+      navigation.filter(
+        (item) =>
+          actor.capabilities.includes(item.capability) &&
+          (admin || item.href === '/products' || item.href === '/catalogs'),
+      ),
+    [actor.capabilities, admin],
+  );
+  const active = (item: NavigationItem) =>
+    item.href === '/' ? pathname === '/' : !!item.href && pathname.startsWith(item.href);
+  const primary = items.slice(0, limit);
+  const current = items.find(active);
+  if (current && !primary.includes(current) && primary.length)
+    primary[primary.length - 1] = current;
+  const overflow = items.filter((item) => !primary.includes(item));
   useEffect(() => {
-    const media = window.matchMedia('(min-width: 721px)');
-    const update = () => setDesktop(media.matches);
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-
-  useEffect(() => {
-    if (open && !desktop) closeButton.current?.focus();
-  }, [open, desktop]);
-
-  useEffect(() => {
-    if (!open || desktop) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (accountOpen) return;
-      if (event.key === 'Escape') onClose();
-      if (event.key === 'Tab') {
-        const elements = sidebar.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled])',
-        );
-        const first = elements?.[0];
-        const last = elements?.[elements.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
+    const nav = root.current?.querySelector<HTMLElement>('.cdr-top-nav');
+    const measure = root.current?.querySelector<HTMLElement>('[data-nav-measure]');
+    if (!nav || !measure) return;
+    const resize = () => {
+      if (window.innerWidth <= 720 || nav.clientWidth === 0) return;
+      const widths = [...measure.children].map(
+        (element) => element.getBoundingClientRect().width + 2,
+      );
+      const more = widths.pop() ?? 0;
+      if (widths.reduce((sum, width) => sum + width, 0) - 2 <= nav.clientWidth) {
+        setLimit(items.length);
+        return;
       }
+      const activeIndex = items.findIndex((item) =>
+        item.href === '/' ? pathname === '/' : !!item.href && pathname.startsWith(item.href),
+      );
+      let available = nav.clientWidth - more - (widths[activeIndex] ?? 0);
+      let count = activeIndex >= 0 ? 1 : 0;
+      for (let index = 0; index < items.length; index += 1) {
+        if (index === activeIndex) continue;
+        const width = widths[index] ?? 0;
+        if (width > available) break;
+        available -= width;
+        count += 1;
+      }
+      setLimit(Math.max(1, count));
     };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', onKeyDown);
+    resize();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+    observer?.observe(nav);
+    observer?.observe(measure);
+    window.addEventListener('resize', resize);
     return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', onKeyDown);
+      observer?.disconnect();
+      window.removeEventListener('resize', resize);
     };
-  }, [onClose, open, desktop, accountOpen]);
-
+  }, [items, pathname]);
   useEffect(() => {
-    if (!accountOpen) return;
-    accountPanel.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const dismiss = (event: PointerEvent) => {
-      if (
-        !accountPanel.current?.contains(event.target as Node) &&
-        !accountButton.current?.contains(event.target as Node)
-      ) {
+      if (!root.current?.contains(event.target as Node)) {
         setAccountOpen(false);
+        setMoreOpen(false);
+        setOpen(false);
       }
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && (accountOpen || moreOpen || open)) {
         setAccountOpen(false);
-        accountButton.current?.focus();
-      }
-      if (event.key === 'Tab') {
-        const items =
-          accountPanel.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
-        const first = items?.[0];
-        const last = items?.[items.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
+        setMoreOpen(false);
+        setOpen(false);
+        accountTrigger.current?.focus();
       }
     };
     document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('pointerdown', dismiss);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', escape);
     };
-  }, [accountOpen]);
-
-  const openTool = (action: () => void) => {
-    setAccountOpen(false);
-    onClose();
-    action();
-  };
-
-  return (
-    <>
-      {open && !desktop ? (
-        <button
-          type="button"
-          aria-label="Cerrar menú de navegación"
-          className="fixed inset-0 z-40 bg-black/45"
-          onClick={onClose}
-          tabIndex={-1}
-        />
-      ) : null}
-      <aside
-        ref={sidebar}
-        id={labelledBy}
-        aria-label="Navegación principal"
-        aria-hidden={!open && !desktop}
-        inert={!open && !desktop}
-        className={cn('cdr-sidebar', open && 'is-open')}
-      >
-        <div className="cdr-side-head">
-          <Link
-            href={homeHref}
-            onClick={onClose}
-            aria-label="CDR PIM, ir al inicio"
-            className="cdr-side-logo"
-          >
-            <Image
-              src="/brand/cdr-logo.png"
-              alt="Casa del Rulimán"
-              width={520}
-              height={158}
-              priority
-              className="cdr-logo-full"
-            />
-            <Image
-              src="/brand/cdr-isotipo-white.png"
-              alt=""
-              width={188}
-              height={188}
-              className="cdr-logo-mark"
-            />
-          </Link>
-          <button
-            type="button"
-            className="cdr-side-toggle"
-            onClick={onToggle}
-            aria-label={collapsed ? 'Expandir menú principal' : 'Contraer menú principal'}
-            aria-expanded={!collapsed}
-            aria-controls={labelledBy}
-            title={collapsed ? 'Expandir menú' : 'Contraer menú'}
-          >
-            <PanelLeftClose
-              aria-hidden="true"
-              className={cn('size-4', collapsed && 'rotate-180')}
-            />
-          </button>
-          <button
-            ref={closeButton}
-            type="button"
-            className="cdr-side-close"
-            onClick={onClose}
-            aria-label="Cerrar menú"
-          >
-            <X aria-hidden="true" className="size-5" />
-          </button>
-        </div>
-        {searchHref ? (
-          <Link
-            href={searchHref}
-            onClick={onClose}
-            className="cdr-side-search"
-            aria-label="Abrir la búsqueda del PIM"
-            title="Buscar en PIM"
-          >
-            <Search aria-hidden="true" className="size-4 shrink-0" />
-            <span>Buscar en PIM…</span>
-          </Link>
-        ) : null}
-        <nav aria-label="Módulos del PIM" className="cdr-side-nav">
-          {navigation
-            .filter((item) => actor.capabilities.includes(item.capability))
-            .map((item) => {
-              const Icon = item.icon;
-              const active =
-                item.href === '/'
-                  ? pathname === '/'
-                  : Boolean(item.href && pathname.startsWith(item.href));
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href ?? homeHref}
-                  onClick={onClose}
-                  aria-label={item.label}
-                  title={item.label}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn('cdr-nav-link', active && 'is-active')}
-                >
-                  <Icon aria-hidden="true" className="size-[18px] shrink-0" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-        </nav>
-        <div className="cdr-side-foot">
-          <button
-            ref={accountButton}
-            type="button"
-            className="cdr-side-account"
-            onClick={() => setAccountOpen((value) => !value)}
-            aria-expanded={accountOpen}
-            aria-controls={accountId}
-            aria-label={`Cuenta de ${actorName(actor.email)}`}
-            title={`${actor.email} · ${roleLabel}`}
-          >
-            <span className="cdr-account-avatar" aria-hidden="true">
-              {actorInitials(actor.email)}
-            </span>
-            <span className="cdr-account-text">
-              <strong>{actorName(actor.email)}</strong>
-              <small>{roleLabel}</small>
-            </span>
-            <ChevronUp aria-hidden="true" className="cdr-account-caret size-3.5" />
-          </button>
-        </div>
-      </aside>
-      {accountOpen ? (
-        <div
-          ref={accountPanel}
-          id={accountId}
-          className="cdr-account-panel"
-          role="region"
-          aria-label="Cuenta"
-        >
-          <div className="flex items-center gap-2.5 border-b p-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cdr-ink text-xs text-white">
-              {actorInitials(actor.email)}
-            </span>
-            <div className="min-w-0">
-              <strong className="block truncate text-sm">{actorName(actor.email)}</strong>
-              <small className="block truncate text-xs text-muted-foreground">{actor.email}</small>
-            </div>
-          </div>
-          <div className="border-b px-3 py-2.5 text-xs">
-            <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
-              Perfil
-            </span>
-            <strong className="mt-1 block font-medium">{roleLabel}</strong>
-          </div>
-          <button
-            type="button"
-            className="cdr-account-action"
-            onClick={() => openTool(onOpenIndex)}
-          >
-            <LayoutGrid aria-hidden="true" className="size-4" />
-            Pantallas
-          </button>
-          <button
-            type="button"
-            className="cdr-account-action"
-            onClick={() => openTool(onOpenStates)}
-          >
-            <ShieldCheck aria-hidden="true" className="size-4" />
-            Estados UX
-          </button>
-          {logoutError ? (
-            <p role="alert" className="px-3 py-2 text-xs text-destructive">
-              {logoutError}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            className="cdr-account-action"
-            onClick={() => {
-              resetColumnPreferences(actor.id);
-              setAccountOpen(false);
-            }}
-          >
-            <Ruler aria-hidden="true" className="size-4" />
-            Restablecer columnas de las tablas
-          </button>
-          <button
-            type="button"
-            className="cdr-account-action border-t"
-            onClick={onLogout}
-            disabled={loggingOut}
-          >
-            <LogOut aria-hidden="true" className="size-4" />
-            {loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
-          </button>
-        </div>
-      ) : null}
-    </>
+  }, [accountOpen, moreOpen, open]);
+  const link = (item: NavigationItem) => (
+    <Link
+      key={item.label}
+      href={item.href ?? '/'}
+      aria-current={active(item) ? 'page' : undefined}
+      className={cn('cdr-top-link', active(item) && 'is-active')}
+      onClick={() => {
+        setOpen(false);
+        setMoreOpen(false);
+      }}
+    >
+      {item.label}
+    </Link>
   );
-}
-
-function actorInitials(email: string): string {
-  const segments = (email.split('@')[0] ?? '').split(/[._-]+/u).filter(Boolean);
   return (
-    segments
-      .slice(0, 2)
-      .map((segment) => segment.charAt(0))
-      .join('') || 'US'
-  ).toUpperCase();
+    <header ref={root} className="cdr-topbar">
+      <div className="cdr-top-measure" data-nav-measure aria-hidden inert>
+        {items.map((item) => (
+          <span key={item.href} className={cn('cdr-top-link', active(item) && 'is-active')}>
+            {item.label}
+          </span>
+        ))}
+        <span className="cdr-top-link">
+          Más <ChevronDown className="size-3" />
+        </span>
+      </div>
+      <button
+        type="button"
+        className="cdr-top-burger"
+        aria-label={open ? 'Cerrar menú principal' : 'Abrir menú principal'}
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={() => setOpen(!open)}
+      >
+        <Menu className="size-5" />
+      </button>
+      <Link
+        href={
+          actor.capabilities.includes('menu:products:view') ||
+          actor.capabilities.includes('menu:home:view')
+            ? '/'
+            : (items[0]?.href ?? '#main-content')
+        }
+        className="cdr-top-logo"
+        aria-label="CDR PIM, ir al inicio"
+      >
+        <Image
+          src="/brand/cdr-isotipo-white.png"
+          width={38}
+          height={38}
+          alt="Casa del Rulimán"
+          priority
+        />
+      </Link>
+      <nav
+        id={menuId}
+        aria-label="Módulos del PIM"
+        className={cn('cdr-top-nav', open && 'is-open')}
+      >
+        <div className="cdr-top-desktop">
+          {primary.map(link)}
+          {overflow.length ? (
+            <div className="cdr-top-more">
+              <button
+                type="button"
+                className="cdr-top-link"
+                aria-expanded={moreOpen}
+                onClick={() => {
+                  setMoreOpen(!moreOpen);
+                  setAccountOpen(false);
+                }}
+              >
+                Más <ChevronDown className="size-3" />
+              </button>
+              {moreOpen ? <div className="cdr-top-dropdown">{overflow.map(link)}</div> : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="cdr-top-mobile" hidden={!open}>
+          {items.map(link)}
+        </div>
+      </nav>
+      <div className="cdr-top-account">
+        <button
+          ref={accountTrigger}
+          type="button"
+          className="cdr-top-user"
+          aria-label={`Cuenta de ${actorName(actor.email)}`}
+          aria-expanded={accountOpen}
+          onClick={() => {
+            setAccountOpen(!accountOpen);
+            setMoreOpen(false);
+          }}
+        >
+          <span className="cdr-top-username">{actorName(actor.email)} · </span>
+          <strong>
+            {admin
+              ? 'Administrador'
+              : actor.roles
+                  .map((role) =>
+                    role === 'VENTAS' ? 'Ventas' : role === 'COMPRAS' ? 'Compras' : role,
+                  )
+                  .join(' · ')}
+          </strong>
+          <ChevronDown className="size-3" />
+        </button>
+        {accountOpen ? (
+          <div role="region" aria-label="Cuenta" className="cdr-top-dropdown cdr-top-account-panel">
+            <p className="border-b p-3 text-xs text-muted-foreground">{actor.email}</p>
+            {admin ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    onOpenIndex();
+                  }}
+                >
+                  Índice de pantallas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    onOpenStates();
+                  }}
+                >
+                  Estados UX
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                resetColumnPreferences(actor.id);
+                setAccountOpen(false);
+              }}
+            >
+              Restablecer columnas de las tablas
+            </button>
+            <button type="button" onClick={onLogout} disabled={loggingOut}>
+              <LogOut className="size-4" />
+              {loggingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
+            </button>
+            {logoutError ? (
+              <p role="alert" className="p-3 text-xs text-destructive">
+                {logoutError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </header>
+  );
 }
 
 function actorName(email: string): string {
@@ -836,26 +755,15 @@ function FooterPager({
 export function AppShell({ children, actor }: { children: ReactNode; actor: AuthActor }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarCollapsed = false;
   const [screenIndexOpen, setScreenIndexOpen] = useState(false);
   const [screenIndexMode, setScreenIndexMode] = useState<'map' | 'states'>('map');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
-  const navigationId = useId();
-  const menuButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const screen = pageSequence.find(
     (item) => item.reference === referencePage(pathname, searchParams.get('view')),
   );
-
-  useEffect(() => {
-    try {
-      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_PREFERENCE_KEY) === 'collapsed');
-    } catch {
-      // Preferences are optional; navigation remains available without browser storage.
-    }
-  }, []);
 
   useEffect(() => {
     if (!screenIndexOpen) return;
@@ -885,24 +793,6 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
       else document.querySelector<HTMLButtonElement>('[data-open-screen-index]')?.focus();
     };
   }, [screenIndexOpen]);
-
-  const closeMenu = () => {
-    setMenuOpen(false);
-    if (window.matchMedia('(max-width: 720px)').matches)
-      requestAnimationFrame(() => menuButton.current?.focus());
-  };
-
-  const toggleNavigation = () => {
-    setSidebarCollapsed((value) => {
-      const next = !value;
-      try {
-        window.localStorage.setItem(SIDEBAR_PREFERENCE_KEY, next ? 'collapsed' : 'expanded');
-      } catch {
-        /* Optional UI preference. */
-      }
-      return next;
-    });
-  };
 
   const openScreenIndex = (mode: 'map' | 'states') => {
     setScreenIndexMode(mode);
@@ -939,41 +829,21 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
           Saltar al contenido
         </a>
         <div className="flex min-h-dvh w-full max-w-full" inert={screenIndexOpen}>
-          <Sidebar
-            open={menuOpen}
-            collapsed={sidebarCollapsed}
-            onClose={closeMenu}
-            onToggle={toggleNavigation}
-            labelledBy={navigationId}
-            actor={actor}
-            onOpenIndex={() => openScreenIndex('map')}
-            onOpenStates={() => openScreenIndex('states')}
-            onLogout={() => void handleLogout()}
-            loggingOut={loggingOut}
-            logoutError={logoutError}
-          />
           <div className="min-w-0 max-w-full flex-1">
-            <header className="cdr-mobile-bar">
-              <button
-                ref={menuButton}
-                type="button"
-                className="grid size-8 shrink-0 place-items-center rounded-md hover:bg-white/10"
-                onClick={() => setMenuOpen(true)}
-                aria-expanded={menuOpen}
-                aria-controls={navigationId}
-                aria-label="Abrir menú principal"
-              >
-                <Menu aria-hidden="true" className="size-5" />
-              </button>
-              <Image src="/brand/cdr-isotipo-white.png" alt="" width={24} height={24} />
-              <span className="truncate">{screen?.label ?? 'CDR PIM'}</span>
-            </header>
+            <TopNavigation
+              actor={actor}
+              onOpenIndex={() => openScreenIndex('map')}
+              onOpenStates={() => openScreenIndex('states')}
+              onLogout={() => void handleLogout()}
+              loggingOut={loggingOut}
+              logoutError={logoutError}
+            />
             <main
               id="main-content"
               tabIndex={-1}
               className="cdr-main min-h-dvh min-w-0 max-w-full bg-white px-3 pb-16 pt-5 outline-none min-[721px]:px-6 min-[1051px]:px-[35px] min-[1051px]:pt-6"
             >
-              {!pathname.startsWith('/products/') ? (
+              {pathname !== '/' && !pathname.startsWith('/products/') ? (
                 <nav
                   aria-label="Ruta de navegación"
                   className="mb-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground"
@@ -995,12 +865,19 @@ export function AppShell({ children, actor }: { children: ReactNode; actor: Auth
                 {children}
               </TableExportPermission.Provider>
             </main>
-            <FooterPager
-              collapsed={sidebarCollapsed}
-              capabilities={actor.capabilities}
-              onOpenIndex={() => openScreenIndex('map')}
-              onOpenStates={() => openScreenIndex('states')}
-            />
+            {isAdministrator(actor.roles) ? (
+              <details className="cdr-review-tools">
+                <summary aria-label="Herramientas de revisión">
+                  <LayoutGrid className="size-4" />
+                </summary>
+                <FooterPager
+                  collapsed={sidebarCollapsed}
+                  capabilities={actor.capabilities}
+                  onOpenIndex={() => openScreenIndex('map')}
+                  onOpenStates={() => openScreenIndex('states')}
+                />
+              </details>
+            ) : null}
           </div>
         </div>
         {screenIndexOpen ? (
