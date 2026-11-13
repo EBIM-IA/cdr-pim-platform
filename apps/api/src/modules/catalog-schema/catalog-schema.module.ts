@@ -1,3 +1,7 @@
+import { CatalogHomeUseCases } from './application/catalog-home.use-cases';
+import { CatalogHomeController } from './presentation/catalog-home.controller';
+import { CATALOG_HOME_SETTINGS } from './domain/ports/catalog-home-settings.port';
+import { DrizzleCatalogHomeSettings } from './infrastructure/persistence/drizzle-catalog-home-settings';
 import { CatalogParametersController } from './presentation/catalog-parameters.controller';
 import { CatalogParametersUseCase } from './application/catalog-parameters.use-case';
 import { CATALOG_PARAMETERS } from './domain/ports/catalog-parameters.port';
@@ -56,6 +60,7 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
 @Module({
   imports: [ApplicationsModule, CatalogModule],
   controllers: [
+    CatalogHomeController,
     CatalogParametersController,
     ProductDraftController,
     CatalogDesignController,
@@ -64,6 +69,8 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     ProductNamingController,
   ],
   providers: [
+    CatalogHomeUseCases,
+    { provide: CATALOG_HOME_SETTINGS, useClass: DrizzleCatalogHomeSettings },
     CatalogParametersUseCase,
     { provide: CATALOG_PARAMETERS, useClass: DrizzleCatalogParameters },
     { provide: DUPLICATE_CANDIDATES, useClass: DrizzleDuplicateCandidates },

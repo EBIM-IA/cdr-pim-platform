@@ -31,6 +31,8 @@ import {
   X,
 } from 'lucide-react';
 
+import { SalesProductDetail } from '@/components/sales-product-detail';
+import { StickyProductNavigation } from '@/components/sticky-product-navigation';
 import { EcommerceDescriptionCard } from '@/components/ecommerce-description-card';
 import { ProductRelationsDrawer } from '@/components/product-relations-drawer';
 import { ProductGallery } from '@/components/product-gallery';
@@ -2270,6 +2272,7 @@ export function ProductDetailView({
   canWriteApplications = false,
   canWriteEquivalences = false,
   showCompleteness = false,
+  consumerMode = false,
   showProductStatus = true,
 }: {
   productId: string;
@@ -2278,6 +2281,7 @@ export function ProductDetailView({
   canWriteApplications?: boolean;
   canWriteEquivalences?: boolean;
   showCompleteness?: boolean;
+  consumerMode?: boolean;
   showProductStatus?: boolean;
 }) {
   const [product, setProduct] = useState<Product | null>(null);
@@ -2285,7 +2289,6 @@ export function ProductDetailView({
   const [experienceLoading, setExperienceLoading] = useState(true);
   const [experienceError, setExperienceError] = useState<string | null>(null);
   const [selectedVariantKey, setSelectedVariantKey] = useState<string | null>(null);
-  const [darkIdentity, setDarkIdentity] = useState(false);
   const [assets, setAssets] = useState<ProductAssetDto[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(true);
   const [assetsError, setAssetsError] = useState<string | null>(null);
@@ -2338,7 +2341,6 @@ export function ProductDetailView({
       setSelectedVariantKey(
         params.get('aplicacion') || (use === 'industrial' || use === 'automotriz' ? use : null),
       );
-      setDarkIdentity(params.get('idbar') === 'b');
     };
     readLocation();
     window.addEventListener('popstate', readLocation);
@@ -2391,7 +2393,7 @@ export function ProductDetailView({
         if (!controller.signal.aborted) setAssetsLoading(false);
       });
     return () => controller.abort();
-  }, [productId, revision]);
+  }, [productId, revision, consumerMode]);
 
   useEffect(() => {
     if (
@@ -2458,7 +2460,9 @@ export function ProductDetailView({
       fetchProduct(productId, controller.signal),
       fetchProductAttributeSheet(productId, controller.signal),
       fetchProductTechnicalSheet(productId, controller.signal),
-      listAuditChanges({ resourceId: productId, page: 1, pageSize: 100 }, controller.signal),
+      consumerMode
+        ? Promise.resolve({ items: [], total: 0 })
+        : listAuditChanges({ resourceId: productId, page: 1, pageSize: 100 }, controller.signal),
     ])
       .then(([productResult, sheetResult, technicalSheetResult, auditResult]) => {
         if (controller.signal.aborted) return;
@@ -2517,7 +2521,7 @@ export function ProductDetailView({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [productId, revision]);
+  }, [productId, revision, consumerMode]);
 
   const unifiedCode = useMemo(
     () => unifiedCodeFromSheet(attributeSheet) ?? product?.unifiedCode,
@@ -2852,6 +2856,34 @@ export function ProductDetailView({
       (showProductStatus || showCompleteness || (tab.id !== 'sources' && tab.id !== 'history')),
   );
 
+  if (consumerMode)
+    return (
+      <SalesProductDetail
+        categoryPath={
+          templateOptions.find((category) => category.id === attributeSheet?.schema.category.id)
+            ?.path
+        }
+        key={product.id}
+        product={product}
+        sheet={attributeSheet}
+        experience={experience}
+        assets={assets}
+        applications={applications}
+        homologs={homologs}
+        oemCodes={oemCodes}
+        selected={selectedVariant}
+        onPick={selectVariant}
+        dataError={
+          attributeSheetError ??
+          experienceError ??
+          assetsError ??
+          applicationsError ??
+          homologsError ??
+          oemError
+        }
+      />
+    );
+
   return (
     <>
       {relationsEditor &&
@@ -2949,7 +2981,10 @@ export function ProductDetailView({
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="mt-1 break-words text-2xl font-bold tracking-tight text-cdr-ink">
+            <h1
+              id="product-identity-anchor"
+              className="mt-1 break-words text-2xl font-bold tracking-tight text-cdr-ink"
+            >
               {product.sku} :{' '}
               {selectedVariant?.codigoProveedor ||
                 product.providerCode ||
@@ -3152,32 +3187,38 @@ export function ProductDetailView({
         )}
       </section>
 
-      <section className="mt-4 min-w-0" aria-label="Detalle complementario">
-        <div className="sticky top-12 z-20 -mx-4 md:top-0 border-y bg-white/95 px-4 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-[35px] lg:px-[35px]">
-          <dl
-            className={cn(styles.identity, darkIdentity && styles.darkIdentity)}
-            aria-label="Contexto persistente del producto"
+      <StickyProductNavigation
+        anchorId="product-identity-anchor"
+        title={product.sku}
+        subtitle={[
+          product.brand,
+          product.providerCode,
+          unifiedCode,
+          selectedVariant ? variantLabel(selectedVariant) : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      >
+        {visibleTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            aria-pressed={activeTab === tab.id}
+            onClick={() => {
+              setActiveTab(tab.id);
+              requestAnimationFrame(() =>
+                document
+                  .getElementById(`panel-${tab.id}`)
+                  ?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+              );
+            }}
           >
-            {[
-              ['Código de artículo', product.sku],
-              ['Código de proveedor', product.providerCode ?? 'No disponible'],
-              ['Marca', product.brand],
-              ['Código unificador', unifiedCode ?? 'Sin código'],
-              ...(selectedVariant
-                ? [
-                    [
-                      selectedVariant.aplicacion ? 'Aplicación' : 'Uso',
-                      variantLabel(selectedVariant),
-                    ],
-                  ]
-                : []),
-            ].map(([label, value]) => (
-              <div key={label} className={styles.identityField}>
-                <dt>{label}</dt>
-                <dd title={value}>{value}</dd>
-              </div>
-            ))}
-          </dl>
+            {tab.label}
+          </button>
+        ))}
+      </StickyProductNavigation>
+      <section className="mt-4 min-w-0" aria-label="Detalle complementario">
+        <div className="border-y bg-white px-4 sm:px-6">
           <div
             className="scrollbar-thin overflow-x-auto"
             role="tablist"
@@ -3240,7 +3281,7 @@ export function ProductDetailView({
           role="tabpanel"
           aria-labelledby={`tab-${activeTab}`}
           tabIndex={0}
-          className="mt-5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+          className="mt-5 scroll-mt-32 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
         >
           <div hidden={activeTab !== 'technical'}>
             <TechnicalPanel

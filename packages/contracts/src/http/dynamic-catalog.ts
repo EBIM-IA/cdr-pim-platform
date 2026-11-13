@@ -221,6 +221,9 @@ export const catalogGridQuerySchema = paginationQuerySchema
 export type CatalogGridQuery = z.infer<typeof catalogGridQuerySchema>;
 
 export const catalogWorkbookQuerySchema = paginationQuerySchema.extend({
+  groupByUnifiedCode: z
+    .union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')])
+    .optional(),
   categoryId: uuidSchema.optional(),
   q: z.string().trim().min(1).max(300).optional(),
   brand: z.string().trim().min(1).max(120).optional(),

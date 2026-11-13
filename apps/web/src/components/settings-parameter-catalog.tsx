@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 
 import type {
   CatalogParameterDto,
@@ -149,6 +150,14 @@ export function SettingsParameterCatalog({
   };
   return (
     <div className="min-w-0 space-y-4">
+      {canManage && kind === 'brand' ? (
+        <Link
+          href="/?configure=brands#home-config"
+          className="inline-flex text-sm font-semibold text-primary"
+        >
+          Configurar galería de marcas del Inicio →
+        </Link>
+      ) : null}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b p-4">
           <div>

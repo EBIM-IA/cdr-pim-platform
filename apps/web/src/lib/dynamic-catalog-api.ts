@@ -117,6 +117,7 @@ export function fetchCatalogWorkbook(
   for (const filter of query.filter) params.append('filter', filter);
   for (const filter of query.columnFilter ?? []) params.append('columnFilter', filter);
   if (query.sort) params.set('sort', query.sort);
+  if (query.groupByUnifiedCode) params.set('groupByUnifiedCode', 'true');
   return request(`/workbook?${params.toString()}`, catalogWorkbookResultSchema, { signal });
 }
 

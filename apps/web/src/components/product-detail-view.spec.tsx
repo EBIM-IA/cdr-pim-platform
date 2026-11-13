@@ -54,6 +54,7 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
     }
   },
   fetchProductAttributeSheet: vi.fn(),
+  fetchCatalogWorkbook: vi.fn(async () => ({ items: [], total: 0 })),
   fetchProductTechnicalSheet: vi.fn(),
   fetchCatalogCategories: vi.fn(),
   patchProductAttributes: vi.fn(),
@@ -331,6 +332,28 @@ beforeEach(() => {
 });
 
 describe('ProductDetailView operational data', () => {
+  it.each(['COMPRAS', 'VENTAS'])(
+    'renders the approved consultation ficha for %s without administration actions',
+    async () => {
+      const view = render(<ProductDetailView productId={product.id} consumerMode />);
+      const content = within(view.container);
+      expect(await content.findByRole('heading', { name: 'D1672', level: 1 })).toBeInTheDocument();
+      expect(content.getByRole('heading', { name: 'Para el cliente' })).toBeInTheDocument();
+      expect(
+        content.getByRole('heading', { name: 'Características técnicas' }),
+      ).toBeInTheDocument();
+      expect(
+        content.getByRole('heading', { name: 'Documentos y certificados' }),
+      ).toBeInTheDocument();
+      expect(content.queryByRole('tab', { name: 'Historial' })).not.toBeInTheDocument();
+      expect(
+        content.queryByRole('button', { name: /Editar enriquecimiento/ }),
+      ).not.toBeInTheDocument();
+      expect(content.queryByText('Fuente: Manual')).not.toBeInTheDocument();
+      expect(listAuditChanges).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { role: 'ADMINISTRADOR', showCompleteness: true, showProductStatus: true },
     { role: 'COMPRAS', showCompleteness: false, showProductStatus: true },
@@ -385,9 +408,9 @@ describe('ProductDetailView operational data', () => {
       }),
     ).toBeInTheDocument();
     const identity = rendered.getByLabelText('Contexto persistente del producto');
-    expect(identity).toHaveTextContent('Código unificador');
+    expect(identity).toHaveTextContent('D1672');
     expect(identity).toHaveTextContent('Toyota Hilux 2016–2024');
-    expect(identity.className).toContain('darkIdentity');
+    expect(identity).toHaveAttribute('aria-hidden', 'true');
 
     fireEvent.click(rendered.getByRole('button', { name: /Uso industrial/ }));
     expect(
@@ -433,8 +456,9 @@ describe('ProductDetailView operational data', () => {
     expect(
       rendered.getByRole('heading', { name: `${product.sku} : ${product.providerCode}`, level: 1 }),
     ).toBeInTheDocument();
-    expect(rendered.getByLabelText('Contexto persistente del producto').className).toContain(
-      'darkIdentity',
+    expect(rendered.getByLabelText('Contexto persistente del producto')).toHaveAttribute(
+      'aria-hidden',
+      'true',
     );
     expect(rendered.getByRole('button', { name: 'Toyota Hilux 2016–2024' })).toHaveAttribute(
       'aria-pressed',
@@ -617,14 +641,11 @@ describe('ProductDetailView operational data', () => {
       '[aria-label="Contexto persistente del producto"]',
     );
     expect(persistentContext).not.toBeNull();
-    expect(within(persistentContext as HTMLElement).getByText('D1672-CARBON')).toBeInTheDocument();
-    expect(within(persistentContext as HTMLElement).getByText('CDR')).toBeInTheDocument();
-    expect(persistentContext?.parentElement).toHaveClass('sticky', 'top-12', 'md:top-0');
-    expect(
-      within(persistentContext?.parentElement as HTMLElement).getByRole('tablist', {
-        name: 'Secciones de la ficha',
-      }),
-    ).toBeInTheDocument();
+    expect(persistentContext).toHaveTextContent('D1672-CARBON');
+    expect(persistentContext).toHaveTextContent('CDR');
+    expect(persistentContext).toHaveClass('cdr-sticky-product');
+    expect(persistentContext).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('tablist', { name: 'Secciones de la ficha' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Código Unificador y Homólogos' })).toBeInTheDocument();
 
     await waitFor(() => {

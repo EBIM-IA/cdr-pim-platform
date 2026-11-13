@@ -117,6 +117,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
                 unified_code_requests,
                 catalog_parameters,
                 product_name_settings,
+                catalog_home_settings,
                 file_cleanup_candidates,
                 file_inventory_cursors,
                 file_maintenance_leases,

@@ -104,6 +104,9 @@ aparece fuera de su carpeta de adapter.
 Los cambios de la reunión del 5 de noviembre y la entrega de diseño del 7 de noviembre se detallan en
 [`CLIENT_MEETING_2026-11-05.md`](docs/product/CLIENT_MEETING_2026-11-05.md), incluyendo galerías, verificación de aplicaciones y descripciones comerciales por variante.
 
+La navegación superior, el nuevo Inicio y la ficha de Compras y Ventas de la entrega del 12 de noviembre están documentados en
+[`CLIENT_MEETING_2026-11-12.md`](docs/product/CLIENT_MEETING_2026-11-12.md), con sus migraciones y pendientes de coordinación.
+
 ## Comandos
 
 ```bash

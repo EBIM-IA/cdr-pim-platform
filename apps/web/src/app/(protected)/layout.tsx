@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { AppShell } from '@/components/app-shell';
-import { safeReturnTo } from '@/lib/auth';
+import { isAdministrator, safeReturnTo } from '@/lib/auth';
 import { getCurrentActor } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
@@ -15,5 +15,13 @@ export default async function ProtectedLayout({ children }: Readonly<{ children:
     redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
+  const path = ((await headers()).get('x-cdr-return-to') ?? '/').split('?')[0] ?? '/';
+  if (
+    !isAdministrator(actor.roles) &&
+    path !== '/' &&
+    !path.startsWith('/products') &&
+    !path.startsWith('/catalogs')
+  )
+    redirect('/');
   return <AppShell actor={actor}>{children}</AppShell>;
 }

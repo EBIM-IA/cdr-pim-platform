@@ -40,7 +40,7 @@ export function ProductGallery({
   assets: readonly ProductAssetDto[];
   attributes: readonly { key: string; label: string; value: unknown }[];
   error?: string | null;
-  type?: 'FOTO' | 'PLANO';
+  type?: 'FOTO' | 'PLANO' | 'ALL';
   productId?: string;
   canManage?: boolean;
   onAssetsChange?: (assets: ProductAssetDto[]) => void;
@@ -69,7 +69,7 @@ export function ProductGallery({
   const trigger = useRef<HTMLButtonElement>(null);
   const modal = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
-  const label = type === 'FOTO' ? 'fotografías' : 'planos';
+  const label = type === 'ALL' ? 'imágenes' : type === 'FOTO' ? 'fotografías' : 'planos';
   const visible = slides.filter((slide) => !failed.has(slide.id));
   const index = Math.max(
     0,
@@ -81,7 +81,7 @@ export function ProductGallery({
   };
   const uploaded = slides.flatMap((slide) => (slide.asset ? [slide.asset] : []));
   const ownIndex = uploaded.findIndex((asset) => asset.id === current.id);
-  const manage = canManage && !!productId && !!onAssetsChange;
+  const manage = type !== 'ALL' && canManage && !!productId && !!onAssetsChange;
   const step = (delta: number) => {
     setSelectedId(visible[(index + delta + visible.length) % visible.length]?.id ?? null);
     setZoom(1);
@@ -149,7 +149,7 @@ export function ProductGallery({
       const replaced = replacement.current;
       const result = await uploadProductAsset({
         productId: productId!,
-        type,
+        type: type === 'ALL' ? 'FOTO' : type,
         file,
         ...(replaced?.position
           ? { position: replaced.position, replacesAssetId: replaced.id }
@@ -168,7 +168,7 @@ export function ProductGallery({
       if (from < 0 || targetIndex < 0 || targetIndex >= ids.length) return;
       ids.splice(from, 1);
       ids.splice(targetIndex, 0, id);
-      onAssetsChange!(await reorderProductAssets(productId!, type, ids));
+      onAssetsChange!(await reorderProductAssets(productId!, type === 'ALL' ? 'FOTO' : type, ids));
       setSelectedId(id);
       setNotice('Orden guardado. El primer archivo es el principal.');
     });
@@ -260,7 +260,7 @@ export function ProductGallery({
   );
   return (
     <div
-      aria-label={type === 'FOTO' ? 'Galería del producto' : 'Galería de planos'}
+      aria-label={type === 'PLANO' ? 'Galería de planos' : 'Galería del producto'}
       role="region"
       tabIndex={0}
       onKeyDown={(event) => {
@@ -311,7 +311,7 @@ export function ProductGallery({
           <button
             ref={trigger}
             type="button"
-            aria-label={`Ampliar ${type === 'FOTO' ? 'imagen' : 'plano'}`}
+            aria-label={`Ampliar ${type === 'PLANO' ? 'plano' : 'imagen'}`}
             className="absolute right-2 top-2 rounded-full border bg-white/90 p-2 shadow"
             onClick={() => {
               setHover(null);

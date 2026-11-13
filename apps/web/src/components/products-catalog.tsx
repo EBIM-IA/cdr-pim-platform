@@ -7,9 +7,12 @@ import type {
   CatalogWorkbookColumnDto,
   ProductStatus,
   ProductAssetDto,
+  GroupApplicationDto,
 } from '@cdr/contracts';
 import { ChevronLeft, ChevronRight, Columns3, Search, SlidersHorizontal, X } from 'lucide-react';
 import Link from 'next/link';
+import { fetchUnifiedMembers } from '@/lib/unified-products';
+import { listApplications } from '@/lib/operational-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CatalogSearch } from '@/components/catalog-search';
@@ -34,6 +37,7 @@ import { fetchCatalogCategories, fetchCatalogWorkbook } from '@/lib/dynamic-cata
 import { listProductAssetsBatch } from '@/lib/product-assets-api';
 import type { Product } from '@/lib/types';
 import { cn, formatNumber } from '@/lib/utils';
+import styles from './products-catalog.module.css';
 
 type CatalogView = 'catalog' | 'table' | 'sheet';
 type CompletenessFilter = '' | 'complete' | 'attention' | 'critical' | 'unavailable';
@@ -102,111 +106,156 @@ function CompletenessMeter({ value, sku }: { value: number | null; sku: string }
   );
 }
 
+type CatalogRelations = {
+  applications: GroupApplicationDto[];
+  members: CatalogWorkbookProductDto[];
+  error?: string;
+};
+
 function ProductCatalogList({
   products,
   assets,
+  relations,
   showStatus,
   showCompleteness,
   canEdit,
 }: {
   products: Product[];
   assets: Record<string, ProductAssetDto[]>;
+  relations: Record<string, CatalogRelations>;
   showStatus: boolean;
   showCompleteness: boolean;
   canEdit: boolean;
 }) {
   return (
-    <ul className="space-y-2">
-      {products.map((product) => (
-        <li
-          key={product.id}
-          className={cn(
-            'grid min-w-0 grid-cols-[56px_minmax(0,1fr)] gap-3 rounded-xl border bg-white p-2 shadow-sm transition hover:border-orange-200 hover:shadow-md md:items-center md:pr-3',
-            showStatus || showCompleteness
-              ? 'md:grid-cols-[56px_minmax(0,1fr)_150px_auto]'
-              : 'md:grid-cols-[56px_minmax(0,1fr)_auto]',
-          )}
-        >
-          <ProductThumbnail product={product} assets={assets[product.id]} />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={`/products/${encodeURIComponent(product.id)}`}
-                title={`Ver ficha técnica de ${product.sku}`}
-                className="break-all text-base font-extrabold tracking-tight hover:text-primary"
-              >
-                {product.sku}
-              </Link>
-              {product.classificationPending ? (
-                <StatusBadge tone="warning">Pendiente de clasificación</StatusBadge>
-              ) : null}
-            </div>
-            <p className="mt-0.5 text-[13px] font-normal leading-4">
-              {product.name === product.sku
-                ? (product.templateKey ?? product.category)
-                : product.name}
-            </p>
-            {product.description ? (
-              <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
-                {product.description}
-              </p>
-            ) : null}
-            <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {[
-                ['Marca', product.brand],
-                ['Categoría', product.category],
-                ['Aplicación', product.application],
-                ['Código unificador', product.unifiedCode ?? 'Sin código'],
-              ].map(([label, value]) => (
-                <div key={label} className="flex min-w-0 items-baseline gap-1">
-                  <dt className="text-[10px] text-muted-foreground">{label}</dt>
-                  <dd className="break-words text-[11px] font-semibold">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-          {showStatus || showCompleteness ? (
-            <div className="col-span-2 flex flex-wrap items-center gap-3 md:col-span-1 md:flex-col md:items-start">
-              {showStatus ? (
-                <StatusBadge tone={statusTone(product.status)}>
-                  {statusLabel(product.status)}
-                </StatusBadge>
-              ) : null}
-              {showCompleteness ? (
-                <CompletenessMeter value={product.completeness} sku={product.sku} />
-              ) : null}
-            </div>
-          ) : null}
-          <div className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1">
-            <Button asChild size="sm">
-              <Link href={`/products/${encodeURIComponent(product.id)}`}>Ver producto</Link>
-            </Button>
-            {canEdit && !product.classificationPending ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/products/${encodeURIComponent(product.id)}?edit=enrichment`}>
-                  Editar enriquecimiento
+    <ul className={styles.list}>
+      {products.map((product) => {
+        const detailHref = `/products/${encodeURIComponent(product.id)}`;
+        const group = product.unifiedCode ? relations[product.unifiedCode] : undefined;
+        const equivalents = group?.members.filter((member) => member.id !== product.id) ?? [];
+        return (
+          <li key={product.id} className={styles.card}>
+            <Link
+              href={detailHref}
+              className={styles.image}
+              aria-label={`Ver imagen y ficha de ${product.sku}`}
+            >
+              <ProductThumbnail product={product} assets={assets[product.id]} />
+            </Link>
+            <div className={styles.cardBody}>
+              <div className={styles.identity}>
+                <span className={styles.brand}>{product.brand}</span>
+                <Link
+                  href={detailHref}
+                  title={`Ver ficha técnica de ${product.sku}`}
+                  className={styles.code}
+                >
+                  {product.sku}
                 </Link>
-              </Button>
-            ) : null}
-          </div>
-        </li>
-      ))}
+                {product.classificationPending ? (
+                  <StatusBadge tone="warning">Pendiente de clasificación</StatusBadge>
+                ) : null}
+                <p className={styles.name}>
+                  {product.name === product.sku
+                    ? (product.templateKey ?? product.category)
+                    : product.name}
+                </p>
+                {product.description ? (
+                  <p className={styles.summary}>{product.description}</p>
+                ) : null}
+                {product.dimensions ? <p className={styles.summary}>{product.dimensions}</p> : null}
+                <p className={styles.summary}>
+                  Código unificador:{' '}
+                  {product.unifiedCode ? (
+                    <Link href={detailHref} className={styles.unified}>
+                      {product.unifiedCode}
+                    </Link>
+                  ) : (
+                    'Sin código'
+                  )}
+                </p>
+                {showStatus || showCompleteness ? (
+                  <div className={styles.state}>
+                    {showStatus ? (
+                      <StatusBadge tone={statusTone(product.status)}>
+                        {statusLabel(product.status)}
+                      </StatusBadge>
+                    ) : null}
+                    {showCompleteness ? (
+                      <CompletenessMeter value={product.completeness} sku={product.sku} />
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div className={styles.relations}>
+                <span className={styles.label}>Aplicación</span>
+                {group?.error ? (
+                  <p role="status" className={styles.summary}>
+                    No fue posible cargar aplicaciones y equivalentes.
+                  </p>
+                ) : (
+                  <>
+                    {group?.applications.length ? (
+                      <ul className={styles.applications}>
+                        {group.applications.slice(0, 3).map((application) => (
+                          <li key={application.id}>
+                            {[
+                              application.make,
+                              application.model,
+                              [application.yearFrom, application.yearTo].filter(Boolean).join('–'),
+                            ]
+                              .filter(Boolean)
+                              .join(' ') || application.vehicleType}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <p className={styles.application}>{product.application}</p>
+                    <span className={styles.label}>Equivalentes</span>
+                    {equivalents.length ? (
+                      <div className={styles.chips}>
+                        {equivalents.map((member) => (
+                          <Link key={member.id} href={`/products/${encodeURIComponent(member.id)}`}>
+                            {member.brand ?? member.sku}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.summary}>
+                        {product.unifiedCode && !group
+                          ? 'Cargando equivalentes…'
+                          : 'Sin equivalentes registrados'}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className={styles.actions}>
+                <Link href={detailHref} className={styles.view}>
+                  Ver ficha
+                </Link>
+                {canEdit && !product.classificationPending ? (
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`${detailHref}?edit=enrichment`}>Editar enriquecimiento</Link>
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
 function CatalogSkeleton({ count }: { count: number }) {
   return (
-    <div
-      className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
-      aria-busy="true"
-      aria-label="Cargando productos"
-    >
+    <div className={styles.list} aria-busy="true" aria-label="Cargando productos">
       <span className="sr-only" role="status">
         Cargando productos…
       </span>
       {Array.from({ length: Math.min(count, 6) }, (_, index) => (
-        <Skeleton key={index} className="h-[260px] rounded-xl" />
+        <Skeleton key={index} className="h-[230px] rounded-2xl" />
       ))}
     </div>
   );
@@ -308,7 +357,7 @@ export function ProductsCatalog({
   const [completeness, setCompleteness] = useState<CompletenessFilter>('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [view, setView] = useState<CatalogView>('catalog');
+  const [view, setView] = useState<CatalogView>('table');
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialBrand || initialStatus),
   );
@@ -320,6 +369,7 @@ export function ProductsCatalog({
     statuses: [],
   });
   const [result, setResult] = useState<CatalogWorkbookResultDto | null>(null);
+  const [relations, setRelations] = useState<Record<string, CatalogRelations>>({});
   const [productAssets, setProductAssets] = useState<Record<string, ProductAssetDto[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -348,7 +398,7 @@ export function ProductsCatalog({
     const completenessValue = params.get('completeness');
     setCategory(categoryValue);
     setApplication(applicationValue);
-    if (params.get('view') === 'table') setView('table');
+    if (params.get('view') === 'catalog') setView('catalog');
     if (
       showCompleteness &&
       (completenessValue === 'complete' ||
@@ -380,7 +430,7 @@ export function ProductsCatalog({
     update('category', category);
     update('application', application);
     update('completeness', showCompleteness ? completeness : '');
-    update('view', view === 'table' ? 'table' : '');
+    update('view', view === 'catalog' ? 'catalog' : view === 'sheet' ? 'sheet' : '');
     params.delete('family');
     const query = params.toString();
     window.history.replaceState(
@@ -480,6 +530,47 @@ export function ProductsCatalog({
       });
     return () => controller.abort();
   }, [products, revision, view]);
+  useEffect(() => {
+    if (view !== 'catalog' || !products.length) return;
+    const controller = new AbortController();
+    const codes = [
+      ...new Set(products.flatMap((product) => (product.unifiedCode ? [product.unifiedCode] : []))),
+    ];
+    setRelations({});
+    let index = 0;
+    const worker = async () => {
+      while (index < codes.length && !controller.signal.aborted) {
+        const code = codes[index++]!;
+        try {
+          const [applications, members] = await Promise.all([
+            listApplications({ unifiedCode: code }, controller.signal),
+            fetchUnifiedMembers(code, controller.signal),
+          ]);
+          if (!controller.signal.aborted)
+            setRelations((current) => ({
+              ...current,
+              [code]: {
+                applications: applications.filter(
+                  (application) =>
+                    application.active &&
+                    (showCompleteness || application.verificationStatus === 'verified'),
+                ),
+                members,
+              },
+            }));
+        } catch {
+          if (!controller.signal.aborted)
+            setRelations((current) => ({
+              ...current,
+              [code]: { applications: [], members: [], error: 'unavailable' },
+            }));
+        }
+      }
+    };
+    void Promise.all([worker(), worker()]);
+    return () => controller.abort();
+  }, [products, revision, view, showCompleteness]);
+
   const total = result?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const categoryOptions = useMemo(
@@ -545,7 +636,7 @@ export function ProductsCatalog({
   return (
     <>
       <PageHeader
-        title="Catálogo maestro de productos"
+        title="Catálogo Maestro de Productos"
         description={
           view === 'catalog' && result
             ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
@@ -863,6 +954,7 @@ export function ProductsCatalog({
               ) : (
                 <ProductCatalogList
                   assets={productAssets}
+                  relations={relations}
                   products={products}
                   showStatus={showProductStatus}
                   showCompleteness={showCompleteness}
