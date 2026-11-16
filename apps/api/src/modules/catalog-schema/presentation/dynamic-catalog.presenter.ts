@@ -21,6 +21,7 @@ import type { ReassignedProductTemplate } from '../application/reassign-product-
 
 export function toGridSchemaDto(schema: DynamicCatalogSchema): CatalogGridSchemaDto {
   return {
+    ...(schema.sections ? { sections: [...schema.sections] } : {}),
     category: schema.category,
     template: schema.template,
     columns: schema.attributes.map((attribute) => ({
@@ -36,6 +37,7 @@ export function toGridSchemaDto(schema: DynamicCatalogSchema): CatalogGridSchema
       includeInTechnicalSheet: attribute.includeInTechnicalSheet,
       ...(attribute.publishable !== undefined ? { publishable: attribute.publishable } : {}),
       sourceAuthority: attribute.sourceAuthority,
+      ...(attribute.sectionKey !== undefined ? { sectionKey: attribute.sectionKey } : {}),
       position: attribute.position,
       permissions: attribute.permissions,
     })),
@@ -55,9 +57,10 @@ export function toGridProductDto(product: CatalogGridProduct): CatalogGridProduc
 }
 
 function toWorkbookProductDto(product: CatalogWorkbookProduct) {
-  const { assetRequirements, ...fields } = product;
+  const { assetRequirements, groupMembers, ...fields } = product;
   return {
     ...fields,
+    ...(groupMembers ? { groupMembers: [...groupMembers] } : {}),
     applicationTypes: [...product.applicationTypes],
     ...(assetRequirements ? { assetRequirements: [...assetRequirements] } : {}),
     updatedAt: product.updatedAt.toISOString(),
@@ -87,6 +90,8 @@ export function toWorkbookResultDto(
       statuses: [...result.facets.statuses],
     },
     items: result.items.map(toWorkbookProductDto),
+    ...(result.totalArticles !== undefined ? { totalArticles: result.totalArticles } : {}),
+    ...(result.totalBrands !== undefined ? { totalBrands: result.totalBrands } : {}),
     page,
     pageSize,
     total: result.total,

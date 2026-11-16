@@ -520,13 +520,23 @@ export function ReferenceWorkspace({
 }) {
   const views = workspaceViews[definition.slug] ?? [];
   const [selected, setSelected] = useState(views[0]?.id ?? '');
+  const [axBatchId, setAxBatchId] = useState<string | undefined>();
+  const [initialSearchQuery, setInitialSearchQuery] = useState<string | undefined>();
   const active = views.find((view) => view.id === selected) ?? views[0];
   const { workspace, loading, error, reload } = useWorkspaceData(
     definition.slug,
-    definition.slug === 'reports' ? { report: reportFormatForView(active?.id) } : {},
+    definition.slug === 'reports'
+      ? { report: reportFormatForView(active?.id) }
+      : definition.slug === 'integrations' && axBatchId
+        ? { axBatchId }
+        : {},
   );
 
-  useEffect(() => setSelected(selectedFromLocation(views)), [views]);
+  useEffect(() => {
+    setSelected(selectedFromLocation(views));
+    setAxBatchId(new URLSearchParams(window.location.search).get('axBatchId') ?? undefined);
+    setInitialSearchQuery(new URLSearchParams(window.location.search).get('q') ?? undefined);
+  }, [views]);
 
   if (!active) return null;
 
@@ -538,6 +548,10 @@ export function ReferenceWorkspace({
     setSelected(id);
     const url = new URL(window.location.href);
     url.searchParams.set('view', id);
+    if (definition.slug === 'integrations' && id !== 'batches') {
+      setAxBatchId(undefined);
+      url.searchParams.delete('axBatchId');
+    }
     window.history.replaceState({}, '', `${url.pathname}${url.search}`);
   };
 
@@ -639,7 +653,14 @@ export function ReferenceWorkspace({
             canViewAudit={actor?.capabilities.includes('audit:read') ?? false}
           />
         ) : definition.slug === 'quality' && active.id === 'search' ? (
-          <SmartSearchWorkspace />
+          <SmartSearchWorkspace
+            {...(initialSearchQuery ? { initialQuery: initialSearchQuery } : {})}
+            canViewSearchReports={
+              !!actor?.capabilities.includes('menu:reports:view') &&
+              actor.capabilities.includes('reports:read')
+            }
+            canManageSettings={actor?.capabilities.includes('administration:manage') ?? false}
+          />
         ) : definition.slug === 'quality' && isQualitySecondaryView(active.id) ? (
           <QualitySecondaryWorkspace view={active.id} workspace={workspace} />
         ) : useOperationsSecondary ? (

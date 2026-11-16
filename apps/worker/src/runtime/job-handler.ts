@@ -35,3 +35,15 @@ export class PermanentJobError extends Error {
     this.name = 'PermanentJobError';
   }
 }
+
+/** Retry through the broker after an ownership lease can expire, without a hot retry loop. */
+export class RetryableJobError extends Error {
+  constructor(
+    message: string,
+    readonly retryDelaySeconds: number,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'RetryableJobError';
+  }
+}

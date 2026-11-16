@@ -158,6 +158,12 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
               ['Actor', selected.actorId ?? 'Sistema'],
               ['Origen', selected.source],
               ['Fecha', new Date(selected.occurredAt).toLocaleString('es-PE')],
+              [
+                'Fec. modificación anterior',
+                selected.previousValueValidFrom
+                  ? new Date(selected.previousValueValidFrom).toLocaleString('es-PE')
+                  : 'Primera modificación',
+              ],
               ['Correlación', selected.correlationId],
             ].map(([label, value]) => (
               <div key={label}>
@@ -168,6 +174,11 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
               </div>
             ))}
           </dl>
+          {selected.sku && selected.resourceType === 'product' ? (
+            <Button asChild className="mt-5" variant="outline">
+              <a href={`/products/${encodeURIComponent(selected.resourceId)}`}>Abrir SKU</a>
+            </Button>
+          ) : null}
         </WorkspaceDrawer>
       ) : null}
       {!embedded ? (
@@ -344,7 +355,15 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
           className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
-          {error}
+          {error}{' '}
+          <button
+            type="button"
+            className="underline"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            Reintentar
+          </button>
         </div>
       ) : null}
 
@@ -416,7 +435,16 @@ export function AuditWorkspace({ embedded = false }: { embedded?: boolean }) {
                       }).format(new Date(item.occurredAt))}
                     </td>
                     <td className="px-4 py-3">
-                      <strong>{item.sku ?? item.resourceId}</strong>
+                      {item.sku && item.resourceType === 'product' ? (
+                        <a
+                          className="font-semibold text-primary hover:underline"
+                          href={`/products/${encodeURIComponent(item.resourceId)}`}
+                        >
+                          {item.sku}
+                        </a>
+                      ) : (
+                        <strong>{item.sku ?? item.resourceId}</strong>
+                      )}
                       <span className="block text-xs text-muted-foreground">
                         {item.resourceType}
                       </span>

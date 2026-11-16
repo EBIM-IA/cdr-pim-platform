@@ -93,7 +93,7 @@ export class ExternalHomologsController {
 
   @Get('homolog-search')
   @ApiOperation({
-    summary: 'Expand an exact external code to group products using approved, active homologs only',
+    summary: 'Find group products by exact homolog code or partial name, active and approved only',
   })
   async eligibleSearch(
     @Query(new ZodValidationPipe(eligibleHomologSearchQuerySchema))

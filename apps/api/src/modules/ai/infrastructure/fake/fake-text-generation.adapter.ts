@@ -32,6 +32,31 @@ export class FakeTextGenerationAdapter implements TextGenerationProviderPort {
         outputTokens: 0,
       };
     }
+    if (
+      data &&
+      typeof data === 'object' &&
+      'recordType' in data &&
+      data.recordType === 'code_affix_evidence'
+    )
+      return {
+        text: JSON.stringify({ items: [] }),
+        model: this.model,
+        inputTokens: estimateTokens(request.input),
+        outputTokens: 0,
+      };
+    if (
+      data &&
+      typeof data === 'object' &&
+      'recordType' in data &&
+      data.recordType === 'search_assistant_facts'
+    ) {
+      return {
+        text: 'Modo simulado: consulta las fichas de los SKU enumerados como evidencia. Activa el proveedor configurado para obtener una respuesta generativa.',
+        model: this.model,
+        inputTokens: estimateTokens(request.input),
+        outputTokens: 0,
+      };
+    }
     return {
       text: `[fake:${this.model}] ${request.instruction.trim()} :: ${request.input.trim()}`,
       model: this.model,

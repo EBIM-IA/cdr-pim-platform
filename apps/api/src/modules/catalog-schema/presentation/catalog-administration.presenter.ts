@@ -26,9 +26,10 @@ export function toAdminTemplateAttributeDto(
 }
 
 export function toAdminTemplateDto(template: AdminAttributeTemplate): AdminTemplateDto {
-  const { attributes, assetRequirements, ...header } = template;
+  const { attributes, assetRequirements, sections, ...header } = template;
   return {
     ...header,
+    ...(sections ? { sections: [...sections] } : {}),
     createdAt: template.createdAt.toISOString(),
     updatedAt: template.updatedAt.toISOString(),
     ...(attributes ? { attributes: attributes.map(toAdminTemplateAttributeDto) } : {}),

@@ -1,3 +1,4 @@
+import { ModulePolicyUseCase } from '../../application/module-policy.use-case';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UnauthorizedError } from '@cdr/shared';
@@ -36,7 +37,14 @@ function createGuard(isPublic = false): { guard: JwtAuthGuard; tokens: TokenServ
       roles: [Role.Admin],
     }),
   };
-  return { guard: new JwtAuthGuard(reflector, tokens), tokens };
+  return {
+    guard: new JwtAuthGuard(
+      reflector,
+      tokens,
+      new ModulePolicyUseCase({ read: async () => [], save: async () => {} }),
+    ),
+    tokens,
+  };
 }
 
 describe('JwtAuthGuard', () => {

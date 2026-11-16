@@ -1,14 +1,19 @@
 'use client';
 
-import type { AdminCatalogCategoryDto, AdminTemplateDto } from '@cdr/contracts';
+import {
+  categoryGovernanceSchema,
+  type AdminCatalogCategoryDto,
+  type AdminTemplateDto,
+} from '@cdr/contracts';
 import { ChevronRight, Minus, Pencil, Plus, RotateCcw, ToggleLeft, X } from 'lucide-react';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { CategoryTreeRow } from '@/components/categories-admin-workspace';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { authenticatedBffFetch } from '@/lib/bff-client';
 import { cn } from '@/lib/utils';
 
 export function CategoryTreePanel({
@@ -20,8 +25,10 @@ export function CategoryTreePanel({
   onInspectCategory,
   onSetActive,
   onDesign,
+  canConfigureHome = false,
 }: {
   rows: readonly CategoryTreeRow[];
+  canConfigureHome?: boolean;
   templatesForCategory: (id: string) => AdminTemplateDto[];
   searching: boolean;
   savingId: string | null;
@@ -30,6 +37,34 @@ export function CategoryTreePanel({
   onInspectCategory?: (id: string) => void;
   onSetActive: (category: AdminCatalogCategoryDto, active: boolean) => void;
 }) {
+  const [erpCodes, setErpCodes] = useState<Record<string, string>>({});
+  const [codeError, setCodeError] = useState(false);
+  const [codesLoading, setCodesLoading] = useState(false);
+  const [codesRevision, setCodesRevision] = useState(0);
+  useEffect(() => {
+    if (!canConfigureHome) return;
+    const controller = new AbortController();
+    setCodeError(false);
+    setCodesLoading(true);
+    void authenticatedBffFetch('/api/catalog/admin/category-governance', {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('No se pudieron consultar los códigos ERP.');
+        const snapshot = categoryGovernanceSchema.parse(await response.json());
+        if (!controller.signal.aborted)
+          setErpCodes(
+            Object.fromEntries(snapshot.erpCodes.map((entry) => [entry.categoryId, entry.code])),
+          );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCodeError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCodesLoading(false);
+      });
+    return () => controller.abort();
+  }, [canConfigureHome, codesRevision]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(rows.filter((row) => !row.leaf && row.depth > 0).map((row) => row.category.id)),
@@ -230,6 +265,26 @@ export function CategoryTreePanel({
           </div>
           <div className="space-y-5 p-4">
             <dl className="grid grid-cols-2 gap-3 text-sm">
+              {canConfigureHome ? (
+                <div>
+                  <dt className="text-xs text-muted-foreground">Código ERP</dt>
+                  <dd>
+                    {codesLoading
+                      ? 'Cargando…'
+                      : (erpCodes[selected.category.id] ??
+                        (codeError ? 'No disponible' : 'Sin código registrado'))}
+                    {codeError ? (
+                      <button
+                        type="button"
+                        className="ml-2 text-xs text-primary underline"
+                        onClick={() => setCodesRevision((value) => value + 1)}
+                      >
+                        Reintentar
+                      </button>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
               <div>
                 <dt className="text-xs text-muted-foreground">SKU</dt>
                 <dd>{selected.category.skuCount ?? 'Sin conteo disponible'}</dd>
@@ -247,6 +302,21 @@ export function CategoryTreePanel({
                 </dd>
               </div>
             </dl>
+            {canConfigureHome && selected.depth === 0 ? (
+              <section>
+                <h3 className="mb-2 font-semibold">Imagen y texto para el Home</h3>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Configura la imagen y el texto de esta categoría de nivel 1 en el Inicio.
+                </p>
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    href={`/?configure=categories&categoryId=${encodeURIComponent(selected.category.id)}#home-category-${encodeURIComponent(selected.category.id)}`}
+                  >
+                    Configurar esta categoría en el Home
+                  </Link>
+                </Button>
+              </section>
+            ) : null}
             <section>
               <h3 className="mb-2 font-semibold">
                 {selected.leaf ? 'Plantillas de la categoría' : 'Subcategorías'}

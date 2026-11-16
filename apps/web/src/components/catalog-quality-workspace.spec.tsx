@@ -8,11 +8,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchCatalogWorkbook, fetchProductAttributeSheet } from '@/lib/dynamic-catalog-api';
+import { listQualityReviews } from '@/lib/quality-governance-api';
 import { listProductAssets } from '@/lib/product-assets-api';
 
 import { CatalogQualityWorkspace } from './catalog-quality-workspace';
 
 vi.mock('@/lib/quality-governance-api', () => ({
+  listQualityReviews: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   getQualityCompleteness: vi.fn().mockResolvedValue([
     {
       kind: 'template',
@@ -178,7 +180,15 @@ describe('CatalogQualityWorkspace', () => {
     expect(within(table).getByText('No')).toBeInTheDocument();
     expect(screen.getByText('1 faltantes')).toBeInTheDocument();
     expect(screen.getByText('No publicable')).toBeInTheDocument();
-    expect(screen.getByText('Sin evaluar', { selector: 'strong' })).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'No hay conflictos registrados pendientes de revisión. Este resultado no constituye una aprobación de publicación.',
+      ),
+    ).toBeVisible();
+    expect(listQualityReviews).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: first.id, conflictsOnly: true, status: 'pending' }),
+      expect.any(AbortSignal),
+    );
     expect(screen.getByRole('link', { name: 'Completar' })).toHaveAttribute(
       'href',
       `/products/${first.id}?edit=enrichment`,

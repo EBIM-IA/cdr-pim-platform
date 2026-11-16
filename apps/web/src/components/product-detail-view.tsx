@@ -1,4 +1,5 @@
 'use client';
+import { AttributeValueTrace } from './attribute-value-trace';
 
 import type {
   AuditChangeDto,
@@ -35,6 +36,10 @@ import { SalesProductDetail } from '@/components/sales-product-detail';
 import { StickyProductNavigation } from '@/components/sticky-product-navigation';
 import { EcommerceDescriptionCard } from '@/components/ecommerce-description-card';
 import { ProductRelationsDrawer } from '@/components/product-relations-drawer';
+import { ApplicationsWorkspace } from '@/components/applications-workspace';
+import { EquivalencesWorkspace, type EquivalencesView } from '@/components/equivalences-workspace';
+import { DocumentsWorkspace } from '@/components/documents-workspace';
+import { ProductTechnicalSheetVisibility } from '@/components/product-technical-sheet-visibility';
 import { ProductGallery } from '@/components/product-gallery';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -61,7 +66,11 @@ import {
   listOemCodes,
 } from '@/lib/operational-api';
 import { fetchProductDraft, saveProductDraft } from '@/lib/product-draft-api';
-import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
+import {
+  groupAttributesByTemplateSections,
+  technicalAttributesFromSheet,
+  unifiedCodeFromSheet,
+} from '@/lib/product-detail-data';
 import {
   listProductAssets,
   productAssetDownloadUrl,
@@ -163,11 +172,17 @@ function parsedAttributeValue(
 }
 
 function EnrichmentDrawer({
+  product,
+  canWriteAssets,
+  onUploaded,
   sheet,
   open,
   onClose,
   onSaved,
 }: {
+  product: Product;
+  canWriteAssets: boolean;
+  onUploaded: (asset: ProductAssetDto) => void;
   sheet: ProductAttributeSheetDto;
   open: boolean;
   onClose: () => void;
@@ -551,9 +566,14 @@ function EnrichmentDrawer({
               <option value="draft">Guardar como borrador</option>
             </Select>
           </div>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Los archivos se administran en la sección Documentos de la ficha.
-          </p>
+          {canWriteAssets ? (
+            <details className="mb-4 rounded-lg border">
+              <summary className="cursor-pointer p-3 text-sm font-semibold">
+                Cargar archivos e imágenes del SKU
+              </summary>
+              <DocumentsPanel product={product} canWrite={canWriteAssets} onUploaded={onUploaded} />
+            </details>
+          ) : null}
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
               Cancelar
@@ -922,28 +942,32 @@ function TechnicalPanel({
       /^\([^)]+\)/u.test(attribute.label) || columns.get(attribute.key)?.dataType === 'measurement',
   );
   const characteristics = technical.filter((attribute) => !measurements.includes(attribute));
-  const groups = [
-    {
-      title: 'Medidas y datos de rendimiento',
-      note: 'Valores según la plantilla del producto',
-      attributes: measurements,
-    },
-    {
-      title: 'Características',
-      note: 'Atributos técnicos de enriquecimiento',
-      attributes: characteristics,
-    },
-    {
-      title: 'Información comercial y logística',
-      note: 'Atributos de la plantilla',
-      attributes: logistics,
-    },
-    {
-      title: 'Datos base ERP',
-      note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
-      attributes: showCompleteness ? erp : [],
-    },
-  ].filter((group) => group.attributes.length > 0);
+  const groups = sheet?.schema.sections?.length
+    ? groupAttributesByTemplateSections<(typeof attributes)[number]>(sheet, attributes)
+    : [
+        {
+          title: 'Medidas y datos de rendimiento',
+          note: 'Valores según la plantilla del producto',
+          attributes: measurements,
+        },
+        {
+          title: 'Características',
+          note: 'Atributos técnicos de enriquecimiento',
+          attributes: characteristics,
+        },
+        {
+          title: 'Información comercial y logística',
+          note: 'Atributos de la plantilla',
+          attributes: logistics,
+        },
+        {
+          title: 'Datos base ERP',
+          note: 'Nacen en ERP (Sismetic / AX) · solo lectura en PIM',
+          attributes: showCompleteness ? erp : [],
+        },
+      ]
+        .filter((group) => group.attributes.length > 0)
+        .map((group, index) => ({ ...group, title: `${index + 1}. ${group.title}` }));
   const convertibleAttributes = attributes.filter(
     (attribute) =>
       hasValue(attribute.rawValue) &&
@@ -1252,6 +1276,13 @@ function TechnicalPanel({
                               </span>
                             ) : null}
                             {attribute.unit ? <span>Unidad {attribute.unit}</span> : null}
+                            {showInternalDetails ? (
+                              <AttributeValueTrace
+                                productId={product.id}
+                                attributeKey={attribute.key}
+                                label={attribute.label}
+                              />
+                            ) : null}
                           </div>
                         </th>
                         <td className="break-words px-2 py-2 align-top">
@@ -1333,7 +1364,7 @@ function TechnicalPanel({
                 </tbody>
               </table>
             );
-            return group.title === 'Datos base ERP' ? (
+            return group.title.endsWith('Datos base ERP') ? (
               <details
                 key={group.title}
                 className={cn(styles.erpFold, 'overflow-hidden rounded-lg border bg-white')}
@@ -2271,6 +2302,7 @@ export function ProductDetailView({
   canReassignTemplate = false,
   canWriteApplications = false,
   canWriteEquivalences = false,
+  canViewQuality = false,
   showCompleteness = false,
   consumerMode = false,
   showProductStatus = true,
@@ -2280,6 +2312,7 @@ export function ProductDetailView({
   canReassignTemplate?: boolean;
   canWriteApplications?: boolean;
   canWriteEquivalences?: boolean;
+  canViewQuality?: boolean;
   showCompleteness?: boolean;
   consumerMode?: boolean;
   showProductStatus?: boolean;
@@ -2315,6 +2348,7 @@ export function ProductDetailView({
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [activeTab, setActiveTab] = useState<DetailTab>('technical');
+  const [equivalencesView, setEquivalencesView] = useState<EquivalencesView>('groups');
   const [unitSystem, setUnitSystem] = useState<MeasurementSystem>('metric');
   const [editOpen, setEditOpen] = useState(false);
   const [relationsEditor, setRelationsEditor] = useState<
@@ -2648,6 +2682,10 @@ export function ProductDetailView({
   const panel = useMemo(() => {
     if (!product) return null;
     if (activeTab === 'applications') {
+      if (canWriteApplications && unifiedCode)
+        return (
+          <ApplicationsWorkspace canWrite embeddedUnifiedCode={unifiedCode} onChanged={reload} />
+        );
       return (
         <div className="space-y-3">
           {canWriteApplications && unifiedCode ? (
@@ -2671,6 +2709,18 @@ export function ProductDetailView({
       );
     }
     if (activeTab === 'equivalences') {
+      if (canWriteEquivalences && unifiedCode)
+        return (
+          <EquivalencesWorkspace
+            canWrite
+            canManageRequests={canReassignTemplate}
+            canViewCompleteness={showCompleteness}
+            embeddedUnifiedCode={unifiedCode}
+            embeddedView={equivalencesView}
+            onEmbeddedViewChange={setEquivalencesView}
+            onChanged={reload}
+          />
+        );
       return (
         <div className="space-y-3">
           {canWriteEquivalences && unifiedCode ? (
@@ -2707,6 +2757,15 @@ export function ProductDetailView({
       );
     }
     if (activeTab === 'documents') {
+      if (canWriteAssets)
+        return (
+          <DocumentsWorkspace
+            canWrite
+            embeddedProductId={product.id}
+            embeddedSku={product.sku}
+            onChanged={reload}
+          />
+        );
       return (
         <DocumentsPanel
           product={product}
@@ -2740,9 +2799,11 @@ export function ProductDetailView({
     auditTotal,
     canWriteAssets,
     handleAssetUploaded,
+    reload,
     canReassignTemplate,
     canWriteApplications,
     canWriteEquivalences,
+    equivalencesView,
     showCompleteness,
     changeUnitSystem,
     homologs,
@@ -2907,6 +2968,9 @@ export function ProductDetailView({
         <>
           {attributeSheet ? (
             <EnrichmentDrawer
+              product={product}
+              canWriteAssets={canWriteAssets}
+              onUploaded={(asset) => setAssets((current) => [...current, asset])}
               sheet={attributeSheet}
               open={editOpen}
               onClose={() => setEditOpen(false)}
@@ -2974,6 +3038,7 @@ export function ProductDetailView({
             canManage={canWriteAssets}
             onAssetsChange={setAssets}
           />
+          {showCompleteness ? <ProductTechnicalSheetVisibility productId={product.id} /> : null}
           <div className="mt-2">
             <span className="block text-[10px] text-muted-foreground">Marca</span>
             <strong className="text-base">{product.brand}</strong>
@@ -3003,11 +3068,9 @@ export function ProductDetailView({
               dataSource="Catálogo ERP, plantilla activa, aplicaciones, homólogos, documentos e historial del producto."
             />
           </div>
-          {!showCompleteness ? (
-            <p className="mt-1 break-words text-lg font-bold leading-tight text-cdr-ink">
-              {heroName}
-            </p>
-          ) : null}
+          <p className="mt-1 break-words text-lg font-bold leading-tight text-cdr-ink">
+            {heroName}
+          </p>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
             {heroDescription ?? 'Descripción técnica pendiente de completar'}
           </p>
@@ -3163,6 +3226,15 @@ export function ProductDetailView({
                   <FileText aria-hidden="true" className="size-3.5" />
                   Ficha técnica (PDF)
                 </Button>
+                {canViewQuality ? (
+                  <Link
+                    className="inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-semibold hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
+                    href={`/quality?view=quality&productId=${encodeURIComponent(product.id)}`}
+                  >
+                    <PackageCheck aria-hidden="true" className="size-3.5" />
+                    Revisar calidad
+                  </Link>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -3189,6 +3261,8 @@ export function ProductDetailView({
 
       <StickyProductNavigation
         anchorId="product-identity-anchor"
+        sku={product.sku}
+        unifiedCode={unifiedCode}
         title={product.sku}
         subtitle={[
           product.brand,

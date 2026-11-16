@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type {
   ApplicationListQuery,
   CreateGroupApplicationInput,
@@ -17,6 +17,11 @@ import {
 import { CLOCK } from '../../../shared/tokens';
 import { AuditAction } from '../../audit/domain/entities/audit-entry';
 import type { AuthenticatedActor } from '../../identity/domain/entities/role';
+import {
+  APPLICATION_COLUMN_SETTINGS,
+  type ApplicationColumnSettingsPort,
+} from '../domain/ports/application-column-settings.port';
+import { validateApplicationAdditionalFields } from '../domain/entities/application-columns';
 import { GroupApplication } from '../domain/entities/group-application';
 import {
   GROUP_APPLICATION_REPOSITORY,
@@ -45,12 +50,17 @@ export class CreateGroupApplicationUseCase {
     @Inject(GROUP_APPLICATION_REPOSITORY)
     private readonly repository: GroupApplicationRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional()
+    @Inject(APPLICATION_COLUMN_SETTINGS)
+    private readonly columnSettings?: ApplicationColumnSettingsPort,
   ) {}
 
   async execute(
     input: CreateGroupApplicationInput,
     actor: AuthenticatedActor,
   ): Promise<GroupApplication> {
+    const configured = await this.columnSettings?.get();
+    validateApplicationAdditionalFields(input.additionalFields ?? {}, configured?.columns ?? []);
     const group = await this.repository.findGroupByCode(input.unifiedCode);
     if (!group) throw new NotFoundError('EquivalenceGroup', input.unifiedCode);
     if (group.vehicleType && group.vehicleType !== input.vehicleType) {
@@ -65,6 +75,7 @@ export class CreateGroupApplicationUseCase {
         groupId: group.id,
         unifiedCode: group.code,
         vehicleType: group.vehicleType ?? input.vehicleType,
+        additionalFields: input.additionalFields,
         make: input.make,
         model: input.model,
         bodyStyle: input.bodyStyle,
@@ -97,6 +108,9 @@ export class UpdateGroupApplicationUseCase {
     @Inject(GROUP_APPLICATION_REPOSITORY)
     private readonly repository: GroupApplicationRepositoryPort,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional()
+    @Inject(APPLICATION_COLUMN_SETTINGS)
+    private readonly columnSettings?: ApplicationColumnSettingsPort,
   ) {}
 
   async execute(
@@ -108,6 +122,10 @@ export class UpdateGroupApplicationUseCase {
     const application = await this.repository.findById(applicationId);
     if (!application) throw new NotFoundError('GroupApplication', id);
     const { expectedUpdatedAt, ...fields } = input;
+    if (fields.additionalFields) {
+      const configured = await this.columnSettings?.get();
+      validateApplicationAdditionalFields(fields.additionalFields, configured?.columns ?? [], true);
+    }
     if (
       fields.vehicleType !== undefined &&
       fields.vehicleType !== application.toSnapshot().vehicleType
@@ -118,6 +136,7 @@ export class UpdateGroupApplicationUseCase {
     application.update(
       {
         vehicleType: fields.vehicleType,
+        additionalFields: fields.additionalFields,
         make: fields.make,
         model: fields.model,
         bodyStyle: fields.bodyStyle,

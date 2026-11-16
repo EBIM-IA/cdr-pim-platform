@@ -44,9 +44,11 @@ Categorías, Plantillas, Aplicaciones, Equivalencias, Documentos, Catálogos de 
 Importaciones, IA y Calidad, Publicación, Integraciones, Reportes y Administración. Cada workspace
 consulta una proyección autenticada; cuando una operación de escritura aún carece de reglas o
 persistencia, el backend la declara bloqueada y explica la dependencia. El workspace de Catálogos
-de productos (#37) es visible para quien tenga su capacidad, pero permanece bloqueado: no ofrece
-carga ni compartición hasta definir permisos, almacenamiento privado, validación y antimalware,
-retención y enlaces con vencimiento. El navegador consume la API mediante route handlers de Next y
+de productos (#37) permite consultar y compartir PDF vigentes según las capacidades del perfil;
+Administración y Compras pueden cargar, editar, dar de baja y restaurar catálogos. Los archivos
+se almacenan de forma privada, se valida el PDF y los enlaces verifican vigencia, vencimiento y
+revocación. El antimalware y la reconciliación de objetos siguen pendientes para producción.
+El navegador consume la API mediante route handlers de Next y
 `API_BASE_URL` se resuelve en runtime, por lo que la misma imagen puede promoverse entre ambientes.
 
 |                   |                                      |
@@ -106,6 +108,12 @@ Los cambios de la reunión del 5 de noviembre y la entrega de diseño del 7 de n
 
 La navegación superior, el nuevo Inicio y la ficha de Compras y Ventas de la entrega del 12 de noviembre están documentados en
 [`CLIENT_MEETING_2026-11-12.md`](docs/product/CLIENT_MEETING_2026-11-12.md), con sus migraciones y pendientes de coordinación.
+
+La entrega del 15 de noviembre y las diferencias del informe v3 se siguen en
+[`DESIGN_ALIGNMENT_2026-11-16.md`](docs/product/DESIGN_ALIGNMENT_2026-11-16.md): agrupación por código unificador,
+secciones de ficha/PDF, visibilidad por SKU, columnas adicionales de aplicaciones, gobierno de categorías y módulos,
+reportes y seguimiento de importaciones. Las importaciones asíncronas usan SQS y el worker con acceso a PostgreSQL;
+el modo local en memoria conserva la confirmación síncrona. Las dependencias pendientes de CDR siguen explícitas.
 
 ## Comandos
 

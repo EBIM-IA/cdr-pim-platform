@@ -174,6 +174,19 @@ describe('designer equivalence screens', () => {
     await loaded();
   });
   it('renders identifiers as their own SKU screen and keeps base ERP read-only', async () => {
+    mocks.listHomologs.mockResolvedValue([
+      {
+        ...homolog,
+        name: 'Rodamiento de referencia',
+        referenceSource: 'Catálogo del fabricante',
+        source: 'import',
+      },
+      {
+        ...homolog,
+        id: '99999999-9999-4999-8999-999999999999',
+        externalCode: 'EXT-LEGACY',
+      },
+    ]);
     window.history.replaceState({}, '', '/equivalences?view=identifiers&sku=SKU-6205-A');
     render(<EquivalencesWorkspace canWrite />);
     expect(
@@ -183,8 +196,46 @@ describe('designer equivalence screens', () => {
     expect(screen.getAllByText('Solo lectura · ERP')).toHaveLength(3);
     expect(screen.getByRole('heading', { name: 'Relacionados en tienda' })).toBeVisible();
     expect(screen.getByText('EXT-6205')).toBeVisible();
+    const reference = within(screen.getByText('EXT-6205').closest('tr')!);
+    expect(reference.getByText('Rodamiento de referencia')).toBeVisible();
+    expect(reference.getByText('Catálogo del fabricante')).toBeVisible();
+    expect(reference.queryByText('Importación')).not.toBeInTheDocument();
+    const legacy = within(screen.getByText('EXT-LEGACY').closest('tr')!).getAllByRole('cell');
+    expect(legacy[2]).toHaveTextContent('—');
+    expect(legacy[3]).toHaveTextContent('—');
     expect(window.location.search).toContain('view=identifiers');
   });
+  it('edits declared reference metadata without overwriting import provenance', async () => {
+    mocks.listHomologs.mockResolvedValue([
+      { ...homolog, referenceSource: 'Fabricante', name: 'Referencia externa', note: 'Documento' },
+    ]);
+    mocks.updateHomolog.mockResolvedValue({
+      ...homolog,
+      referenceSource: 'TecDoc',
+      name: 'Referencia externa',
+      note: 'Documento',
+      updatedAt: '2026-11-16T12:00:00Z',
+    });
+    render(<EquivalencesWorkspace canWrite embeddedUnifiedCode="UNI-6205" />);
+    await loaded();
+    fireEvent.click(screen.getByRole('tab', { name: 'Homólogos 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Fuente de EXT-6205' }));
+    const field = screen.getByRole('textbox', { name: 'Editar Fuente' });
+    fireEvent.change(field, { target: { value: 'TecDoc' } });
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(mocks.updateHomolog).toHaveBeenCalledWith(homolog.id, {
+        expectedUpdatedAt: homolog.updatedAt,
+        referenceSource: 'TecDoc',
+      }),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Editar Fuente de EXT-6205' }),
+    ).toHaveTextContent('TecDoc');
+    expect(window.location.pathname).toBe('/equivalences');
+    expect(screen.queryByText('UNI-6305')).not.toBeInTheDocument();
+  });
+
   it('creates and edits a homolog against the real optimistic API and confirms logical deletion', async () => {
     render(<EquivalencesWorkspace canWrite />);
     await loaded();
@@ -205,6 +256,10 @@ describe('designer equivalence screens', () => {
         externalBrand: 'NSK',
         approvalStatus: 'pending',
         active: true,
+        name: null,
+        referenceType: null,
+        referenceSource: null,
+        note: null,
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Editar Código de EXT-6205' }));

@@ -51,6 +51,15 @@ export const ecommerceDescriptionSchema = ecommerceTextSchema.extend({
   status: z.enum(['pending', 'approved']),
   origin: z.enum(['ai', 'edited']),
   model: z.string().nullable(),
+  generationPrompt: z
+    .object({
+      instruction: z.string(),
+      input: z.string(),
+      maxOutputTokens: z.number().int(),
+      temperature: z.number(),
+    })
+    .nullable()
+    .optional(),
   version: z.number().int().positive(),
   stale: z.boolean(),
   updatedAt: z.string().datetime(),

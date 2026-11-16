@@ -44,6 +44,73 @@ describe('DrizzleDynamicCatalogRepository', () => {
   });
   afterAll(() => database.close());
 
+  it('paginates complete unified-code groups, counts matched SKUs and keeps exact SKU searches scoped', async () => {
+    const options = { roles: ['VENTAS'], page: 1, pageSize: 100, filters: [] };
+    const all = await repository.listWorkbook(options);
+    const expectedGroups = new Map<string, typeof all.items>();
+    for (const item of all.items) {
+      const key = item.unifiedCode?.trim() || `sku:${item.id}`;
+      expectedGroups.set(key, [...(expectedGroups.get(key) ?? []), item]);
+    }
+    const grouped = await repository.listWorkbook({
+      ...options,
+      groupByUnifiedCode: true,
+      pageSize: 1,
+    });
+    expect(grouped.total).toBe(expectedGroups.size);
+    expect(grouped.totalArticles).toBe(all.total);
+    expect(grouped.items).toHaveLength(1);
+    const group = grouped.items[0]!;
+    const expected = expectedGroups.get(group.unifiedCode?.trim() || `sku:${group.id}`)!;
+    expect(group.groupMembers?.map((member) => member.sku)).toEqual(
+      expected.map((member) => member.sku),
+    );
+    const second = await repository.listWorkbook({
+      ...options,
+      groupByUnifiedCode: true,
+      pageSize: 1,
+      page: 2,
+    });
+    expect(second.items[0]?.id).not.toBe(group.id);
+    const source = all.items.find((item) => item.unifiedCode)!;
+    const exact = await repository.listWorkbook({
+      ...options,
+      groupByUnifiedCode: true,
+      q: source.sku,
+    });
+    expect(
+      exact.items.some((item) => item.groupMembers?.some((member) => member.id === source.id)),
+    ).toBe(true);
+    expect(exact.totalArticles).toBeLessThanOrEqual(all.total);
+    expect(
+      catalogWorkbookResultSchema.parse(toWorkbookResultDto(grouped, 1, 1)).totalArticles,
+    ).toBe(all.total);
+  });
+
+  it('never groups by an identifier hidden for the current template even if other templates expose that attribute', async () => {
+    const options = { roles: ['VENTAS'], page: 1, pageSize: 100, filters: [] };
+    const initial = await repository.listWorkbook(options);
+    const source = initial.items.find((item) => item.unifiedCode && item.template)!;
+    const definition = initial.columns.find((column) => column.key === 'codigo_unificador')!;
+    await database.db
+      .update(templateAttributeRoleAccess)
+      .set({ canView: false, canExport: false })
+      .where(
+        and(
+          eq(templateAttributeRoleAccess.templateId, source.template!.id),
+          eq(templateAttributeRoleAccess.attributeDefinitionId, definition.id),
+          eq(templateAttributeRoleAccess.role, 'VENTAS'),
+        ),
+      );
+    const result = await repository.listWorkbook({
+      ...options,
+      q: source.sku,
+      groupByUnifiedCode: true,
+    });
+    expect(result.items.find((item) => item.id === source.id)?.unifiedCode).toBeNull();
+    expect(result.items.find((item) => item.id === source.id)?.groupMembers).toHaveLength(1);
+  });
+
   it('does not elevate denied administrator attributes using obsolete purchasing grants in a mixed profile', async () => {
     const category = (await repository.listActiveCategories(['ADMINISTRADOR'])).find(
       (item) => item.slug === BRAKE_PAD_CATEGORY_SLUG,
@@ -195,6 +262,21 @@ describe('DrizzleDynamicCatalogRepository', () => {
         items: [{ sku: 'D1672' }],
       });
     }
+  });
+
+  it('projects SKU counts only for authorized active templates, including an empty active template', async () => {
+    const available = await repository.listActiveCategories(['COMPRAS']);
+    const populated = available.find((category) => (category.skuCount ?? 0) > 0)!;
+    expect(populated).toBeDefined();
+    await database.db
+      .delete(productTemplateAssignments)
+      .where(eq(productTemplateAssignments.templateId, populated.templateId));
+    const current = await repository.listActiveCategories(['COMPRAS']);
+    expect(current.find((category) => category.templateId === populated.templateId)?.skuCount).toBe(
+      0,
+    );
+    expect(current.some((category) => (category.skuCount ?? 0) > 0)).toBe(true);
+    expect(await repository.listActiveCategories(['UNKNOWN'])).toEqual([]);
   });
 
   it('discovers active categories and filters every schema by role access', async () => {

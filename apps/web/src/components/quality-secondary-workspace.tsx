@@ -40,6 +40,7 @@ import {
   useState,
 } from 'react';
 
+import { SourceTraceLookup } from '@/components/source-trace-lookup';
 import { CommercialReviewHistory } from '@/components/commercial-review-history';
 import { QualityGovernanceWorkspace } from '@/components/quality-governance-workspace';
 import { decideQualityReview, updateQualitySourcePriority } from '@/lib/quality-governance-api';
@@ -53,6 +54,7 @@ import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { fetchProduct, fetchProducts } from '@/lib/catalog-api';
 import { fetchProductAttributeSheet } from '@/lib/dynamic-catalog-api';
 import { listProductAssets, productAssetDownloadUrl } from '@/lib/product-assets-api';
+import { productWithSheetEvidence } from '@/lib/product-evidence-view';
 import type { Product } from '@/lib/types';
 
 export type QualitySecondaryView =
@@ -154,8 +156,13 @@ function ProductSelector({
   const [query, setQuery] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
+  const [requestedLoading, setRequestedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
 
   const loadProducts = useCallback((searchQuery: string) => {
     requestRef.current?.abort();
@@ -190,9 +197,10 @@ function ProductSelector({
     const requestedId = new URLSearchParams(window.location.search).get('productId');
     if (disabled || !requestedId) return;
     const controller = new AbortController();
+    setRequestedLoading(true);
     void fetchProduct(requestedId, controller.signal)
       .then((product) => {
-        if (!controller.signal.aborted) onSelect(product);
+        if (!controller.signal.aborted) onSelectRef.current(product);
       })
       .catch((requestError: unknown) => {
         if (!controller.signal.aborted)
@@ -201,9 +209,12 @@ function ProductSelector({
               ? requestError.message
               : 'No fue posible cargar el SKU solicitado.',
           );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRequestedLoading(false);
       });
     return () => controller.abort();
-  }, [disabled, onSelect]);
+  }, [disabled]);
 
   const options = selected
     ? [selected, ...products.filter((product) => product.id !== selected.id)]
@@ -255,9 +266,11 @@ function ProductSelector({
           onChange={(event) =>
             onSelect(options.find((product) => product.id === event.target.value) ?? null)
           }
-          disabled={disabled || loading || options.length === 0}
+          disabled={disabled || loading || requestedLoading || options.length === 0}
         >
-          <option value="">Selecciona un producto</option>
+          <option value="">
+            {requestedLoading ? 'Cargando SKU solicitado…' : 'Selecciona un producto'}
+          </option>
           {options.map((product) => (
             <option key={product.id} value={product.id}>
               {product.sku} · {product.name}
@@ -266,9 +279,11 @@ function ProductSelector({
         </select>
         <span className="mt-1 block min-h-4 text-xs" aria-live="polite">
           {error ??
-            (loading
-              ? 'Consultando catálogo…'
-              : `${products.length} productos disponibles en esta búsqueda.`)}
+            (requestedLoading
+              ? 'Cargando SKU solicitado…'
+              : loading
+                ? 'Consultando catálogo…'
+                : `${products.length} productos disponibles en esta búsqueda.`)}
         </span>
       </label>
     </Card>
@@ -283,6 +298,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
+  const [contextRevision, setContextRevision] = useState(0);
   const [result, setResult] = useState<AiExtractionCandidatesResponse | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Record<string, boolean>>({});
   const [rejectedCandidates, setRejectedCandidates] = useState<Record<string, boolean>>({});
@@ -325,7 +341,12 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
         );
         setAssets(extractableAssets);
         setSheet(productSheet);
-        setSelectedAssetId(extractableAssets[0]?.id ?? '');
+        const requestedAssetId = new URLSearchParams(window.location.search).get('assetId');
+        setSelectedAssetId(
+          extractableAssets.find((asset) => asset.id === requestedAssetId)?.id ??
+            extractableAssets[0]?.id ??
+            '',
+        );
       })
       .catch((requestError: unknown) => {
         if (isAbortError(requestError)) return;
@@ -339,7 +360,7 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
         if (!controller.signal.aborted) setContextLoading(false);
       });
     return () => controller.abort();
-  }, [product]);
+  }, [product, contextRevision]);
 
   useEffect(
     () => () => {
@@ -482,6 +503,14 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
               role="alert"
             >
               {contextError}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 block"
+                onClick={() => setContextRevision((value) => value + 1)}
+              >
+                Reintentar documentos y plantilla
+              </Button>
             </div>
           ) : product ? (
             <>
@@ -789,9 +818,92 @@ function ExtractionWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   );
 }
 
+function CommercialFactComparison({ product, text }: { product: Product; text: string }) {
+  const normalize = (value: string) => value.toLocaleLowerCase('es').replace(/\s+/g, ' ').trim();
+  const normalized = normalize(text);
+  const context = [
+    product.sku,
+    product.name,
+    product.brand,
+    product.description ?? '',
+    ...product.attributes.map((attribute) => attribute.value),
+  ].join(' ');
+  const numbers = (value: string) =>
+    value.match(/\d+(?:[.,]\d+)?/g)?.map((number) => number.replace(',', '.')) ?? [];
+  const knownNumbers = new Set(numbers(context));
+  const unverified = [...new Set(numbers(text))].filter((number) => !knownNumbers.has(number));
+  return (
+    <section className="mt-3 space-y-2 text-xs" aria-label="Contraste de datos técnicos">
+      {product.attributes.length ? (
+        <ul className="divide-y">
+          {product.attributes.map((attribute) => (
+            <li key={attribute.key} className="flex flex-wrap justify-between gap-2 py-2">
+              <span>
+                {attribute.label}: {attribute.value}
+              </span>
+              <span className="font-semibold">
+                {normalized.includes(normalize(attribute.value))
+                  ? 'Valor presente en el texto'
+                  : 'Valor omitido en el texto'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No hay atributos visibles con los que contrastar el texto.</p>
+      )}
+      {unverified.length > 0 && (
+        <p
+          role="alert"
+          className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950"
+        >
+          Valores numéricos sin correspondencia en el contexto consultado: {unverified.join(', ')}.
+          Verifica su evidencia antes de aprobar.
+        </p>
+      )}
+      <p className="text-muted-foreground">
+        Este contraste textual ayuda a revisar valores; la presencia de un valor no confirma una
+        afirmación comercial. La aprobación requiere revisión humana.
+      </p>
+    </section>
+  );
+}
+
 function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
   const canExecute = supportedAction(workspace, 'generate-commercial-proposal');
   const [product, setProduct] = useState<Product | null>(null);
+  const [technicalSheet, setTechnicalSheet] = useState<ProductAttributeSheetDto | null>(null);
+  const [technicalError, setTechnicalError] = useState('');
+  const [technicalRevision, setTechnicalRevision] = useState(0);
+  useEffect(() => {
+    setTechnicalSheet(null);
+    setTechnicalError('');
+    if (!product) return;
+    const controller = new AbortController();
+    void fetchProductAttributeSheet(product.id, controller.signal)
+      .then((sheet) => {
+        if (!controller.signal.aborted) setTechnicalSheet(sheet);
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted)
+          setTechnicalError(
+            cause instanceof Error ? cause.message : 'No fue posible cargar los datos técnicos.',
+          );
+      });
+    return () => controller.abort();
+  }, [product, technicalRevision]);
+  const evidenceProduct =
+    product && technicalSheet ? productWithSheetEvidence(product, technicalSheet) : product;
+  const enrichmentKeys = new Set(
+    technicalSheet?.schema.columns
+      .filter((column) => column.sourceAuthority === 'pim')
+      .map((column) => column.key),
+  );
+  const highlightedAttributes = [...(evidenceProduct?.attributes ?? [])]
+    .sort(
+      (left, right) => Number(enrichmentKeys.has(right.key)) - Number(enrichmentKeys.has(left.key)),
+    )
+    .slice(0, 6);
   const [channel, setChannel] = useState<'b2c' | 'b2b'>('b2c');
   const [result, setResult] = useState<AiCommercialProposalResponse | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -804,7 +916,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
 
   useEffect(() => () => requestRef.current?.abort(), []);
 
-  const selectProduct = (nextProduct: Product | null) => {
+  const selectProduct = useCallback((nextProduct: Product | null) => {
     requestRef.current?.abort();
     setProduct(nextProduct);
     setResult(null);
@@ -813,7 +925,7 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
     setDraft(null);
     setEditingDraft(null);
     setComparisonOpen(false);
-  };
+  }, []);
 
   const generate = async () => {
     if (!product) return;
@@ -909,13 +1021,31 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                 </Link>
               </Button>
             ) : null}
-            {product?.attributes.length ? (
+            {technicalError && (
+              <div role="alert" className="mt-3 text-xs text-red-700">
+                {technicalError}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 block"
+                  onClick={() => setTechnicalRevision((value) => value + 1)}
+                >
+                  Reintentar ficha técnica
+                </Button>
+              </div>
+            )}
+            {evidenceProduct?.attributes.length ? (
               <div className="mt-4 border-t pt-4">
                 <h5 className="text-sm font-semibold">Datos técnicos disponibles</h5>
                 <dl className="mt-2 divide-y">
-                  {product.attributes.slice(0, 6).map((attribute) => (
+                  {highlightedAttributes.map((attribute) => (
                     <div key={attribute.key} className="flex justify-between gap-3 py-2 text-xs">
-                      <dt className="text-muted-foreground">{attribute.label}</dt>
+                      <dt className="text-muted-foreground">
+                        {attribute.label}
+                        {technicalSheet && !enrichmentKeys.has(attribute.key) ? (
+                          <small className="ml-1">· Referencia ERP</small>
+                        ) : null}
+                      </dt>
                       <dd>{attribute.value}</dd>
                     </div>
                   ))}
@@ -947,6 +1077,12 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                     Valida medidas, materiales, aplicaciones y afirmaciones comerciales contra la
                     ficha técnica. Este borrador no está aprobado para publicación.
                   </p>
+                  {product && (
+                    <CommercialFactComparison
+                      product={evidenceProduct ?? product}
+                      text={draft ?? result.proposal}
+                    />
+                  )}
                 </div>
                 <dl className="mt-5 grid gap-2 border-t pt-4 text-xs text-muted-foreground sm:grid-cols-3">
                   <div>
@@ -1091,6 +1227,12 @@ function CommercialWorkspace({ workspace }: { workspace: WorkspaceDto }) {
                 <p className="mt-2 whitespace-pre-wrap">{draft}</p>
               </section>
             ) : null}
+            {product && (
+              <CommercialFactComparison
+                product={evidenceProduct ?? product}
+                text={draft ?? result.proposal}
+              />
+            )}
             <p className="text-xs text-muted-foreground">
               La propuesta original está guardada en el historial. Su aprobación y las ediciones
               confirmadas se registran con motivo.
@@ -1191,6 +1333,7 @@ function SourcesWorkspace({
 }) {
   const [categories, setCategories] = useState<AdminCatalogCategoryDto[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   useEffect(() => {
@@ -1210,7 +1353,7 @@ function SourcesWorkspace({
     return () => {
       current = false;
     };
-  }, [conflict]);
+  }, [conflict, sourceRevision]);
 
   const configuredCategories = useMemo(
     () =>
@@ -1263,6 +1406,16 @@ function SourcesWorkspace({
           {loadState === 'error'
             ? 'No fue posible consultar la matriz persistida de prioridades.'
             : 'Consultando prioridades persistidas por categoría…'}
+          {loadState === 'error' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 block"
+              onClick={() => setSourceRevision((value) => value + 1)}
+            >
+              Reintentar prioridades
+            </Button>
+          )}
         </div>
       ) : null}
       <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
@@ -1294,6 +1447,7 @@ function SourcesWorkspace({
             : `${configuredCategories.length} configuradas · ${pendingCount} pendientes`}
         </StatusBadge>
       </Card>
+      {!conflict && <SourceTraceLookup />}
       {editingPriority && selectedCategory && (
         <WorkspaceDrawer
           title={`Prioridad de fuentes · ${selectedCategory.name}`}

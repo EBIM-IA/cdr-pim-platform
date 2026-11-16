@@ -2,6 +2,7 @@ import type { GroupApplicationDto } from '@cdr/contracts';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getApplicationColumns, updateApplicationColumns } from '@/lib/application-columns-api';
 import { listApplications, updateApplication } from '@/lib/operational-api';
 import { downloadXlsx } from '@/lib/tabular-export';
 import { findApplicationUnifiedCodes } from '@/lib/application-search';
@@ -9,6 +10,10 @@ import type * as ApplicationSearch from '@/lib/application-search';
 
 import { ApplicationsWorkspace } from './applications-workspace';
 
+vi.mock('@/lib/application-columns-api', () => ({
+  getApplicationColumns: vi.fn(async () => ({ columns: [], version: 0 })),
+  updateApplicationColumns: vi.fn(),
+}));
 vi.mock('@/lib/operational-api', () => ({
   listApplications: vi.fn(),
   updateApplication: vi.fn(),
@@ -52,6 +57,7 @@ const second: GroupApplicationDto = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getApplicationColumns).mockReset().mockResolvedValue({ columns: [], version: 0 });
   window.localStorage.clear();
   window.history.replaceState({}, '', '/applications');
   vi.mocked(listApplications).mockResolvedValue([first, second]);
@@ -65,6 +71,81 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('applications reference layout', () => {
+  it('embeds the same editable table while keeping the product group fixed', async () => {
+    window.history.replaceState({}, '', '/products/product-id?aplicacion=chosen#detalle');
+    vi.mocked(listApplications).mockResolvedValue([first, { ...second, unifiedCode: 'OTHER' }]);
+    render(<ApplicationsWorkspace canWrite embeddedUnifiedCode="UNI-6205" />);
+    expect(
+      await screen.findByRole('button', { name: 'Editar Marca Vehículo de UNI-6205' }),
+    ).toBeVisible();
+    expect(screen.queryByText('OTHER')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar fila' }));
+    expect(
+      screen.queryByRole('textbox', { name: 'Nuevo código unificador' }),
+    ).not.toBeInTheDocument();
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      '/products/product-id?aplicacion=chosen#detalle',
+    );
+  });
+
+  it('renders customer columns as editable cells and includes their values in the Excel export', async () => {
+    vi.mocked(getApplicationColumns).mockResolvedValue({
+      columns: [
+        {
+          key: 'campo_cliente',
+          header: 'Campo Excel',
+          label: 'Campo cliente',
+          required: false,
+          aliases: [],
+        },
+      ],
+      version: 2,
+    });
+    vi.mocked(listApplications).mockResolvedValue([
+      { ...first, additionalFields: { campo_cliente: 'Dato original' } },
+    ]);
+    vi.mocked(updateApplication).mockResolvedValue({
+      ...first,
+      additionalFields: { campo_cliente: 'Dato actualizado' },
+    });
+    render(<ApplicationsWorkspace canWrite />);
+    fireEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: 'Editar Campo cliente de UNI-6205' },
+        { timeout: 3000 },
+      ),
+    );
+    const input = screen.getByRole('textbox', { name: 'Editar Campo cliente' });
+    fireEvent.change(input, { target: { value: 'Dato actualizado' } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(updateApplication).toHaveBeenCalledWith(first.id, {
+        expectedUpdatedAt: first.updatedAt,
+        additionalFields: { campo_cliente: 'Dato actualizado' },
+      }),
+    );
+    expect(await screen.findByText('Dato actualizado')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    expect(vi.mocked(downloadXlsx).mock.calls.at(-1)?.[0]).toMatchObject({
+      headers: expect.arrayContaining(['Campo cliente']),
+      rows: [expect.arrayContaining(['Dato actualizado'])],
+    });
+  });
+
+  it('starts with no invented customer fields and saves administrator-defined column metadata', async () => {
+    vi.mocked(updateApplicationColumns).mockResolvedValue({ columns: [], version: 1 });
+    render(<ApplicationsWorkspace canWrite />);
+    await screen.findByRole('table');
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar columnas' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('group')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar columnas' }));
+    await waitFor(() =>
+      expect(updateApplicationColumns).toHaveBeenCalledWith({ columns: [], expectedVersion: 0 }),
+    );
+  });
+
   it('puts one compact table and operations before the editable matrix without contextual tabs', async () => {
     render(<ApplicationsWorkspace canWrite />);
     const table = await screen.findByRole('table');

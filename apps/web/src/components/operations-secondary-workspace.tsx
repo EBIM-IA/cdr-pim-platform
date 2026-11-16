@@ -1,4 +1,7 @@
 'use client';
+import { IntegrationSourceCandidates } from './integration-source-candidates';
+import { IntegrationExecutionMonitor } from './integration-execution-monitor';
+import { CodeAffixBootstrap } from './code-affix-bootstrap';
 
 import type {
   CodeAffixDto,
@@ -43,6 +46,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
+import { WorkspaceDrawer } from '@/components/workspace-drawer';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { SettingsParameterCatalog } from '@/components/settings-parameter-catalog';
 import { EcommerceDescriptionsWorkspace } from '@/components/ecommerce-descriptions-workspace';
@@ -955,8 +959,21 @@ const statusLabels: Record<CodeAffixStatus, string> = {
   rejected: 'Rechazado',
 };
 
+const affixSourceLabels: Record<CodeAffixSource, string> = {
+  manual: 'Manual',
+  manufacturer: 'Fabricante',
+  standard: 'Norma',
+  import: 'Importación',
+  ai_suggestion: 'Sugerencia IA',
+};
+
 function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
   const [catalog, setCatalog] = useState<SettingsCatalog>('Prefijos y sufijos');
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('catalog');
+    if (settingsCatalogs.includes(requested as SettingsCatalog))
+      setCatalog(requested as SettingsCatalog);
+  }, []);
   const [rules, setRules] = useState<CodeAffixDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -970,6 +987,7 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
   const [form, setForm] = useState<CodeAffixFormState>(emptyAffixForm);
   const [saving, setSaving] = useState(false);
   const [parseInput, setParseInput] = useState('');
+  const [brandFilter, setBrandFilter] = useState('');
   const [parseBrand, setParseBrand] = useState('');
   const [parseFamily, setParseFamily] = useState('');
   const [parsed, setParsed] = useState<ParsedProductCodeDto | null>(null);
@@ -1006,11 +1024,13 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
   }, [appliedQuery, catalog, kind, refresh, status]);
 
   const openCreate = () => {
+    setError('');
     setEditing(null);
     setCreating(true);
     setForm(emptyAffixForm());
   };
   const openEdit = (rule: CodeAffixDto) => {
+    setError('');
     setCreating(false);
     setEditing(rule);
     setForm({
@@ -1131,12 +1151,12 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                 <strong className="block">{item}</strong>
                 <small className="text-muted-foreground">
                   {item === 'Prefijos y sufijos'
-                    ? `${rules.length} reglas persistidas`
+                    ? `${rules.length} reglas consultadas`
                     : item === 'Nombre amigable del producto'
                       ? 'Fórmulas Automotriz e Industrial'
                       : item === 'Descripción para e-commerce'
                         ? 'Generación y revisión por variante'
-                        : 'Pendiente'}
+                        : 'Catálogo configurable'}
                 </small>
               </span>
               <SlidersHorizontal className="size-4 shrink-0" aria-hidden="true" />
@@ -1152,6 +1172,9 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
         <SettingsParameterCatalog catalog={catalog} canManage={canManage} />
       ) : (
         <div className="min-w-0 space-y-4">
+          {canManage ? (
+            <CodeAffixBootstrap rules={rules} onSaved={() => setRefresh((value) => value + 1)} />
+          ) : null}
           <Card className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1199,6 +1222,19 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                 {parsing ? 'Interpretando…' : 'Interpretar'}
               </Button>
             </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {['6205-2RS-C3', '6301-ZZ', 'D227'].map((example) => (
+                <Button
+                  key={example}
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setParseInput(example)}
+                >
+                  {example}
+                </Button>
+              ))}
+            </div>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <Input
                 aria-label="Marca para interpretar el código"
@@ -1236,6 +1272,25 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                           {segment.boreMillimeters} mm · ISO 15
                         </small>
                       ) : null}
+                      {!segment.ruleId && segment.boreMillimeters === null && canManage ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="ml-2 h-7 px-2 text-xs"
+                          onClick={() => {
+                            openCreate();
+                            setForm({
+                              ...emptyAffixForm(),
+                              token: segment.text,
+                              brand: parseBrand.trim(),
+                              family: parseFamily.trim(),
+                            });
+                          }}
+                        >
+                          Agregar {segment.text}
+                        </Button>
+                      ) : null}
                       {segment.evidence ? (
                         <small className="mt-1 block opacity-70">{segment.evidence}</small>
                       ) : null}
@@ -1247,12 +1302,19 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
           </Card>
 
           {(creating || editing) && canManage ? (
-            <Card className="p-5">
+            <WorkspaceDrawer
+              title={editing ? `Editar ${editing.token}` : 'Nueva regla'}
+              onClose={closeEditor}
+              busy={saving}
+              unsavedChanges={
+                form.token !== (editing?.token ?? '') ||
+                form.meaning !== (editing?.meaning ?? '') ||
+                form.evidence !== (editing?.evidence ?? '')
+              }
+            >
               <form onSubmit={(event) => void submit(event)} className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-semibold text-cdr-ink">
-                    {editing ? `Editar ${editing.token}` : 'Nueva regla'}
-                  </h3>
+                  <h3 className="font-semibold text-cdr-ink">Datos de la regla</h3>
                   <Button type="button" variant="ghost" size="sm" onClick={closeEditor}>
                     Cancelar
                   </Button>
@@ -1290,13 +1352,11 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                         mutateForm('source', event.target.value as CodeAffixSource)
                       }
                     >
-                      {['manual', 'manufacturer', 'standard', 'import', 'ai_suggestion'].map(
-                        (value) => (
-                          <option key={value} value={value}>
-                            {value}
-                          </option>
-                        ),
-                      )}
+                      {(Object.keys(affixSourceLabels) as CodeAffixSource[]).map((value) => (
+                        <option key={value} value={value}>
+                          {affixSourceLabels[value]}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label className="text-xs text-muted-foreground md:col-span-2 xl:col-span-3">
@@ -1394,8 +1454,13 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                     {saving ? 'Guardando…' : 'Guardar regla'}
                   </Button>
                 </div>
+                {error && (
+                  <p role="alert" className="text-sm text-red-700">
+                    {error}
+                  </p>
+                )}
               </form>
-            </Card>
+            </WorkspaceDrawer>
           ) : null}
 
           <Card className="overflow-hidden">
@@ -1407,6 +1472,25 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                 placeholder="Código, significado, marca o familia"
                 className="min-w-64 flex-1 bg-white"
               />
+              <select
+                aria-label="Filtrar reglas por marca"
+                className="h-10 rounded-md border bg-white px-3 text-sm"
+                value={brandFilter}
+                onChange={(event) => setBrandFilter(event.target.value)}
+              >
+                <option value="">Todas las marcas</option>
+                {[
+                  ...new Set(
+                    rules.map((rule) => rule.brand).filter((brand): brand is string => !!brand),
+                  ),
+                ]
+                  .sort()
+                  .map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+              </select>
               <select
                 aria-label="Filtrar por tipo"
                 className="h-10 rounded-md border bg-white px-3 text-sm"
@@ -1441,7 +1525,7 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
               <p className="p-8 text-center text-sm text-muted-foreground" role="status">
                 Cargando reglas…
               </p>
-            ) : rules.length === 0 ? (
+            ) : rules.filter((rule) => !brandFilter || rule.brand === brandFilter).length === 0 ? (
               <div className="p-8 text-center" role="status">
                 <strong>No hay reglas persistidas</strong>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -1464,87 +1548,89 @@ function SettingsSurface({ workspace }: { workspace: WorkspaceDto }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {rules.map((rule) => (
-                      <tr key={rule.id} className="hover:bg-orange-50/40">
-                        <td className="px-4 py-3 font-mono font-semibold">{rule.token}</td>
-                        <td className="px-4 py-3">{kindLabels[rule.kind]}</td>
-                        <td className="max-w-md px-4 py-3">
-                          <span className="block">{rule.meaning}</span>
-                          <small className="text-muted-foreground">
-                            {rule.evidence ?? 'Sin evidencia'}
-                          </small>
-                        </td>
-                        <td className="px-4 py-3">
-                          {rule.source}
-                          {rule.confidence !== null ? (
-                            <small className="block text-muted-foreground">
-                              {Math.round(rule.confidence * 100)} %
+                    {rules
+                      .filter((rule) => !brandFilter || rule.brand === brandFilter)
+                      .map((rule) => (
+                        <tr key={rule.id} className="hover:bg-orange-50/40">
+                          <td className="px-4 py-3 font-mono font-semibold">{rule.token}</td>
+                          <td className="px-4 py-3">{kindLabels[rule.kind]}</td>
+                          <td className="max-w-md px-4 py-3">
+                            <span className="block">{rule.meaning}</span>
+                            <small className="text-muted-foreground">
+                              {rule.evidence ?? 'Sin evidencia'}
                             </small>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            tone={
-                              rule.status === 'validated'
-                                ? 'success'
-                                : rule.status === 'rejected'
-                                  ? 'danger'
-                                  : 'warning'
-                            }
-                          >
-                            {statusLabels[rule.status]}
-                          </StatusBadge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              disabled={!canManage}
-                              aria-label={`Editar ${rule.token}`}
-                              onClick={() => openEdit(rule)}
-                            >
-                              <Pencil className="size-3.5" aria-hidden="true" />
-                            </Button>
-                            {rule.status !== 'validated' ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                disabled={!canManage || !rule.evidence}
-                                aria-label={`Validar ${rule.token}`}
-                                onClick={() => void decide(rule, 'validated')}
-                              >
-                                <Check className="size-3.5" aria-hidden="true" />
-                              </Button>
+                          </td>
+                          <td className="px-4 py-3">
+                            {affixSourceLabels[rule.source]}
+                            {rule.confidence !== null ? (
+                              <small className="block text-muted-foreground">
+                                {Math.round(rule.confidence * 100)} %
+                              </small>
                             ) : null}
-                            {rule.status !== 'rejected' ? (
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge
+                              tone={
+                                rule.status === 'validated'
+                                  ? 'success'
+                                  : rule.status === 'rejected'
+                                    ? 'danger'
+                                    : 'warning'
+                              }
+                            >
+                              {statusLabels[rule.status]}
+                            </StatusBadge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-1">
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="ghost"
                                 disabled={!canManage}
-                                aria-label={`Rechazar ${rule.token}`}
-                                onClick={() => void decide(rule, 'rejected')}
+                                aria-label={`Editar ${rule.token}`}
+                                onClick={() => openEdit(rule)}
                               >
-                                <X className="size-3.5" aria-hidden="true" />
+                                <Pencil className="size-3.5" aria-hidden="true" />
                               </Button>
-                            ) : null}
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              disabled={!canManage}
-                              aria-label={`Desactivar ${rule.token}`}
-                              onClick={() => void deactivate(rule)}
-                            >
-                              <Trash2 className="size-3.5" aria-hidden="true" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                              {rule.status !== 'validated' ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={!canManage || !rule.evidence}
+                                  aria-label={`Validar ${rule.token}`}
+                                  onClick={() => void decide(rule, 'validated')}
+                                >
+                                  <Check className="size-3.5" aria-hidden="true" />
+                                </Button>
+                              ) : null}
+                              {rule.status !== 'rejected' ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={!canManage}
+                                  aria-label={`Rechazar ${rule.token}`}
+                                  onClick={() => void decide(rule, 'rejected')}
+                                >
+                                  <X className="size-3.5" aria-hidden="true" />
+                                </Button>
+                              ) : null}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                disabled={!canManage}
+                                aria-label={`Desactivar ${rule.token}`}
+                                onClick={() => void deactivate(rule)}
+                              >
+                                <Trash2 className="size-3.5" aria-hidden="true" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -2060,6 +2146,10 @@ export function OperationsSecondaryWorkspace({
         </StatusBadge>
       </section>
 
+      {view === 'monitor' && workspace.integrationMonitor ? (
+        <IntegrationExecutionMonitor data={workspace.integrationMonitor} />
+      ) : null}
+      {view === 'sources' ? <IntegrationSourceCandidates /> : null}
       {showMetrics ? <Metrics workspace={workspace} /> : null}
       <Notices workspace={workspace} />
 

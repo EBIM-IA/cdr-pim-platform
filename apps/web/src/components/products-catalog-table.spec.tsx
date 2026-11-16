@@ -142,7 +142,7 @@ beforeEach(() => {
 
 describe('ProductsCatalog table view', () => {
   it('opens the reference catalog list and forwards write capability to the table', async () => {
-    render(<ProductsCatalog canEditAttributes />);
+    render(<ProductsCatalog canEditAttributes showCompleteness />);
 
     expect(screen.getByRole('button', { name: 'Tabla' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
@@ -193,7 +193,7 @@ describe('ProductsCatalog table view', () => {
     render(<ProductsCatalog />);
     fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
-    await screen.findByText('SKU-FAG');
+    await screen.findAllByText('UNI-6205');
     const filtersButton = screen.getByRole('button', { name: /Filtros/u });
     expect(filtersButton).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('combobox', { name: 'Marca' })).not.toBeInTheDocument();
@@ -259,7 +259,7 @@ describe('ProductsCatalog table view', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByText('SKU-FAG')).toBeVisible();
+    expect((await screen.findAllByText('UNI-6205'))[0]).toBeVisible();
   });
 
   it('keeps an unclassified SKU visible and accessible without offering enrichment edits', async () => {

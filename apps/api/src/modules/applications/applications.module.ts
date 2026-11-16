@@ -1,3 +1,6 @@
+import { ApplicationColumnSettingsUseCases } from './application/application-column-settings.use-cases';
+import { APPLICATION_COLUMN_SETTINGS } from './domain/ports/application-column-settings.port';
+import { DrizzleApplicationColumnSettings } from './infrastructure/persistence/drizzle-application-column-settings';
 import { Module } from '@nestjs/common';
 
 import {
@@ -15,6 +18,8 @@ import { ApplicationsController } from './presentation/applications.controller';
 @Module({
   controllers: [ApplicationsController],
   providers: [
+    ApplicationColumnSettingsUseCases,
+    { provide: APPLICATION_COLUMN_SETTINGS, useClass: DrizzleApplicationColumnSettings },
     { provide: GROUP_APPLICATION_REPOSITORY, useClass: DrizzleGroupApplicationRepository },
     { provide: APPLICATION_SEARCH_READ_MODEL, useClass: DrizzleApplicationSearchReadModel },
     ListGroupApplicationsUseCase,
@@ -22,6 +27,10 @@ import { ApplicationsController } from './presentation/applications.controller';
     UpdateGroupApplicationUseCase,
     DeactivateGroupApplicationUseCase,
   ],
-  exports: [GROUP_APPLICATION_REPOSITORY, APPLICATION_SEARCH_READ_MODEL],
+  exports: [
+    GROUP_APPLICATION_REPOSITORY,
+    APPLICATION_SEARCH_READ_MODEL,
+    APPLICATION_COLUMN_SETTINGS,
+  ],
 })
 export class ApplicationsModule {}

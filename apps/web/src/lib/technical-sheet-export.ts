@@ -1,4 +1,5 @@
 import type { ProductAssetDto, ProductAttributeSheetDto } from '@cdr/contracts';
+import { listTechnicalSheetVisibility } from '@/lib/technical-sheet-visibility-api';
 import { authenticatedBffFetch } from '@/lib/bff-client';
 import { listCatalogParameters } from '@/lib/catalog-parameters-api';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
@@ -49,6 +50,12 @@ export function technicalSheetDocument(
     unitSystem,
     attributes: exported.map((attribute) => ({
       key: attribute.key,
+      ...(attribute.sectionLabel
+        ? { sectionLabel: attribute.sectionLabel, sectionNumber: attribute.sectionNumber }
+        : sheet.schema.sections?.length
+          ? { sectionNumber: sheet.schema.sections.length + 1 }
+          : {}),
+      ...(attribute.sectionKey ? { sectionKey: attribute.sectionKey } : {}),
       label: attribute.label,
       value:
         displayMeasurement(
@@ -154,16 +161,25 @@ export async function downloadTechnicalSheetsZip(
   products: readonly { id: string; sku: string }[],
   assetsByProduct: Readonly<Record<string, ProductAssetDto[]>>,
   options: { signal?: AbortSignal; onProgress?: (complete: number, total: number) => void } = {},
-): Promise<void> {
+): Promise<number> {
   if (!products.length || products.length > MAX_TECHNICAL_SHEETS_PER_ZIP)
     throw new Error(`Selecciona entre 1 y ${MAX_TECHNICAL_SHEETS_PER_ZIP} SKU con los filtros.`);
+  const policies = await listTechnicalSheetVisibility(
+    products.map((product) => product.id),
+    options.signal,
+  );
+  const visibleIds = new Set(
+    policies.filter((policy) => policy.canView ?? policy.visible).map((policy) => policy.productId),
+  );
+  const eligible = products.filter((product) => visibleIds.has(product.id));
+  if (!eligible.length) throw new Error('No hay SKU con ficha técnica accesible en la selección.');
   const entries: BinaryZipEntry[] = [],
     filenames = new Set<string>();
   const [cdrLogo, brands] = await Promise.all([
     technicalSheetLogo(options.signal),
     listCatalogParameters('brand', options.signal),
   ]);
-  for (const product of [...products].sort((a, b) =>
+  for (const product of [...eligible].sort((a, b) =>
     a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0,
   )) {
     options.signal?.throwIfAborted();
@@ -192,8 +208,9 @@ export async function downloadTechnicalSheetsZip(
       throw new Error(
         'Las fichas superan 100 MB. Reduce el conjunto con los filtros y vuelve a exportar.',
       );
-    options.onProgress?.(entries.length, products.length);
+    options.onProgress?.(entries.length, eligible.length);
   }
   options.signal?.throwIfAborted();
   downloadBinary(createBinaryZip(entries), 'fichas-tecnicas-cdr.zip', 'application/zip');
+  return entries.length;
 }

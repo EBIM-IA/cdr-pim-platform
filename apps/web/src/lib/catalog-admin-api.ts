@@ -18,6 +18,8 @@ import {
 } from '@cdr/contracts';
 import {
   type AdminCatalogCategoryDto,
+  type UpdateTemplateSectionsInput,
+  updateTemplateSectionsSchema,
   type AdminTemplateAttributeDto,
   type AdminTemplateDto,
   type UpdateCatalogCategoryInput,
@@ -92,6 +94,16 @@ export function listAdminTemplates(categoryId?: string): Promise<AdminTemplateDt
 
 export function getAdminTemplate(id: string): Promise<AdminTemplateDto> {
   return request(`/templates/${encodeURIComponent(id)}`, adminTemplateSchema);
+}
+
+export function updateAdminTemplateSections(
+  templateId: string,
+  input: UpdateTemplateSectionsInput,
+): Promise<AdminTemplateDto> {
+  return request(`/templates/${encodeURIComponent(templateId)}/sections`, adminTemplateSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(updateTemplateSectionsSchema.parse(input)),
+  });
 }
 
 export function updateAdminTemplateAttribute(

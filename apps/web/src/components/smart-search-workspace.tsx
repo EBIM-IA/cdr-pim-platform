@@ -1,4 +1,5 @@
 'use client';
+import { SearchAssistant } from './search-assistant';
 
 import type {
   HomologSearchResultDto,
@@ -9,13 +10,15 @@ import type {
 } from '@cdr/contracts';
 import { ArrowRight, Bot, Link2, PackageSearch, Sparkles } from 'lucide-react';
 import Link from 'next/link';
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
+import { productWithWorkbookEvidence } from '@/lib/product-evidence-view';
 import { fetchProducts } from '@/lib/catalog-api';
 import { parseCode } from '@/lib/code-affix-api';
 import { searchEligibleHomologs, searchEligibleOemCodes } from '@/lib/operational-api';
@@ -60,7 +63,24 @@ function semanticQueryFromInterpretation(query: string, parsed: ParsedProductCod
   return [...new Set([query, ...knowledge])].join(' ').slice(0, 500);
 }
 
-function DirectResult({ product }: { product: Product }) {
+function DirectResult({ product, query }: { product: Product; query: string }) {
+  const norm = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('es');
+  const q = norm(query);
+  const reasons = [
+    norm(product.sku).includes(q) ? 'Código de artículo' : null,
+    product.providerCode && norm(product.providerCode).includes(q) ? 'Código de proveedor' : null,
+    product.unifiedCode && norm(product.unifiedCode).includes(q) ? 'Código unificador' : null,
+    norm(product.brand).includes(q) ? 'Marca' : null,
+    norm(`${product.name} ${product.category}`).includes(q) ? 'Descripción / categoría' : null,
+    product.attributes.some((attribute) => norm(attribute.value).includes(q))
+      ? 'Atributos / medidas'
+      : null,
+  ].filter(Boolean);
+
   return (
     <article className="flex min-h-[74px] flex-col gap-3 border-b py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
@@ -76,6 +96,16 @@ function DirectResult({ product }: { product: Product }) {
           </Link>
           <strong className="mt-1 block truncate text-sm text-cdr-ink">{product.name}</strong>
           <small className="mt-1 block text-muted-foreground">
+            Coincide en: {reasons.join(' · ') || 'Búsqueda del catálogo'}
+            {product.attributes.length
+              ? ` · ${product.attributes
+                  .filter((attribute) => attribute.unit)
+                  .slice(0, 3)
+                  .map((attribute) => `${attribute.label}: ${attribute.value}`)
+                  .join(' · ')}`
+              : ''}
+          </small>
+          <small className="mt-1 block text-muted-foreground">
             {[
               product.brand,
               product.category,
@@ -87,6 +117,15 @@ function DirectResult({ product }: { product: Product }) {
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {product.unifiedCode && (
+          <Button asChild size="sm" variant="outline">
+            <Link
+              href={`/equivalences?view=groups&group=${encodeURIComponent(product.unifiedCode)}`}
+            >
+              Abrir grupo
+            </Link>
+          </Button>
+        )}
         <StatusBadge tone={statusTone(product.status)}>{statusLabel(product.status)}</StatusBadge>
         <Button asChild size="sm">
           <Link href={`/products/${encodeURIComponent(product.id)}`}>
@@ -127,7 +166,11 @@ function SemanticResult({ hit }: { hit: SemanticHit }) {
   );
 }
 
-export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?: string } = {}) {
+export function SmartSearchWorkspace({
+  initialQuery = '6205',
+  canViewSearchReports = false,
+  canManageSettings = false,
+}: { initialQuery?: string; canViewSearchReports?: boolean; canManageSettings?: boolean } = {}) {
   const [query, setQuery] = useState(initialQuery);
   const [products, setProducts] = useState<Product[]>([]);
   const [semanticHits, setSemanticHits] = useState<SemanticHit[]>([]);
@@ -138,10 +181,12 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
   const runSearch = useCallback(async (rawQuery: string) => {
     const q = rawQuery.trim();
     if (q.length < 2) return;
+    const sequence = ++requestSequence.current;
     setQuery(q);
     setLoading(true);
     setError(null);
@@ -151,17 +196,28 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
       // semantic, homolog or OEM results.
       const parsedCode = await parseCode({ code: q }).catch(() => null);
       const semanticQuery = semanticQueryFromInterpretation(q, parsedCode);
-      const [catalog, semantic, eligibleHomologs, eligibleOemCodes] = await Promise.allSettled([
-        fetchProducts({ q, page: 1, pageSize: 50 }),
-        semanticSearch(semanticQuery, 20),
-        searchEligibleHomologs(q),
-        searchEligibleOemCodes(q),
-      ]);
+      const [catalog, semantic, eligibleHomologs, eligibleOemCodes, workbook] =
+        await Promise.allSettled([
+          fetchProducts({ q, page: 1, pageSize: 50 }),
+          semanticSearch(semanticQuery, 20),
+          searchEligibleHomologs(q),
+          searchEligibleOemCodes(q),
+          fetchCatalogWorkbook({ q, page: 1, pageSize: 100, filter: [] }),
+        ]);
+      if (sequence !== requestSequence.current) return;
       const results = [catalog, semantic, eligibleHomologs, eligibleOemCodes];
       if (results.every((result) => result.status === 'rejected')) {
         throw (results[0] as PromiseRejectedResult).reason;
       }
-      setProducts(catalog.status === 'fulfilled' ? catalog.value.items : []);
+      const metadata = workbook.status === 'fulfilled' ? workbook.value : undefined;
+      const byId = new Map(metadata?.items.map((product) => [product.id, product]));
+      setProducts(
+        catalog.status === 'fulfilled'
+          ? catalog.value.items.map((product) =>
+              productWithWorkbookEvidence(product, byId.get(product.id), metadata),
+            )
+          : [],
+      );
       setSemanticHits(
         semantic.status === 'fulfilled' ? semantic.value.hits.filter((hit) => hit.score > 0) : [],
       );
@@ -174,6 +230,7 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
         semantic.status === 'rejected' ? 'índice semántico' : null,
         eligibleHomologs.status === 'rejected' ? 'homólogos' : null,
         eligibleOemCodes.status === 'rejected' ? 'códigos OEM' : null,
+        workbook.status === 'rejected' ? 'datos técnicos del catálogo' : null,
       ].filter((source): source is string => source !== null);
       if (unavailable.length > 0) {
         setWarning(
@@ -181,6 +238,7 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
         );
       }
     } catch (requestError) {
+      if (sequence !== requestSequence.current) return;
       setProducts([]);
       setSemanticHits([]);
       setHomologs([]);
@@ -194,7 +252,7 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
           : 'No fue posible ejecutar la búsqueda.',
       );
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }, []);
 
@@ -273,9 +331,16 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
   return (
     <Card className="overflow-hidden p-5 sm:p-6">
       <section aria-labelledby="smart-search-title">
-        <h2 id="smart-search-title" className="text-[17px] font-semibold text-cdr-ink">
-          Consulta inteligente
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="smart-search-title" className="text-[17px] font-semibold text-cdr-ink">
+            Consulta inteligente
+          </h2>
+          {canViewSearchReports && (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/reports?view=searches">Reporte de búsquedas</Link>
+            </Button>
+          )}
+        </div>
         <form onSubmit={search} className="mt-4 flex flex-col gap-2 sm:flex-row">
           <label className="flex-1">
             <span className="sr-only">Consulta</span>
@@ -359,8 +424,8 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
             </span>
             <h3 className="mt-4 font-semibold text-cdr-ink">Asistente de resultados</h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Cuando existan resultados, este panel los resumirá de forma determinista. No hay un
-              proveedor generativo conectado en este entorno.
+              Consulta el asistente sobre los resultados y revisa las fichas que utiliza como
+              evidencia. El proveedor depende de la configuración del entorno.
             </p>
           </Card>
         </div>
@@ -434,7 +499,7 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
               ) : (
                 <div>
                   {products.map((product) => (
-                    <DirectResult key={product.id} product={product} />
+                    <DirectResult key={product.id} product={product} query={searchedQuery} />
                   ))}
                   {visibleSemanticHits.map((hit) => (
                     <SemanticResult key={hit.productId} hit={hit} />
@@ -451,7 +516,16 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
                         <span className="text-xs text-muted-foreground">
                           Homólogo aprobado · unificador {result.homolog.unifiedCode}
                         </span>
+                        <Link
+                          className="text-xs font-semibold text-primary underline"
+                          href={`/equivalences?view=groups&group=${encodeURIComponent(result.homolog.unifiedCode)}`}
+                        >
+                          Abrir grupo {result.homolog.unifiedCode}
+                        </Link>
                       </div>
+                      {result.homolog.name ? (
+                        <p className="mt-1 text-sm text-muted-foreground">{result.homolog.name}</p>
+                      ) : null}
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         {result.products.map((product) => (
                           <Link
@@ -490,6 +564,12 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
                         <span className="text-xs text-muted-foreground">
                           OEM aprobado · unificador {result.oem.unifiedCode}
                         </span>
+                        <Link
+                          className="text-xs font-semibold text-primary underline"
+                          href={`/equivalences?view=groups&group=${encodeURIComponent(result.oem.unifiedCode)}`}
+                        >
+                          Abrir grupo {result.oem.unifiedCode}
+                        </Link>
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         {result.products.map((product) => (
@@ -543,11 +623,29 @@ export function SmartSearchWorkspace({ initialQuery = '6205' }: { initialQuery?:
                   relación activa y aprobada en el backend.
                 </p>
               )}
-              <p className="mt-4 border-t border-violet-100 pt-4 text-xs leading-relaxed text-muted-foreground">
-                Este resumen se calcula exclusivamente con la respuesta visible. La generación
-                conversacional permanece deshabilitada hasta contar con proveedor, evidencia y
-                política de auditoría.
-              </p>
+              {canManageSettings && (
+                <p className="my-4 text-xs text-muted-foreground">
+                  Sinónimos de búsqueda:{' '}
+                  <Link
+                    className="text-primary underline"
+                    href="/administration?view=settings&catalog=Sin%C3%B3nimos"
+                  >
+                    Catálogos · Sinónimos
+                  </Link>
+                </p>
+              )}
+              <SearchAssistant
+                key={searchedQuery}
+                query={searchedQuery}
+                productIds={[
+                  ...new Set([
+                    ...directProductIds,
+                    ...semanticProductIds,
+                    ...homologProductIds,
+                    ...oemProductIds,
+                  ]),
+                ].slice(0, 12)}
+              />
             </Card>
           </div>
         </div>

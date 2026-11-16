@@ -404,13 +404,8 @@ function TopNavigation({
   const accountTrigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const items = useMemo(
-    () =>
-      navigation.filter(
-        (item) =>
-          actor.capabilities.includes(item.capability) &&
-          (admin || item.href === '/products' || item.href === '/catalogs'),
-      ),
-    [actor.capabilities, admin],
+    () => navigation.filter((item) => actor.capabilities.includes(item.capability)),
+    [actor.capabilities],
   );
   const active = (item: NavigationItem) =>
     item.href === '/' ? pathname === '/' : !!item.href && pathname.startsWith(item.href);

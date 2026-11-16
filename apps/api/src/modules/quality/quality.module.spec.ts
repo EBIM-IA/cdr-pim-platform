@@ -1,3 +1,4 @@
+import { OBJECT_STORAGE } from '@cdr/storage';
 import { Global, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,12 +11,13 @@ import { QualityGovernanceController } from './presentation/quality-governance.c
 @Global()
 @Module({
   providers: [
+    { provide: OBJECT_STORAGE, useValue: {} },
     { provide: CLOCK, useValue: { now: () => new Date('2026-11-10T15:00:00Z') } },
     { provide: DATABASE, useValue: {} },
     { provide: DATABASE_SQL, useValue: vi.fn() },
     { provide: AUDIT_PORT, useValue: { record: vi.fn() } },
   ],
-  exports: [CLOCK, DATABASE, DATABASE_SQL, AUDIT_PORT],
+  exports: [CLOCK, DATABASE, DATABASE_SQL, AUDIT_PORT, OBJECT_STORAGE],
 })
 class TestPlatformModule {}
 describe('QualityModule composition', () => {

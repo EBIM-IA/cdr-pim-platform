@@ -1,4 +1,8 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import type { ApiEnv } from '@cdr/config';
+import { ConflictError } from '@cdr/shared';
+import { API_ENV } from '../../../shared/tokens';
+import { ImportExecutionUseCases } from '../application/import-execution.use-cases';
+import { Body, Controller, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { type ImportBatchDto, type PreviewImportInput, previewImportSchema } from '@cdr/contracts';
 import { z } from 'zod';
@@ -25,6 +29,8 @@ const skeletonPingBodySchema = z.object({
 @RequireCapabilities(Capability.ImportsExecute)
 export class ImportsController {
   constructor(
+    @Inject(API_ENV) private readonly env: ApiEnv,
+    private readonly executions: ImportExecutionUseCases,
     private readonly enqueueSkeletonPing: EnqueueSkeletonPingUseCase,
     private readonly enqueueProductEmbedding: EnqueueProductEmbeddingUseCase,
     private readonly previewImportBatch: PreviewImportBatchUseCase,
@@ -38,12 +44,34 @@ export class ImportsController {
     @Body(new ZodValidationPipe(previewImportSchema)) body: PreviewImportInput,
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ImportBatchDto> {
-    return toImportBatchDto(await this.previewImportBatch.execute(body, actor));
+    return toImportBatchDto(
+      await this.previewImportBatch.execute(body, actor),
+      this.env.QUEUE_DRIVER === 'sqs' ? 'asynchronous' : 'synchronous',
+    );
   }
 
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<ImportBatchDto> {
-    return toImportBatchDto(await this.getImportBatch.execute(id));
+    return toImportBatchDto(
+      await this.getImportBatch.execute(id),
+      this.env.QUEUE_DRIVER === 'sqs' ? 'asynchronous' : 'synchronous',
+    );
+  }
+
+  @Get(':id/execution')
+  execution(@Param('id') id: string) {
+    return this.executions.get(id);
+  }
+
+  @Post(':id/confirm-async')
+  @HttpCode(202)
+  confirmAsync(@Param('id') id: string, @CurrentActor() actor: AuthenticatedActor) {
+    if (this.env.QUEUE_DRIVER !== 'sqs')
+      throw new ConflictError(
+        'La confirmación asíncrona requiere SQS. En modo local usa la confirmación síncrona.',
+        { reason: 'ASYNC_IMPORT_UNAVAILABLE' },
+      );
+    return this.executions.enqueue(id, actor);
   }
 
   @Post(':id/confirm')
@@ -54,7 +82,10 @@ export class ImportsController {
     @Param('id') id: string,
     @CurrentActor() actor: AuthenticatedActor,
   ): Promise<ImportBatchDto> {
-    return toImportBatchDto(await this.confirmImportBatch.execute(id, actor));
+    return toImportBatchDto(
+      await this.confirmImportBatch.execute(id, actor),
+      this.env.QUEUE_DRIVER === 'sqs' ? 'asynchronous' : 'synchronous',
+    );
   }
 
   @Post('skeleton-ping')
@@ -75,14 +106,20 @@ export class ImportsController {
   }
 }
 
-function toImportBatchDto(batch: ImportBatch): ImportBatchDto {
+function toImportBatchDto(
+  batch: ImportBatch,
+  executionMode: 'synchronous' | 'asynchronous',
+): ImportBatchDto {
   const value = batch.toSnapshot();
   const validRows = value.rows.filter((row) => row.valid).length;
   return {
     id: value.id,
     target: value.target,
     format: value.format,
+    originalFileName: value.originalFileName,
+    sourceFileFormat: value.sourceFileFormat,
     status: value.status,
+    executionMode,
     idempotencyKey: value.idempotencyKey,
     categoryCode: value.categoryCode,
     totalRows: value.rows.length,

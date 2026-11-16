@@ -29,3 +29,5 @@ export interface ImportBatchRepositoryPort {
 }
 
 export const IMPORT_BATCH_REPOSITORY = Symbol('ImportBatchRepositoryPort');
+
+export const IMPORT_CONFIRMATION_LEASE_MS = Symbol('ImportConfirmationLeaseMs');

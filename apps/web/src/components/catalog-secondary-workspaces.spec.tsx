@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   deactivateHomolog: vi.fn(),
 }));
 
+vi.mock('@/lib/application-columns-api', () => ({
+  getApplicationColumns: vi.fn(async () => ({ columns: [], version: 0 })),
+  updateApplicationColumns: vi.fn(),
+}));
+
 vi.mock('@/lib/operational-api', () => ({
   listApplications: mocks.listApplications,
   createApplication: mocks.createApplication,
@@ -280,6 +285,7 @@ describe('catálogo secundario aprobado', () => {
 
     await waitFor(() =>
       expect(mocks.createApplication).toHaveBeenCalledWith({
+        additionalFields: {},
         unifiedCode: 'UNI-6205',
         vehicleType: 'AUTOMOTRIZ',
         make: 'Toyota',

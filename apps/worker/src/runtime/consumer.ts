@@ -3,7 +3,7 @@ import type { QueueConsumerPort, ReceivedMessage } from '@cdr/messaging';
 import type { Logger } from '@cdr/shared';
 
 import type { HandlerRegistry } from './handler-registry';
-import { PermanentJobError } from './job-handler';
+import { PermanentJobError, RetryableJobError } from './job-handler';
 
 export interface ConsumerOptions {
   readonly maxMessages: number;
@@ -134,6 +134,17 @@ export class JobConsumer {
     logger.info('job started');
     const startedAt = Date.now();
 
+    // Long imports must retain their SQS receipt while active. The same broker primitive
+    // used for retry delay also extends visibility; no local redrive policy is introduced.
+    const heartbeat = setInterval(
+      () => {
+        void this.queue.release(message, this.options.visibilityTimeoutSeconds).catch(() => {
+          logger.warn('Could not renew in-flight job visibility');
+        });
+      },
+      Math.max(250, Math.floor(this.options.visibilityTimeoutSeconds * 500)),
+    );
+    heartbeat.unref?.();
     try {
       const payload = handler.parse(envelope.payload);
       await handler.handle(payload, envelope, {
@@ -147,6 +158,8 @@ export class JobConsumer {
     } catch (error) {
       this.metrics.failed += 1;
       await this.handleFailure(message, envelope, error, logger, startedAt);
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 
@@ -183,8 +196,11 @@ export class JobConsumer {
     // Exponential backoff, capped at the SQS maximum visibility timeout of 12 hours.
     const delaySeconds = Math.min(
       43_200,
-      Math.round(
-        (this.options.retryBaseDelayMs * 2 ** (message.approximateReceiveCount - 1)) / 1000,
+      Math.max(
+        error instanceof RetryableJobError ? error.retryDelaySeconds : 0,
+        Math.round(
+          (this.options.retryBaseDelayMs * 2 ** (message.approximateReceiveCount - 1)) / 1000,
+        ),
       ),
     );
 

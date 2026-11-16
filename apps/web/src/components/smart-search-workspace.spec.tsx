@@ -9,6 +9,8 @@ import type { Product } from '@/lib/types';
 
 import { SmartSearchWorkspace } from './smart-search-workspace';
 
+const metadataMocks = vi.hoisted(() => ({ workbook: vi.fn() }));
+vi.mock('@/lib/dynamic-catalog-api', () => ({ fetchCatalogWorkbook: metadataMocks.workbook }));
 vi.mock('@/lib/catalog-api', () => ({ fetchProducts: vi.fn() }));
 vi.mock('@/lib/code-affix-api', () => ({ parseCode: vi.fn() }));
 vi.mock('@/lib/operational-api', () => ({
@@ -32,6 +34,7 @@ const product: Product = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  metadataMocks.workbook.mockResolvedValue({ items: [], columns: [] });
   vi.mocked(fetchProducts).mockResolvedValue({
     items: [product],
     total: 1,
@@ -73,6 +76,54 @@ describe('SmartSearchWorkspace', () => {
     expect(screen.getByText(/La API encontró 1 coincidencia directa/)).toBeInTheDocument();
   });
 
+  it('reopens a search term supplied by a report and links the exact ERP group', async () => {
+    const { rerender } = render(<SmartSearchWorkspace initialQuery="rodamiento" />);
+    await screen.findByText(product.sku);
+    expect(screen.getByRole('link', { name: 'Abrir grupo' })).toHaveAttribute(
+      'href',
+      '/equivalences?view=groups&group=UNI-000123',
+    );
+    rerender(<SmartSearchWorkspace initialQuery="reten" />);
+    await waitFor(() =>
+      expect(fetchProducts).toHaveBeenCalledWith({ q: 'reten', page: 1, pageSize: 50 }),
+    );
+    expect(screen.getByRole('textbox', { name: 'Consulta' })).toHaveValue('reten');
+  });
+  it('uses authorized workbook metadata for direct results and clears hidden identifiers', async () => {
+    metadataMocks.workbook.mockResolvedValue({
+      columns: [{ key: 'diameter', label: 'Diámetro', unit: 'mm' }],
+      items: [
+        {
+          id: product.id,
+          category: { name: 'Rodamientos reales' },
+          applicationTypes: ['Industrial'],
+          unifiedCode: null,
+          providerCode: null,
+          completeness: 70,
+          attributes: {
+            diameter: { applicable: true, value: 25 },
+            hidden: { applicable: true, value: 'SECRET-HIDDEN' },
+          },
+        },
+      ],
+    });
+    render(<SmartSearchWorkspace initialQuery="6205" canViewSearchReports />);
+    await screen.findByText(product.sku);
+    expect(metadataMocks.workbook).toHaveBeenCalledWith({
+      q: '6205',
+      page: 1,
+      pageSize: 100,
+      filter: [],
+    });
+    expect(screen.getByText(/Rodamientos reales/)).toBeVisible();
+    expect(screen.getByText(/Diámetro: 25 mm/)).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Abrir grupo' })).toBeNull();
+    expect(screen.queryByText(/SECRET-HIDDEN/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Reporte de búsquedas' })).toHaveAttribute(
+      'href',
+      '/reports?view=searches',
+    );
+  });
   it('enriches semantic search from validated affixes and deduplicates products by id', async () => {
     vi.mocked(parseCode).mockResolvedValue({
       code: '6205-C3',
@@ -119,6 +170,7 @@ describe('SmartSearchWorkspace', () => {
           unifiedCode: 'UNI-000123',
           externalCode: 'HOM-C3',
           externalBrand: 'FAG',
+          name: 'Referencia con juego radial ampliado',
           active: true,
           approvalStatus: 'approved',
           source: 'manual',
@@ -148,6 +200,7 @@ describe('SmartSearchWorkspace', () => {
     );
     expect(screen.getAllByText('6205-2RS1')).toHaveLength(1);
     expect(screen.getAllByText('6301-C3')).toHaveLength(1);
+    expect(screen.getByText('Referencia con juego radial ampliado')).toBeVisible();
     expect(
       screen.getByText(
         'Los SKU vinculados ya aparecen una sola vez entre los resultados anteriores.',

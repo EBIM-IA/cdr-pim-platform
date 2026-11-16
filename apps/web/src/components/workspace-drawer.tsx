@@ -11,12 +11,14 @@ export function WorkspaceDrawer({
   onClose,
   busy = false,
   unsavedChanges = false,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   busy?: boolean;
   unsavedChanges?: boolean;
+  wide?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const headingId = useId();
@@ -92,7 +94,7 @@ export function WorkspaceDrawer({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
-        className="relative flex h-full w-full max-w-2xl flex-col border-l bg-white shadow-2xl outline-none"
+        className={`relative flex h-full w-full ${wide ? 'max-w-[1100px]' : 'max-w-2xl'} flex-col border-l bg-white shadow-2xl outline-none`}
       >
         <div className="flex shrink-0 items-center justify-between gap-4 border-b px-5 py-4">
           <h2 id={headingId} className="text-lg font-semibold">

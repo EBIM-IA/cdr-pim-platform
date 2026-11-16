@@ -1,9 +1,10 @@
 import { OBJECT_STORAGE } from '@cdr/storage';
 import { QUEUE_PORT } from '@cdr/messaging';
+import { DependencyUnavailableError } from '@cdr/shared';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../../src/app.module';
 import { EMBEDDING_PROVIDER } from '../../src/modules/ai/domain/ports/embedding-provider.port';
@@ -15,6 +16,10 @@ import { EQUIVALENCE_GROUP_REPOSITORY } from '../../src/modules/equivalences/dom
 import { HealthController } from '../../src/modules/health/presentation/health.controller';
 import { Role } from '../../src/modules/identity/domain/entities/role';
 import { CREDENTIAL_VERIFIER } from '../../src/modules/identity/domain/ports/credential-verifier.port';
+import {
+  MODULE_POLICY,
+  type ModulePolicyPort,
+} from '../../src/modules/identity/domain/ports/module-policy.port';
 import {
   TOKEN_SERVICE,
   type TokenServicePort,
@@ -50,7 +55,9 @@ import { API_ENV, CLOCK, DATABASE, DATABASE_SQL, LOGGER } from '../../src/shared
  * and CI fails, instead of the container crash-looping in ECS.
  *
  * No database, queue or AI provider is contacted: `postgres.js` connects lazily, and the
- * default drivers are the in-memory/fake ones. No TCP port is opened either — supertest
+ * default drivers are the in-memory/fake ones. The persistent module-policy port is
+ * replaced with a hermetic fake; policy resolution and authentication guards stay real.
+ * No TCP port is opened explicitly — supertest
  * drives the HTTP adapter in-process.
  */
 
@@ -78,13 +85,20 @@ const TEST_ENV: NodeJS.ProcessEnv = {
 
 describe('AppModule bootstrap', () => {
   let app: NestExpressApplication;
+  const policies = {
+    read: vi.fn<ModulePolicyPort['read']>().mockResolvedValue([]),
+    save: vi.fn<ModulePolicyPort['save']>().mockResolvedValue(undefined),
+  } satisfies ModulePolicyPort;
 
   beforeAll(async () => {
     Object.assign(process.env, TEST_ENV);
 
     // This single call is the regression guard: it resolves every provider in every module
     // through the Nest injector, using the same decorator metadata production uses.
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(MODULE_POLICY)
+      .useValue(policies)
+      .compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
     configureBodyParsers(app);
@@ -139,6 +153,7 @@ describe('AppModule bootstrap', () => {
     ['AX_MOCK_BATCH_STORE', AX_MOCK_BATCH_STORE],
     ['TOKEN_SERVICE', TOKEN_SERVICE],
     ['CREDENTIAL_VERIFIER', CREDENTIAL_VERIFIER],
+    ['MODULE_POLICY', MODULE_POLICY],
     ['AUDIT_PORT', AUDIT_PORT],
     ['QUEUE_PORT', QUEUE_PORT],
     ['OBJECT_STORAGE', OBJECT_STORAGE],
@@ -417,6 +432,21 @@ describe('AppModule bootstrap', () => {
       .expect(200);
 
     expect(me.body).toEqual({ actor: login.body.actor });
+  });
+
+  it('fails closed when the persisted module policies cannot be resolved', async () => {
+    const tokens = app.get<TokenServicePort>(TOKEN_SERVICE);
+    const { accessToken } = await tokens.issue({
+      id: 'bootstrap-admin',
+      email: 'bootstrap-admin@casadelruliman.com',
+      roles: [Role.Admin],
+    });
+    policies.read.mockRejectedValueOnce(new DependencyUnavailableError('identity-module-policies'));
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('authorization', `Bearer ${accessToken}`)
+      .expect(503);
+    expect(response.body.error).toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
   });
 
   it('does not reveal which local credential was invalid', async () => {

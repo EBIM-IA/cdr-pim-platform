@@ -57,14 +57,8 @@ describe('role capability policy', () => {
     expect(new Set(capabilities).size).toBe(capabilities.length);
   });
 
-  it('limits non-administrator menus to the five modules approved by the client', () => {
-    const expectedMenus = [
-      Capability.MenuApplicationsView,
-      Capability.MenuCatalogsView,
-      Capability.MenuDocumentsView,
-      Capability.MenuEquivalencesView,
-      Capability.MenuProductsView,
-    ];
+  it('defaults consultation menus to Products and Catalogs from the approved design', () => {
+    const expectedMenus = [Capability.MenuCatalogsView, Capability.MenuProductsView];
     for (const role of [Role.Purchasing, Role.Sales, Role.Editor, Role.Viewer]) {
       expect(
         capabilitiesForRole(role).filter((capability) => capability.startsWith('menu:')),

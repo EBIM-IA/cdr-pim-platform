@@ -67,6 +67,10 @@ export const attributeTemplates = pgTable(
       .references(() => catalogCategories.id, { onDelete: 'restrict' }),
     variantKey: text('variant_key').notNull(),
     name: text('name').notNull(),
+    sections: jsonb('sections')
+      .$type<Array<{ key: string; label: string; position: number }>>()
+      .notNull()
+      .default([]),
     version: integer('version').notNull(),
     status: text('status').notNull().default('draft'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -119,6 +123,7 @@ export const templateAttributeAssignments = pgTable(
     attributeDefinitionId: uuid('attribute_definition_id')
       .notNull()
       .references(() => attributeDefinitions.id, { onDelete: 'restrict' }),
+    sectionKey: text('section_key'),
     position: integer('position').notNull().default(0),
     required: boolean('required').notNull().default(false),
     replicable: boolean('replicable').notNull().default(false),

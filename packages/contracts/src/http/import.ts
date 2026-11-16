@@ -8,6 +8,17 @@ export type ImportTarget = z.infer<typeof importTargetSchema>;
 export const importFormatSchema = z.enum(['csv', 'json']);
 export type ImportFormat = z.infer<typeof importFormatSchema>;
 
+// The browser can decode CSV/XLSX into JSON records before validation. This records
+// the uploaded file's identity independently of that transport representation.
+export const importSourceFileFormatSchema = z.enum(['csv', 'xlsx']);
+export const importOriginalFileNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .regex(/^[^/\\\p{Cc}]+$/u, 'A filename without paths or control characters is required')
+  .refine((name) => name !== '.' && name !== '..', 'A filename is required');
+
 export const importBatchStatusSchema = z.enum(['previewed', 'processing', 'confirmed', 'failed']);
 export type ImportBatchStatus = z.infer<typeof importBatchStatusSchema>;
 
@@ -28,6 +39,8 @@ export const previewImportSchema = z
   .object({
     target: importTargetSchema,
     format: importFormatSchema,
+    originalFileName: importOriginalFileNameSchema.optional(),
+    sourceFileFormat: importSourceFileFormatSchema.optional(),
     idempotencyKey: z.string().trim().min(8).max(200),
     categoryCode: z
       .string()
@@ -81,7 +94,10 @@ export const importBatchSchema = z.object({
   id: uuidSchema,
   target: importTargetSchema,
   format: importFormatSchema,
+  originalFileName: importOriginalFileNameSchema.nullable().optional(),
+  sourceFileFormat: importSourceFileFormatSchema.nullable().optional(),
   status: importBatchStatusSchema,
+  executionMode: z.enum(['synchronous', 'asynchronous']).optional(),
   idempotencyKey: z.string().min(8).max(200),
   categoryCode: z.string().nullable(),
   totalRows: z.number().int().nonnegative(),
@@ -92,3 +108,17 @@ export const importBatchSchema = z.object({
   confirmedAt: z.string().datetime().nullable(),
 });
 export type ImportBatchDto = z.infer<typeof importBatchSchema>;
+
+export const importExecutionSchema = z.object({
+  batchId: uuidSchema,
+  status: z.enum(['queued', 'processing', 'completed', 'failed']),
+  processedRows: z.number().int().nonnegative(),
+  totalRows: z.number().int().nonnegative(),
+  queuedAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  error: z.string().nullable(),
+});
+export const importExecutionResultSchema = importExecutionSchema.nullable();
+export type ImportExecutionDto = z.infer<typeof importExecutionSchema>;

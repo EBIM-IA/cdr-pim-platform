@@ -1,3 +1,5 @@
+import { SimulateQualityUseCase } from '../application/simulate-quality.use-case';
+import { qualitySimulationSchema, type QualitySimulationInput } from '@cdr/contracts';
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   qualitySourcePrioritySchema,
@@ -17,7 +19,16 @@ import { QualityGovernanceUseCases } from '../application/quality-governance.use
 @Controller('quality')
 @RequireCapabilities(Capability.CatalogRead, Capability.AiQualityExecute)
 export class QualityGovernanceController {
-  constructor(private readonly quality: QualityGovernanceUseCases) {}
+  constructor(
+    private readonly quality: QualityGovernanceUseCases,
+    private readonly simulate: SimulateQualityUseCase,
+  ) {}
+  @Post('simulate') @RequireCapabilities(Capability.AdministrationManage) simulation(
+    @Body(new ZodValidationPipe(qualitySimulationSchema)) input: QualitySimulationInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) {
+    return this.simulate.execute(input, actor);
+  }
   @Get('product-changes') productChanges(
     @Query(new ZodValidationPipe(qualityReviewQuerySchema)) query: QualityReviewQuery,
     @CurrentActor() actor: AuthenticatedActor,

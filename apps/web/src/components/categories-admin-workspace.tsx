@@ -15,6 +15,7 @@ import {
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { CategoryGovernanceDrawer } from '@/components/category-governance-drawer';
 import { CategorySkuAssignmentsDrawer } from '@/components/category-sku-assignments-drawer';
 import { CatalogDesignDrawer } from '@/components/catalog-design-drawer';
 import { PageHeader } from '@/components/page-header';
@@ -164,6 +165,9 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
   const [savingId, setSavingId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<AdminTemplateDto[]>([]);
   const [view, setView] = useState<'tree' | 'table'>('tree');
+  const [governanceMode, setGovernanceMode] = useState<
+    'import' | 'attributes' | 'diagnostics' | null
+  >(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -321,22 +325,38 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
         actions={
           <>
             {canManage ? (
-              <Button variant="outline" onClick={() => setAssignmentsOpen(true)}>
+              <Button size="sm" variant="outline" onClick={() => setAssignmentsOpen(true)}>
                 Categorías de SKU
               </Button>
             ) : null}
             {canManage ? (
-              <Button onClick={() => setDesign({ operation: 'create', category: null })}>
+              <Button size="sm" onClick={() => setDesign({ operation: 'create', category: null })}>
                 Nueva categoría
               </Button>
             ) : null}
-            <Button
-              disabled
-              title="La importación requiere el contrato aprobado de sincronización ERP"
-            >
-              Importar árbol
-            </Button>
-            <Button asChild variant="outline">
+            {canManage ? (
+              <details className="relative">
+                <summary className="inline-flex h-8 cursor-pointer items-center rounded-md border bg-white px-3 text-xs font-semibold">
+                  Más acciones
+                </summary>
+                <div className="absolute right-0 top-9 z-30 grid min-w-56 gap-1 rounded-lg border bg-white p-2 shadow-lg">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setGovernanceMode('diagnostics')}
+                  >
+                    Diagnóstico de categorías
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setGovernanceMode('attributes')}>
+                    Atributos por categoría
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setGovernanceMode('import')}>
+                    Importar árbol
+                  </Button>
+                </div>
+              </details>
+            ) : null}
+            <Button asChild size="sm" variant="outline">
               <Link href="/templates">Administrar plantillas</Link>
             </Button>
           </>
@@ -354,7 +374,7 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
       />
 
       <section
-        className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground"
+        className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
         aria-label="Indicadores de categorías"
       >
         <span>
@@ -386,8 +406,8 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
         </div>
       ) : null}
 
-      <Card className="mb-5 p-4 sm:p-5">
-        <nav className="mb-4 flex gap-1 border-b pb-3" aria-label="Vista de categorías">
+      <Card className="mb-2 flex flex-wrap items-center gap-2 p-2">
+        <nav className="flex gap-1" aria-label="Vista de categorías">
           {(
             [
               ['tree', 'Árbol de categorías'],
@@ -408,23 +428,23 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
             </Button>
           ))}
         </nav>
-        <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_auto_auto] md:items-end">
-          <label className="grid gap-1.5 text-xs font-semibold text-muted-foreground">
-            Buscar categorías
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <label className="min-w-48 flex-1 text-xs font-semibold text-muted-foreground">
+            <span className="sr-only">Buscar categorías</span>
             <span className="relative block">
               <Search
                 aria-hidden="true"
                 className="absolute left-3 top-1/2 size-4 -translate-y-1/2"
               />
               <Input
-                className="pl-9"
+                className="h-8 pl-9"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Categoría padre, hija, aplicación o ruta"
               />
             </span>
           </label>
-          <label className="flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium">
+          <label className="flex h-8 items-center gap-2 rounded-md border px-2 text-xs font-medium">
             <input
               type="checkbox"
               checked={showInactive}
@@ -481,6 +501,7 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
       ) : view === 'tree' ? (
         <CategoryTreePanel
           rows={visibleTreeRows}
+          canConfigureHome={canManage}
           templatesForCategory={categoryTemplates}
           searching={Boolean(query.trim())}
           savingId={savingId}
@@ -745,6 +766,14 @@ export function CategoriesAdminWorkspace({ canManage = false }: { canManage?: bo
           </div>
         </Card>
       )}
+      {governanceMode ? (
+        <CategoryGovernanceDrawer
+          mode={governanceMode}
+          categories={categories}
+          onClose={() => setGovernanceMode(null)}
+          onSaved={load}
+        />
+      ) : null}
       {assignmentsOpen ? (
         <CategorySkuAssignmentsDrawer onClose={() => setAssignmentsOpen(false)} onSaved={load} />
       ) : null}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assertUuid } from '@cdr/shared';
+import { groupApplicationSchema } from '@cdr/contracts';
 
 import { GroupApplication } from './group-application';
 
@@ -79,6 +80,32 @@ describe('GroupApplication', () => {
       fuel: 'DIESEL',
       bodyStyle: null,
     });
+  });
+
+  it('retains archived column values and returns a readable DTO after the sixty-first historical key', () => {
+    const original = Object.fromEntries(
+      Array.from({ length: 60 }, (_, index) => [`campo_${index}`, `Valor ${index}`]),
+    );
+    const application = GroupApplication.create(
+      {
+        groupId,
+        unifiedCode: 'D1672',
+        vehicleType: 'AUTOMOTRIZ',
+        make: 'Toyota',
+        model: 'Hilux',
+        additionalFields: original,
+      },
+      now,
+    );
+    application.update({ additionalFields: { renamed: 'Dato vigente' } }, now);
+    const snapshot = application.toSnapshot();
+    const response = groupApplicationSchema.parse({
+      ...snapshot,
+      createdAt: snapshot.createdAt.toISOString(),
+      updatedAt: snapshot.updatedAt.toISOString(),
+    });
+    expect(response.additionalFields).toEqual({ ...original, renamed: 'Dato vigente' });
+    expect(Object.keys(response.additionalFields!)).toHaveLength(61);
   });
 
   it('enforces the same text limits as the HTTP contract on create and update', () => {

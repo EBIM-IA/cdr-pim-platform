@@ -50,6 +50,7 @@ describe('migration runner', () => {
         WHERE table_schema = 'public' ORDER BY table_name
       `;
       expect(tables.map((row) => row.table_name)).toEqual([
+        'application_column_settings',
         'attribute_definitions',
         'attribute_templates',
         'audit_change_items',
@@ -57,9 +58,11 @@ describe('migration runner', () => {
         'ax_inbound_batches',
         'ax_inbound_records',
         'catalog_categories',
+        'catalog_category_erp_codes',
         'catalog_home_settings',
         'catalog_parameters',
         'catalog_product_readiness',
+        'category_dynamic_attributes',
         'cdr_schema_migrations',
         'code_affixes',
         'ecommerce_descriptions',
@@ -71,7 +74,9 @@ describe('migration runner', () => {
         'file_maintenance_leases',
         'group_applications',
         'group_oem_codes',
+        'identity_module_policies',
         'import_batches',
+        'import_executions',
         'import_rows',
         'product_assets',
         'product_attribute_drafts',
@@ -81,6 +86,7 @@ describe('migration runner', () => {
         'product_embeddings',
         'product_identifiers',
         'product_name_settings',
+        'product_technical_sheet_visibility',
         'product_template_assignments',
         'products',
         'quality_review_items',

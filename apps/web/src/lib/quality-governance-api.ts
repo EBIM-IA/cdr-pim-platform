@@ -1,4 +1,9 @@
 import {
+  qualitySimulationSchema,
+  qualitySimulationResultSchema,
+  type QualitySimulationInput,
+} from '@cdr/contracts';
+import {
   qualityProductChangesSchema,
   qualityCompletenessSchema,
   qualitySourcePrioritySchema,
@@ -45,6 +50,9 @@ export function listQualityReviews(query: Partial<QualityReviewQuery> = {}, sign
   );
   return request(`/reviews?${params}`, qualityReviewListSchema, undefined, signal);
 }
+export function getQualityReview(id: string, signal?: AbortSignal) {
+  return request(`/reviews/${encodeURIComponent(id)}`, qualityReviewSchema, undefined, signal);
+}
 export function decideQualityReview(id: string, input: QualityDecisionInput) {
   return request(
     `/reviews/${encodeURIComponent(id)}/decision`,
@@ -78,4 +86,8 @@ export function listQualityProductChanges(page = 1, signal?: AbortSignal) {
     undefined,
     signal,
   );
+}
+
+export function simulateQuality(input: QualitySimulationInput) {
+  return request('/simulate', qualitySimulationResultSchema, qualitySimulationSchema.parse(input));
 }

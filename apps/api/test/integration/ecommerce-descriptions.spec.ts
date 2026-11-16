@@ -55,6 +55,19 @@ describe('ecommerce description persistence', () => {
       descripcion: 'Texto revisado.',
     });
   });
+  it('preserves the exact generation prompt through database reloads', async () => {
+    const generationPrompt = {
+      instruction: 'Usa solo datos confirmados.',
+      input: '{"sku":"ECOM-1"}',
+      maxOutputTokens: 800,
+      temperature: 0.2,
+    };
+    await repository.save({ ...value(), generationPrompt }, 0, entry());
+    expect(
+      (await new DrizzleEcommerceDescription(database.db).get(productId, value().variantKey))
+        ?.generationPrompt,
+    ).toEqual(generationPrompt);
+  });
   it('rolls back the text when its immutable audit event fails', async () => {
     const audit = entry();
     await repository.save(value(), 0, audit);

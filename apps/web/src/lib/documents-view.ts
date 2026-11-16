@@ -7,7 +7,10 @@ export type DocumentProduct = CatalogWorkbookProductDto;
 export type DocumentAssets = Readonly<Record<string, ProductAssetDto[]>>;
 
 /** Read complete pages before filtering/exporting; the assets endpoint accepts at most 100 IDs. */
-export async function fetchDocumentsCatalog(signal?: AbortSignal): Promise<{
+export async function fetchDocumentsCatalog(
+  signal?: AbortSignal,
+  productScope?: { id: string; sku: string },
+): Promise<{
   products: DocumentProduct[];
   assets: DocumentAssets;
 }> {
@@ -16,7 +19,21 @@ export async function fetchDocumentsCatalog(signal?: AbortSignal): Promise<{
   let page = 1;
   let total = 0;
   do {
-    const result = await fetchCatalogWorkbook({ page, pageSize: 100, filter: [] }, signal);
+    const result = await fetchCatalogWorkbook(
+      {
+        page,
+        pageSize: 100,
+        filter: [],
+        ...(productScope
+          ? {
+              columnFilter: [
+                JSON.stringify({ key: 'base:sku', values: [`value:${productScope.sku}`] }),
+              ],
+            }
+          : {}),
+      },
+      signal,
+    );
     total = result.total;
     let added = 0;
     for (const product of result.items) {

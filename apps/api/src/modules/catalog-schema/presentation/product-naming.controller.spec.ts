@@ -1,3 +1,4 @@
+import { ModulePolicyUseCase } from '../../identity/application/module-policy.use-case';
 import { type ExecutionContext, RequestMethod } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenError, UnauthorizedError } from '@cdr/shared';
@@ -74,9 +75,13 @@ describe('ProductNamingController', () => {
 
   it('requires bearer authentication on every naming route with the production JWT guard', async () => {
     const verifyAccessToken = vi.fn();
-    const guard = new JwtAuthGuard(new Reflector(), {
-      verifyAccessToken,
-    } as unknown as TokenServicePort);
+    const guard = new JwtAuthGuard(
+      new Reflector(),
+      {
+        verifyAccessToken,
+      } as unknown as TokenServicePort,
+      new ModulePolicyUseCase({ read: async () => [], save: async () => {} }),
+    );
     for (const method of ['settings', 'save', 'preview', 'search', 'experience'] as const) {
       const context = {
         getHandler: () => ProductNamingController.prototype[method],

@@ -1,3 +1,4 @@
+import { StatePanel } from '@/components/state-panel';
 import type { Metadata } from 'next';
 import { productListQuerySchema, type ProductStatus } from '@cdr/contracts';
 
@@ -29,6 +30,14 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const initialBrand = parsed.success ? (parsed.data.brand ?? '') : '';
   const initialStatus: ProductStatus | '' = parsed.success ? (parsed.data.status ?? '') : '';
   const actor = await getCurrentActor();
+  if (!actor?.capabilities.includes('menu:products:view'))
+    return (
+      <StatePanel
+        variant="error"
+        title="Sin permisos para esta pantalla"
+        description="El módulo Productos está desactivado para tu perfil."
+      />
+    );
   const roles = actor?.roles ?? [];
   const administrator = isAdministrator(roles);
   const salesOnly = isSalesOnly(roles);

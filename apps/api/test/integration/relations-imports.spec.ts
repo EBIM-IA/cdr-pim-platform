@@ -12,6 +12,7 @@ import {
 import { GroupOemCode } from '../../src/modules/equivalences/domain/entities/group-oem-code';
 import { DrizzleGroupOemCodeRepository } from '../../src/modules/equivalences/infrastructure/persistence/drizzle-group-oem-code.repository';
 import { ImportBatch } from '../../src/modules/imports/domain/entities/import-batch';
+import { parseImportPayload } from '../../src/modules/imports/application/parse-import-payload';
 import { DrizzleImportBatchRepository } from '../../src/modules/imports/infrastructure/persistence/drizzle-import-batch.repository';
 import { type TestDatabase, createTestDatabase } from './database.helper';
 
@@ -43,6 +44,38 @@ describe('group relationships and imports persistence', () => {
   });
 
   afterAll(() => database.close());
+
+  it('persists a real CSV preview with both valid and rejected rows', async () => {
+    const repository = new DrizzleImportBatchRepository(database.db);
+    const rows = parseImportPayload({
+      target: 'homologs',
+      format: 'csv',
+      idempotencyKey: 'csv-preview-dictionaries',
+      csv: 'codigo_unificador;codigo_homologo;marca_homologo\nD1672;CSV-42;EXTERNAL\nD1672;;EXTERNAL\n',
+    });
+    const batch = ImportBatch.preview(
+      {
+        target: 'homologs',
+        format: 'csv',
+        idempotencyKey: 'csv-preview-dictionaries',
+        payloadHash: 'csv-preview-hash',
+        categoryCode: null,
+        createdBy: 'admin',
+        rows,
+      },
+      now,
+    );
+
+    await repository.savePreview(batch);
+    const persisted = (await repository.findById(batch.toSnapshot().id))?.toSnapshot();
+    expect(persisted?.rows.map((row) => row.valid)).toEqual([true, false]);
+    expect(persisted?.rows[0]?.data).toMatchObject({
+      unifiedCode: 'D1672',
+      externalCode: 'CSV-42',
+      externalBrand: 'EXTERNAL',
+    });
+    expect(persisted?.rows[1]?.errors.length).toBeGreaterThan(0);
+  });
 
   it('keeps unverified compatibility out of consultation and reopens review after a change', async () => {
     const repository = new DrizzleGroupApplicationRepository(database.db);

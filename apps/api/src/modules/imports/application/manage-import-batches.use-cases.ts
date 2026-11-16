@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { ApplicationVehicleType, PreviewImportInput } from '@cdr/contracts';
 import {
   type Clock,
   ConflictError,
+  DependencyUnavailableError,
   NotFoundError,
   ValidationError,
   type Uuid,
@@ -56,7 +57,13 @@ import {
   IMPORT_BATCH_REPOSITORY,
   type ImportBatchRepositoryPort,
 } from '../domain/ports/import-batch-repository.port';
+import {
+  APPLICATION_COLUMN_SETTINGS,
+  type ApplicationColumnSettingsPort,
+} from '../../applications/domain/ports/application-column-settings.port';
+import { validateApplicationAdditionalFields } from '../../applications/domain/entities/application-columns';
 import { parseImportPayload } from './parse-import-payload';
+import { isRetryableImportFailure } from './import-execution-errors';
 
 @Injectable()
 export class PreviewImportBatchUseCase {
@@ -73,10 +80,19 @@ export class PreviewImportBatchUseCase {
     private readonly categoryAttributes: CategoryAttributeImportPort,
     @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
     private readonly homologReferencePolicy: ExternalHomologReferencePolicyPort,
+    @Optional()
+    @Inject(APPLICATION_COLUMN_SETTINGS)
+    private readonly applicationColumns?: ApplicationColumnSettingsPort,
   ) {}
 
   async execute(input: PreviewImportInput, actor: AuthenticatedActor): Promise<ImportBatch> {
-    const parsedRows = parseImportPayload(input);
+    const configuredColumns =
+      input.target === 'applications'
+        ? ((await this.applicationColumns?.get())?.columns ?? [])
+        : [];
+    const parsedRows = parseImportPayload(input, configuredColumns);
+    // File metadata describes the first preview and never overwrites an idempotent
+    // winner. Keep it outside the content hash so legacy retries still match.
     const payloadHash = createHash('sha256')
       .update(
         JSON.stringify({
@@ -106,6 +122,8 @@ export class PreviewImportBatchUseCase {
       {
         target: input.target,
         format: input.format,
+        originalFileName: input.originalFileName ?? null,
+        sourceFileFormat: input.sourceFileFormat ?? null,
         idempotencyKey: input.idempotencyKey,
         payloadHash,
         categoryCode: input.categoryCode ?? null,
@@ -262,9 +280,16 @@ export class ConfirmImportBatchUseCase {
     private readonly categoryAttributes: CategoryAttributeImportPort,
     @Inject(EXTERNAL_HOMOLOG_REFERENCE_POLICY)
     private readonly homologReferencePolicy: ExternalHomologReferencePolicyPort,
+    @Optional()
+    @Inject(APPLICATION_COLUMN_SETTINGS)
+    private readonly applicationColumns?: ApplicationColumnSettingsPort,
   ) {}
 
-  async execute(id: string, actor: AuthenticatedActor): Promise<ImportBatch> {
+  async execute(
+    id: string,
+    actor: AuthenticatedActor,
+    progress?: (processedRows: number) => Promise<void>,
+  ): Promise<ImportBatch> {
     const batchId = assertUuid(id, 'importBatchId');
     let batch = await this.repository.findById(batchId);
     if (!batch) throw new NotFoundError('ImportBatch', id);
@@ -285,9 +310,9 @@ export class ConfirmImportBatchUseCase {
     batch = claim.batch;
     try {
       if (before.target === 'category') {
-        await this.applyCategoryRows(batch, actor, now, correlationId);
+        await this.applyCategoryRows(batch, actor, now, correlationId, progress);
       } else {
-        await this.applyValidRows(batch, actor, now, confirmationCache());
+        await this.applyValidRows(batch, actor, now, confirmationCache(), progress);
       }
       batch = (await this.repository.findById(batchId)) ?? batch;
       if (!batch.toSnapshot().rows.some((row) => row.valid)) {
@@ -296,6 +321,7 @@ export class ConfirmImportBatchUseCase {
         return (await this.repository.findById(batchId)) ?? batch;
       }
     } catch (error) {
+      if (isRetryableImportFailure(error)) throw error;
       const claimed = (await this.repository.findById(batchId)) ?? batch;
       claimed.failConfirmation();
       await this.repository.saveConfirmation(claimed, audit);
@@ -312,8 +338,10 @@ export class ConfirmImportBatchUseCase {
     actor: AuthenticatedActor,
     now: Date,
     correlationId: string,
+    progress?: (processedRows: number) => Promise<void>,
   ): Promise<void> {
     const snapshot = batch.toSnapshot();
+    let processedRows = 0;
     const categorySlug = snapshot.categoryCode;
     if (!categorySlug) throw new ValidationError('Category imports require a category slug');
     for (const row of snapshot.rows.filter((candidate) => candidate.valid)) {
@@ -322,6 +350,7 @@ export class ConfirmImportBatchUseCase {
         await this.repository.updateRowResult(snapshot.id, row.rowNumber, false, [
           'La vista previa no contiene un plan de confirmación válido',
         ]);
+        await progress?.(++processedRows);
         continue;
       }
       const result = await this.categoryAttributes.applyRow({
@@ -337,6 +366,7 @@ export class ConfirmImportBatchUseCase {
       if (!result.applied) {
         await this.repository.updateRowResult(snapshot.id, row.rowNumber, false, result.errors);
       }
+      await progress?.(++processedRows);
     }
   }
 
@@ -345,8 +375,10 @@ export class ConfirmImportBatchUseCase {
     actor: AuthenticatedActor,
     now: Date,
     cache: ConfirmationCache,
+    progress?: (processedRows: number) => Promise<void>,
   ): Promise<void> {
     const snapshot = batch.toSnapshot();
+    let processedRows = 0;
     const correlationId = getCorrelationId() ?? newUuid();
     for (const row of snapshot.rows.filter((candidate) => candidate.valid)) {
       try {
@@ -358,9 +390,10 @@ export class ConfirmImportBatchUseCase {
           await this.applyOemCode(snapshot.id, row.data, actor, now, correlationId, cache);
         }
       } catch (error) {
-        if (!isDomainError(error)) throw error;
+        if (!isDomainError(error) || error instanceof DependencyUnavailableError) throw error;
         await this.repository.updateRowResult(snapshot.id, row.rowNumber, false, [error.message]);
       }
+      await progress?.(++processedRows);
     }
   }
 
@@ -378,6 +411,8 @@ export class ConfirmImportBatchUseCase {
     );
     if (!group) throw new NotFoundError('EquivalenceGroup', unifiedCode);
     const fields = applicationFields(data);
+    const configuredColumns = (await this.applicationColumns?.get())?.columns ?? [];
+    validateApplicationAdditionalFields(fields.additionalFields, configuredColumns);
     const applications = await memoized(cache.applications, unifiedCode, () =>
       this.applications.list({ unifiedCode, includeInactive: true }),
     );
@@ -433,6 +468,13 @@ export class ConfirmImportBatchUseCase {
     const fields = {
       externalCode: text(data.externalCode),
       externalBrand: text(data.externalBrand),
+      ...(data.name !== undefined ? { name: text(data.name) } : {}),
+      ...(data.referenceType !== undefined ? { referenceType: text(data.referenceType) } : {}),
+      ...(data.referenceSource !== undefined
+        ? { referenceSource: text(data.referenceSource) }
+        : {}),
+      ...(data.note !== undefined ? { note: text(data.note) } : {}),
+
       active: boolean(data.active, true),
       approvalStatus: homologApproval(data.approvalStatus),
     };
@@ -561,6 +603,11 @@ function boolean(value: unknown, fallback: boolean): boolean {
 
 function applicationFields(data: ImportRecord) {
   return {
+    additionalFields: Object.fromEntries(
+      Object.entries(data)
+        .filter(([key]) => key.startsWith('extra:'))
+        .map(([key, value]) => [key.slice(6), text(value) || null]),
+    ),
     vehicleType: text(data.vehicleType) || null,
     make: text(data.make) || null,
     model: text(data.model) || null,

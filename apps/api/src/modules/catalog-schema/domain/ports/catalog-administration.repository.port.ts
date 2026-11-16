@@ -13,6 +13,12 @@ export type AdminMutationResult<T> =
   | { readonly kind: 'version_conflict'; readonly actualUpdatedAt: Date };
 
 export interface CatalogAdministrationRepositoryPort {
+  updateTemplateSections(input: {
+    templateId: Uuid;
+    sections: NonNullable<AdminAttributeTemplate['sections']>;
+    expectedUpdatedAt: Date;
+    audit: AuditMetadata;
+  }): Promise<AdminMutationResult<AdminAttributeTemplate>>;
   listCategories(includeInactive: boolean): Promise<readonly AdminCatalogCategory[]>;
   updateCategory(input: {
     id: Uuid;
@@ -36,6 +42,7 @@ export interface CatalogAdministrationRepositoryPort {
     searchable?: boolean;
     includeInTechnicalSheet?: boolean;
     publishable?: boolean;
+    sectionKey?: string | null;
     position?: number;
     roleAccess?: readonly AttributeRoleAccess[];
     expectedUpdatedAt: Date;

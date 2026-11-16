@@ -201,28 +201,26 @@ describe('ProductNameSettings', () => {
   it('edits affixes and format, reorders fields and saves with the current version', async () => {
     render(<ProductNameSettings />);
     await screen.findByText(experience.nombreGeneral);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Campo 1 de Automotriz' }), {
+    const automotive = within(screen.getByLabelText('Fórmula Automotriz'));
+    const industrial = within(screen.getByLabelText('Fórmula Industrial'));
+    const save = screen.getByRole('button', { name: 'Guardar fórmulas' });
+    const discard = screen.getByRole('button', { name: 'Descartar cambios' });
+    fireEvent.change(automotive.getByLabelText('Campo 1 de Automotriz'), {
       target: { value: 'attribute:diametro' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Antes del campo 1 de Automotriz' }), {
+    fireEvent.change(automotive.getByLabelText('Antes del campo 1 de Automotriz'), {
       target: { value: 'Diámetro: ' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Después del campo 1 de Automotriz' }), {
+    fireEvent.change(automotive.getByLabelText('Después del campo 1 de Automotriz'), {
       target: { value: ' mm' },
     });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Formato del campo 1 de Automotriz' }), {
+    fireEvent.change(automotive.getByLabelText('Formato del campo 1 de Automotriz'), {
       target: { value: 'upper' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Bajar campo 1 de Automotriz' }));
-    expect(screen.getByRole('combobox', { name: 'Campo 1 de Automotriz' })).toHaveValue(
-      'erp:marca',
-    );
-    expect(screen.getByRole('textbox', { name: 'Antes del campo 2 de Automotriz' })).toHaveValue(
-      'Diámetro: ',
-    );
-    expect(screen.getByRole('textbox', { name: 'Después del campo 2 de Automotriz' })).toHaveValue(
-      ' mm',
-    );
+    fireEvent.click(automotive.getByRole('button', { name: 'Bajar campo 1 de Automotriz' }));
+    expect(automotive.getByLabelText('Campo 1 de Automotriz')).toHaveValue('erp:marca');
+    expect(automotive.getByLabelText('Antes del campo 2 de Automotriz')).toHaveValue('Diámetro: ');
+    expect(automotive.getByLabelText('Después del campo 2 de Automotriz')).toHaveValue(' mm');
     const expectedConfig = {
       ...settings.config,
       automotive: [
@@ -236,25 +234,23 @@ describe('ProductNameSettings', () => {
         settings.config.automotive[2]!,
       ],
     };
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar fórmulas' }));
+    fireEvent.click(save);
     await waitFor(() =>
       expect(saveProductNameSettings).toHaveBeenCalledWith({ config: expectedConfig, version: 4 }),
     );
     expect(await screen.findByText(/Fórmulas guardadas\./u)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Guardar fórmulas' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Descartar cambios' })).toBeDisabled();
+    expect(save).toBeDisabled();
+    expect(discard).toBeDisabled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Después del campo 2 de Automotriz' }), {
+    fireEvent.change(automotive.getByLabelText('Después del campo 2 de Automotriz'), {
       target: { value: ' milímetros' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
-    expect(screen.getByRole('textbox', { name: 'Después del campo 2 de Automotriz' })).toHaveValue(
-      ' mm',
-    );
-    fireEvent.change(screen.getByRole('textbox', { name: 'Antes del campo 1 de Industrial' }), {
+    fireEvent.click(discard);
+    expect(automotive.getByLabelText('Después del campo 2 de Automotriz')).toHaveValue(' mm');
+    fireEvent.change(industrial.getByLabelText('Antes del campo 1 de Industrial'), {
       target: { value: 'Código ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar fórmulas' }));
+    fireEvent.click(save);
     await waitFor(() =>
       expect(saveProductNameSettings).toHaveBeenLastCalledWith({
         config: {

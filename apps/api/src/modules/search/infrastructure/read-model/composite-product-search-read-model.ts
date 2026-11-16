@@ -173,7 +173,7 @@ export class CompositeProductSearchReadModel implements ProductSearchReadModelPo
           .filter((homolog) => homolog.eligibleForSearch)
           .flatMap((homolog) => {
             const value = homolog.toSnapshot();
-            return [value.externalCode, value.externalBrand];
+            return [value.externalCode, value.externalBrand, ...(value.name ? [value.name] : [])];
           }),
       );
       relationParts.push(

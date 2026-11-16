@@ -15,6 +15,7 @@ import {
   AddTemplateAttributeDrawer,
   TemplateInheritanceSimulator,
 } from '@/components/template-design-tools';
+import { TemplateSectionsEditor } from '@/components/template-sections-editor';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -271,7 +272,8 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
       .filter(
         (attribute) =>
           !sectionFilter ||
-          sectionFilter === (attribute.sourceAuthority === 'erp' ? 'erp' : 'enrichment'),
+          sectionFilter === (attribute.sourceAuthority === 'erp' ? 'erp' : 'enrichment') ||
+          sectionFilter === `section:${attribute.sectionKey}`,
       )
       .filter((attribute) => !kindFilter || attribute.dataType === kindFilter)
       .filter((attribute) => !requiredFilter || String(attribute.required) === requiredFilter)
@@ -344,7 +346,7 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
   const assetPolicies = template?.assetRequirements ?? [];
   const visibleAssetPolicies = assetPolicies.filter(
     (policy) =>
-      (!sectionFilter || sectionFilter === 'asset') &&
+      (!sectionFilter || sectionFilter === 'asset' || sectionFilter === 'section:docs') &&
       (!kindFilter || kindFilter === (policy.type === 'FOTO' ? 'image' : 'file')) &&
       (!requiredFilter || String(policy.required) === requiredFilter) &&
       (!activeFilter || activeFilter === 'true') &&
@@ -1093,276 +1095,319 @@ export function TemplatesAdminWorkspace({ canManageTemplate }: { canManageTempla
               description="No hay versiones de plantilla para la categoría seleccionada."
             />
           ) : (
-            <Card id="template-attributes" className="scroll-mt-3 overflow-hidden">
-              <div className="px-5 pb-3 pt-4">
-                <h2 className="text-base font-semibold">
-                  Atributos · {attributes.length + visibleAssetPolicies.length} de{' '}
-                  {(template.attributes?.length ?? 0) + assetPolicies.length}
-                </h2>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  Orden de la plantilla. Los datos base ERP son de solo lectura en la ficha. COMPRAS
-                  y VENTAS indican la visibilidad por rol; Exportable controla la ficha técnica
-                  descargable. Al desactivar un atributo conserva sus valores y deja de contar en la
-                  completitud.
-                </p>
-              </div>
-              <div className="grid gap-2.5 px-5 pb-4 sm:grid-cols-2 lg:grid-cols-[minmax(200px,1.6fr)_repeat(3,minmax(0,1fr))] [&_select]:h-9 [&_select]:min-w-0 [&_select]:rounded-md [&_select]:border [&_select]:bg-white [&_select]:px-2 [&_select]:text-xs">
-                <label>
-                  <span className="sr-only">Buscar atributos</span>
-                  <Input
-                    className="h-9 text-xs"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Buscar atributo o clave…"
-                  />
-                </label>
-                <select
-                  aria-label="Sección"
-                  value={sectionFilter}
-                  onChange={(event) => setSectionFilter(event.target.value)}
-                >
-                  <option value="">Todas las secciones</option>
-                  <option value="erp">Base ERP</option>
-                  <option value="enrichment">Enriquecimiento</option>
-                  <option value="asset">Archivo / imagen</option>
-                </select>
-                <select
-                  aria-label="Tipo de atributo"
-                  value={kindFilter}
-                  onChange={(event) => setKindFilter(event.target.value)}
-                >
-                  <option value="">Todos los tipos</option>
-                  {Object.entries(typeLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                  <option value="file">Archivo</option>
-                  <option value="image">Imagen</option>
-                </select>
-                <select
-                  aria-label="Obligatoriedad"
-                  value={requiredFilter}
-                  onChange={(event) => setRequiredFilter(event.target.value)}
-                >
-                  <option value="">Obligatorio y opcional</option>
-                  <option value="true">Obligatorio</option>
-                  <option value="false">Opcional</option>
-                </select>
-                <select
-                  aria-label="Estado del atributo"
-                  value={activeFilter}
-                  onChange={(event) => setActiveFilter(event.target.value)}
-                >
-                  <option value="">Activos e inactivos</option>
-                  <option value="true">Solo activos</option>
-                  <option value="false">Solo inactivos</option>
-                </select>
-                <select
-                  aria-label="Replicable"
-                  value={replicableFilter}
-                  onChange={(event) => setReplicableFilter(event.target.value)}
-                >
-                  <option value="">Replicable y no replicable</option>
-                  <option value="true">Solo replicables</option>
-                  <option value="false">Solo no replicables</option>
-                </select>
-                <select
-                  aria-label="Visibilidad por rol"
-                  value={roleFilter}
-                  onChange={(event) => setRoleFilter(event.target.value)}
-                >
-                  <option value="">Todos los roles</option>
-                  <option value="COMPRAS:true">Visibles para COMPRAS</option>
-                  <option value="COMPRAS:false">Ocultos para COMPRAS</option>
-                  <option value="VENTAS:true">Visibles para VENTAS</option>
-                  <option value="VENTAS:false">Ocultos para VENTAS</option>
-                </select>
-                <select
-                  aria-label="Exportable en la ficha técnica"
-                  value={exportFilter}
-                  onChange={(event) => setExportFilter(event.target.value)}
-                >
-                  <option value="">Exportables y no exportables</option>
-                  <option value="true">Solo exportables</option>
-                  <option value="false">Solo no exportables</option>
-                </select>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1250px] text-left text-sm">
-                  <caption className="sr-only">Atributos y permisos de {template.name}</caption>
-                  <thead>
-                    <tr>
-                      {[
-                        'Orden',
-                        'Atributo',
-                        'Activo',
-                        'Tipo',
-                        'Unidad',
-                        'Fuente',
-                        'Obligatorio',
-                        'Replicable',
-                        'COMPRAS',
-                        'VENTAS',
-                        'Exportable',
-                        'Muestra',
-                        'Acción',
-                      ].map((label) => (
-                        <th key={label} scope="col" className="px-2 py-1">
-                          {label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attributes.map((attribute) => (
-                      <tr
-                        key={attribute.id}
-                        className={cn(
-                          'border-t align-top',
-                          !attribute.active && 'bg-slate-50 text-slate-500',
-                        )}
-                      >
-                        <td className="px-2 py-1 text-center">{attribute.position}</td>
-                        <td className="min-w-44 px-2 py-1">
-                          <span className="block">{attribute.label}</span>
-                          <code className="text-[10px] text-muted-foreground">{attribute.key}</code>
-                        </td>
-                        <td className="px-2 py-1">
-                          <AttributeSwitch
-                            checked={attribute.active}
-                            disabled={!canManageTemplate || saving}
-                            label={`Activo: ${attribute.label}`}
-                            onChange={() =>
-                              void updateFromTable(attribute, { active: !attribute.active })
-                            }
-                          />
-                        </td>
-                        <td className="px-2 py-1">{typeLabels[attribute.dataType]}</td>
-                        <td className="px-2 py-1">{attribute.unit ?? '—'}</td>
-                        <td className="px-2 py-1 text-xs">
-                          {sourceLabels[attribute.sourceAuthority]}
-                        </td>
-                        <td className="px-2 py-1">
-                          <AttributeSwitch
-                            checked={attribute.required}
-                            disabled={!canManageTemplate || saving}
-                            label={`Obligatorio: ${attribute.label}`}
-                            onChange={() =>
-                              void updateFromTable(attribute, { required: !attribute.required })
-                            }
-                          />
-                        </td>
-                        <td className="px-2 py-1">
-                          <AttributeSwitch
-                            checked={attribute.replicable}
-                            disabled={!canManageTemplate || saving}
-                            label={`Replicable: ${attribute.label}`}
-                            onChange={() =>
-                              void updateFromTable(attribute, { replicable: !attribute.replicable })
-                            }
-                          />
-                        </td>
-                        {(['COMPRAS', 'VENTAS'] as const).map((role) => {
-                          const access = completeRoleAccess(attribute.roleAccess).find(
-                            (item) => item.role === role,
-                          )!;
-                          return (
-                            <td key={role} className="px-2 py-1">
-                              <AttributeSwitch
-                                checked={access.canView}
-                                disabled={!canManageTemplate || saving}
-                                label={`Visible para ${roleLabels[role]}: ${attribute.label}`}
-                                onChange={() =>
-                                  void updateFromTable(attribute, {
-                                    roleAccess: updateRolePermission(
-                                      attribute.roleAccess,
-                                      role,
-                                      'canView',
-                                      !access.canView,
-                                    ),
-                                  })
-                                }
-                              />
-                            </td>
-                          );
-                        })}
-                        <td className="px-2 py-1">
-                          <AttributeSwitch
-                            checked={attribute.includeInTechnicalSheet}
-                            disabled={!canManageTemplate || saving}
-                            label={`Ficha técnica: ${attribute.label}`}
-                            onChange={() =>
-                              void updateFromTable(attribute, {
-                                includeInTechnicalSheet: !attribute.includeInTechnicalSheet,
-                              })
-                            }
-                          />
-                        </td>
-                        <td
-                          className="px-2 py-1 text-muted-foreground"
-                          title="La muestra original no está disponible para consulta"
-                        >
-                          —
-                        </td>
-                        <td className="px-2 py-1">
-                          {canManageTemplate ? (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={saving}
-                              onClick={() => beginEdit(attribute)}
-                            >
-                              <Pencil className="size-3" aria-hidden="true" />
-                              Configurar
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Solo lectura</span>
-                          )}
-                        </td>
-                      </tr>
+            <>
+              <TemplateSectionsEditor
+                template={template}
+                disabled={!canManageTemplate || saving}
+                onSaved={() => void loadTemplate(template.id)}
+              />
+              <Card id="template-attributes" className="scroll-mt-3 overflow-hidden">
+                <div className="px-5 pb-3 pt-4">
+                  <h2 className="text-base font-semibold">
+                    Atributos · {attributes.length + visibleAssetPolicies.length} de{' '}
+                    {(template.attributes?.length ?? 0) + assetPolicies.length}
+                  </h2>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    Orden de la plantilla. Los datos base ERP son de solo lectura en la ficha.
+                    COMPRAS y VENTAS indican la visibilidad por rol; Exportable controla la ficha
+                    técnica descargable. Al desactivar un atributo conserva sus valores y deja de
+                    contar en la completitud.
+                  </p>
+                </div>
+                <div className="grid gap-2.5 px-5 pb-4 sm:grid-cols-2 lg:grid-cols-[minmax(200px,1.6fr)_repeat(3,minmax(0,1fr))] [&_select]:h-9 [&_select]:min-w-0 [&_select]:rounded-md [&_select]:border [&_select]:bg-white [&_select]:px-2 [&_select]:text-xs">
+                  <label>
+                    <span className="sr-only">Buscar atributos</span>
+                    <Input
+                      className="h-9 text-xs"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Buscar atributo o clave…"
+                    />
+                  </label>
+                  <select
+                    aria-label="Sección"
+                    value={sectionFilter}
+                    onChange={(event) => setSectionFilter(event.target.value)}
+                  >
+                    <option value="">Todas las secciones</option>
+                    <option value="erp">Base ERP</option>
+                    <option value="enrichment">Enriquecimiento</option>
+                    <option value="asset">Archivo / imagen</option>
+                    {(template.sections ?? []).map((section) => (
+                      <option key={section.key} value={`section:${section.key}`}>
+                        {section.position + 1}. {section.label}
+                      </option>
                     ))}
-                    {visibleAssetPolicies.map((policy) => (
-                      <tr key={`asset-${policy.type}`} className="border-t align-top">
-                        <td className="px-2 py-1">—</td>
-                        <td className="px-2 py-1">
-                          {policyLabels[policy.type]}
-                          <code className="block text-[10px] text-muted-foreground">
-                            {policy.type}
-                          </code>
-                        </td>
-                        <td className="px-2 py-1">Sí</td>
-                        <td className="px-2 py-1">
-                          {policy.type === 'FOTO' ? 'Imagen' : 'Archivo'}
-                        </td>
-                        <td className="px-2 py-1">—</td>
-                        <td className="px-2 py-1">Activo del producto</td>
-                        <td className="px-2 py-1">
-                          <StatusBadge tone={policy.required ? 'warning' : 'neutral'}>
-                            {policy.required ? 'Obligatorio' : 'Opcional'}
-                          </StatusBadge>
-                        </td>
-                        <td colSpan={5} className="px-2 py-1 text-xs text-muted-foreground">
-                          Requisito documental de la plantilla · consulta
-                        </td>
-                        <td className="px-2 py-1">
-                          <Link href="/documents" className="text-xs underline">
-                            Ver activos
-                          </Link>
-                        </td>
-                      </tr>
+                  </select>
+                  <select
+                    aria-label="Tipo de atributo"
+                    value={kindFilter}
+                    onChange={(event) => setKindFilter(event.target.value)}
+                  >
+                    <option value="">Todos los tipos</option>
+                    {Object.entries(typeLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
                     ))}
-                    {!attributes.length && !visibleAssetPolicies.length ? (
+                    <option value="file">Archivo</option>
+                    <option value="image">Imagen</option>
+                  </select>
+                  <select
+                    aria-label="Obligatoriedad"
+                    value={requiredFilter}
+                    onChange={(event) => setRequiredFilter(event.target.value)}
+                  >
+                    <option value="">Obligatorio y opcional</option>
+                    <option value="true">Obligatorio</option>
+                    <option value="false">Opcional</option>
+                  </select>
+                  <select
+                    aria-label="Estado del atributo"
+                    value={activeFilter}
+                    onChange={(event) => setActiveFilter(event.target.value)}
+                  >
+                    <option value="">Activos e inactivos</option>
+                    <option value="true">Solo activos</option>
+                    <option value="false">Solo inactivos</option>
+                  </select>
+                  <select
+                    aria-label="Replicable"
+                    value={replicableFilter}
+                    onChange={(event) => setReplicableFilter(event.target.value)}
+                  >
+                    <option value="">Replicable y no replicable</option>
+                    <option value="true">Solo replicables</option>
+                    <option value="false">Solo no replicables</option>
+                  </select>
+                  <select
+                    aria-label="Visibilidad por rol"
+                    value={roleFilter}
+                    onChange={(event) => setRoleFilter(event.target.value)}
+                  >
+                    <option value="">Todos los roles</option>
+                    <option value="COMPRAS:true">Visibles para COMPRAS</option>
+                    <option value="COMPRAS:false">Ocultos para COMPRAS</option>
+                    <option value="VENTAS:true">Visibles para VENTAS</option>
+                    <option value="VENTAS:false">Ocultos para VENTAS</option>
+                  </select>
+                  <select
+                    aria-label="Exportable en la ficha técnica"
+                    value={exportFilter}
+                    onChange={(event) => setExportFilter(event.target.value)}
+                  >
+                    <option value="">Exportables y no exportables</option>
+                    <option value="true">Solo exportables</option>
+                    <option value="false">Solo no exportables</option>
+                  </select>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1250px] text-left text-sm">
+                    <caption className="sr-only">Atributos y permisos de {template.name}</caption>
+                    <thead>
                       <tr>
-                        <td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">
-                          Ningún atributo coincide con los filtros.
-                        </td>
+                        {[
+                          'Orden',
+                          'Atributo',
+                          'Activo',
+                          'Sección',
+                          'Tipo',
+                          'Unidad',
+                          'Fuente',
+                          'Obligatorio',
+                          'Replicable',
+                          'COMPRAS',
+                          'VENTAS',
+                          'Exportable',
+                          'Muestra',
+                          'Acción',
+                        ].map((label) => (
+                          <th key={label} scope="col" className="px-2 py-1">
+                            {label}
+                          </th>
+                        ))}
                       </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                    </thead>
+                    <tbody>
+                      {attributes.map((attribute) => (
+                        <tr
+                          key={attribute.id}
+                          className={cn(
+                            'border-t align-top',
+                            !attribute.active && 'bg-slate-50 text-slate-500',
+                          )}
+                        >
+                          <td className="px-2 py-1 text-center">{attribute.position}</td>
+                          <td className="min-w-44 px-2 py-1">
+                            <span className="block">{attribute.label}</span>
+                            <code className="text-[10px] text-muted-foreground">
+                              {attribute.key}
+                            </code>
+                          </td>
+                          <td className="px-2 py-1">
+                            <AttributeSwitch
+                              checked={attribute.active}
+                              disabled={!canManageTemplate || saving}
+                              label={`Activo: ${attribute.label}`}
+                              onChange={() =>
+                                void updateFromTable(attribute, { active: !attribute.active })
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <select
+                              aria-label={`Sección de ${attribute.label}`}
+                              className="max-w-48 rounded border p-1 text-xs"
+                              disabled={!canManageTemplate || saving}
+                              value={attribute.sectionKey ?? ''}
+                              onChange={(event) =>
+                                void updateFromTable(attribute, {
+                                  sectionKey: event.target.value || null,
+                                })
+                              }
+                            >
+                              <option value="">Sin sección</option>
+                              {[...(template.sections ?? [])]
+                                .sort((a, b) => a.position - b.position)
+                                .map((section) => (
+                                  <option key={section.key} value={section.key}>
+                                    {section.position + 1}. {section.label}
+                                  </option>
+                                ))}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1">{typeLabels[attribute.dataType]}</td>
+                          <td className="px-2 py-1">{attribute.unit ?? '—'}</td>
+                          <td className="px-2 py-1 text-xs">
+                            {sourceLabels[attribute.sourceAuthority]}
+                          </td>
+                          <td className="px-2 py-1">
+                            <AttributeSwitch
+                              checked={attribute.required}
+                              disabled={!canManageTemplate || saving}
+                              label={`Obligatorio: ${attribute.label}`}
+                              onChange={() =>
+                                void updateFromTable(attribute, { required: !attribute.required })
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <AttributeSwitch
+                              checked={attribute.replicable}
+                              disabled={!canManageTemplate || saving}
+                              label={`Replicable: ${attribute.label}`}
+                              onChange={() =>
+                                void updateFromTable(attribute, {
+                                  replicable: !attribute.replicable,
+                                })
+                              }
+                            />
+                          </td>
+                          {(['COMPRAS', 'VENTAS'] as const).map((role) => {
+                            const access = completeRoleAccess(attribute.roleAccess).find(
+                              (item) => item.role === role,
+                            )!;
+                            return (
+                              <td key={role} className="px-2 py-1">
+                                <AttributeSwitch
+                                  checked={access.canView}
+                                  disabled={!canManageTemplate || saving}
+                                  label={`Visible para ${roleLabels[role]}: ${attribute.label}`}
+                                  onChange={() =>
+                                    void updateFromTable(attribute, {
+                                      roleAccess: updateRolePermission(
+                                        attribute.roleAccess,
+                                        role,
+                                        'canView',
+                                        !access.canView,
+                                      ),
+                                    })
+                                  }
+                                />
+                              </td>
+                            );
+                          })}
+                          <td className="px-2 py-1">
+                            <AttributeSwitch
+                              checked={attribute.includeInTechnicalSheet}
+                              disabled={!canManageTemplate || saving}
+                              label={`Ficha técnica: ${attribute.label}`}
+                              onChange={() =>
+                                void updateFromTable(attribute, {
+                                  includeInTechnicalSheet: !attribute.includeInTechnicalSheet,
+                                })
+                              }
+                            />
+                          </td>
+                          <td
+                            className="px-2 py-1 text-muted-foreground"
+                            title="La muestra original no está disponible para consulta"
+                          >
+                            —
+                          </td>
+                          <td className="px-2 py-1">
+                            {canManageTemplate ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={saving}
+                                onClick={() => beginEdit(attribute)}
+                              >
+                                <Pencil className="size-3" aria-hidden="true" />
+                                Configurar
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Solo lectura</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {visibleAssetPolicies.map((policy) => (
+                        <tr key={`asset-${policy.type}`} className="border-t align-top">
+                          <td className="px-2 py-1">—</td>
+                          <td className="px-2 py-1">
+                            {policyLabels[policy.type]}
+                            <code className="block text-[10px] text-muted-foreground">
+                              {policy.type}
+                            </code>
+                          </td>
+                          <td className="px-2 py-1">Sí</td>
+                          <td className="px-2 py-1">
+                            {template.sections?.find((section) => section.key === 'docs')?.label ??
+                              'Documentos y activos'}
+                          </td>
+                          <td className="px-2 py-1">
+                            {policy.type === 'FOTO' ? 'Imagen' : 'Archivo'}
+                          </td>
+                          <td className="px-2 py-1">—</td>
+                          <td className="px-2 py-1">Activo del producto</td>
+                          <td className="px-2 py-1">
+                            <StatusBadge tone={policy.required ? 'warning' : 'neutral'}>
+                              {policy.required ? 'Obligatorio' : 'Opcional'}
+                            </StatusBadge>
+                          </td>
+                          <td colSpan={5} className="px-2 py-1 text-xs text-muted-foreground">
+                            Requisito documental de la plantilla · consulta
+                          </td>
+                          <td className="px-2 py-1">
+                            <Link href="/documents" className="text-xs underline">
+                              Ver activos
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                      {!attributes.length && !visibleAssetPolicies.length ? (
+                        <tr>
+                          <td colSpan={14} className="px-4 py-8 text-center text-muted-foreground">
+                            Ningún atributo coincide con los filtros.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
           )}
         </div>
       </div>

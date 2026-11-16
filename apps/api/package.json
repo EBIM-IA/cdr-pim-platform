@@ -55,5 +55,21 @@
     "typescript": "^5.9.3",
     "unplugin-swc": "^1.5.7",
     "vitest": "^4.1.11"
+  },
+  "exports": {
+    "./import-worker": {
+      "types": "./dist/workers/import-batch.runtime.d.ts",
+      "default": "./dist/workers/import-batch.runtime.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "typesVersions": {
+    "*": {
+      "import-worker": [
+        "dist/workers/import-batch.runtime.d.ts"
+      ]
+    }
   }
 }

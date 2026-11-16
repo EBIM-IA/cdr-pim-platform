@@ -232,6 +232,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@cdr/api':
+        specifier: workspace:*
+        version: link:../api
       '@cdr/config':
         specifier: workspace:*
         version: link:../../packages/config

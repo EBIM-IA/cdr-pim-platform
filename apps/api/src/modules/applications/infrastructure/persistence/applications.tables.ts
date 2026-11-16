@@ -1,4 +1,13 @@
-import { boolean, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { equivalenceGroups } from '../../../equivalences/infrastructure/persistence/equivalences.tables';
 
@@ -22,6 +31,10 @@ export const groupApplications = pgTable(
     subarea: text('subarea'),
     engine: text('engine'),
     notes: text('notes'),
+    additionalFields: jsonb('additional_fields')
+      .$type<Record<string, string | null>>()
+      .notNull()
+      .default({}),
     active: boolean('active').notNull().default(true),
     verificationStatus: text('verification_status').notNull().default('pending'),
     source: text('source').notNull().default('manual'),

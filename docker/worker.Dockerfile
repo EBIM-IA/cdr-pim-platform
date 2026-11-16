@@ -41,6 +41,8 @@ WORKDIR /app
 
 COPY --from=build --chown=node:node /output/node_modules ./node_modules
 COPY --from=build --chown=node:node /output/dist ./dist
+COPY --from=build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem ./certs/rds-global-bundle.pem
+ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
 
 EXPOSE 3002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

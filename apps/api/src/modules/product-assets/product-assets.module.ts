@@ -1,6 +1,10 @@
 import { PRODUCT_ASSET_OBJECT_REFERENCES } from './domain/ports/product-asset-object-references.port';
 import { DrizzleProductAssetObjectReferences } from './infrastructure/persistence/drizzle-product-asset-object-references';
 import { Module } from '@nestjs/common';
+import { TECHNICAL_SHEET_VISIBILITY } from './domain/ports/technical-sheet-visibility.port';
+import { DrizzleTechnicalSheetVisibility } from './infrastructure/persistence/drizzle-technical-sheet-visibility';
+import { TechnicalSheetVisibilityUseCase } from './application/technical-sheet-visibility.use-case';
+import { TechnicalSheetVisibilityController } from './presentation/technical-sheet-visibility.controller';
 
 import { CatalogModule } from '../catalog/catalog.module';
 import {
@@ -24,8 +28,10 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
 
 @Module({
   imports: [CatalogModule],
-  controllers: [ProductAssetsController],
+  controllers: [TechnicalSheetVisibilityController, ProductAssetsController],
   providers: [
+    { provide: TECHNICAL_SHEET_VISIBILITY, useClass: DrizzleTechnicalSheetVisibility },
+    TechnicalSheetVisibilityUseCase,
     { provide: PRODUCT_ASSET_OBJECT_REFERENCES, useClass: DrizzleProductAssetObjectReferences },
     { provide: PRODUCT_ASSET_REPOSITORY, useClass: DrizzleProductAssetRepository },
     { provide: ASSET_BINARY_STORAGE, useClass: PlatformAssetStorageAdapter },
@@ -38,6 +44,11 @@ import { ProductAssetsController } from './presentation/product-assets.controlle
     DeleteProductAssetUseCase,
     ProcessProductAssetArchiveUseCase,
   ],
-  exports: [PRODUCT_ASSET_REPOSITORY, ASSET_BINARY_STORAGE, PRODUCT_ASSET_OBJECT_REFERENCES],
+  exports: [
+    PRODUCT_ASSET_REPOSITORY,
+    ASSET_BINARY_STORAGE,
+    PRODUCT_ASSET_OBJECT_REFERENCES,
+    TECHNICAL_SHEET_VISIBILITY,
+  ],
 })
 export class ProductAssetsModule {}

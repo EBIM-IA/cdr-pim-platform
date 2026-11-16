@@ -1,3 +1,5 @@
+import { BulkValidateCodeAffixesUseCase } from '../application/bulk-validate-code-affixes.use-case';
+import { bulkValidateCodeAffixesSchema, type BulkValidateCodeAffixesInput } from '@cdr/contracts';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
@@ -36,6 +38,7 @@ import { toCodeAffixDto, toParsedProductCodeDto } from './code-affix.presenter';
 @Controller('code-affixes')
 export class CodeAffixesController {
   constructor(
+    private readonly bulkValidate: BulkValidateCodeAffixesUseCase,
     private readonly listRules: ListCodeAffixesUseCase,
     private readonly createRule: CreateCodeAffixUseCase,
     private readonly updateRule: UpdateCodeAffixUseCase,
@@ -52,6 +55,16 @@ export class CodeAffixesController {
     @Query(new ZodValidationPipe(codeAffixListQuerySchema)) query: CodeAffixListQuery,
   ): Promise<CodeAffixDto[]> {
     return (await this.listRules.execute(query)).map(toCodeAffixDto);
+  }
+
+  @Post('bulk-validation')
+  @RequireCapabilities(Capability.AdministrationManage)
+  async validateBulk(
+    @Body(new ZodValidationPipe(bulkValidateCodeAffixesSchema)) body: BulkValidateCodeAffixesInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) {
+    const result = await this.bulkValidate.execute(body, actor);
+    return { items: result.items.map(toCodeAffixDto), errors: result.errors };
   }
 
   @Post('parse')

@@ -119,6 +119,13 @@ export class DrizzleQualityGovernanceRepository implements QualityGovernancePort
       if (query.kind) predicates.push(eq(qualityReviewItems.kind, query.kind));
       if (query.status) predicates.push(eq(qualityReviewItems.status, query.status));
       if (query.productId) predicates.push(eq(qualityReviewItems.productId, query.productId));
+      if (query.attributeKey)
+        predicates.push(sql`${qualityReviewItems.data}->>'attributeKey'=${query.attributeKey}`);
+      if (query.conflictsOnly)
+        predicates.push(sql`${qualityReviewItems.kind}='attribute' AND (
+          SELECT COUNT(DISTINCT candidate->'value')
+          FROM jsonb_array_elements(${qualityReviewItems.data}->'candidates') candidate
+        ) > 1`);
       const where = and(...predicates);
       const [rows, totals] = await Promise.all([
         this.db

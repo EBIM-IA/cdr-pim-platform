@@ -32,6 +32,87 @@ describe('DrizzleCatalogAdministrationRepository', () => {
   });
   afterAll(() => database?.close());
 
+  it('persists ordered sections and assignments with audit, concurrency and orphan protection', async () => {
+    const [header] = await repository.listTemplates();
+    const template = (await repository.getTemplate(header!.id))!;
+    const sections = [...(template.sections ?? [])]
+      .reverse()
+      .map((section, position) => ({ ...section, position, label: `QA ${section.label}` }));
+    const audit = {
+      actorId: 'admin-test',
+      correlationId: newUuid(),
+      occurredAt: new Date('2026-11-16T17:00:00.000Z'),
+    };
+    const updated = await repository.updateTemplateSections({
+      templateId: template.id,
+      sections,
+      expectedUpdatedAt: template.updatedAt,
+      audit,
+    });
+    expect(updated.kind).toBe('updated');
+    expect((await repository.getTemplate(template.id))?.sections).toEqual(sections);
+    expect(
+      (
+        await repository.updateTemplateSections({
+          templateId: template.id,
+          sections: [],
+          expectedUpdatedAt: template.updatedAt,
+          audit,
+        })
+      ).kind,
+    ).toBe('version_conflict');
+    const attribute = template.attributes![0]!;
+    const assignment = await repository.updateTemplateAttribute({
+      templateId: template.id,
+      attributeDefinitionId: attribute.id,
+      sectionKey: sections[0]!.key,
+      expectedUpdatedAt: attribute.updatedAt,
+      audit,
+    });
+    expect(assignment.kind === 'updated' && assignment.after.sectionKey).toBe(sections[0]!.key);
+    const dynamic = new DrizzleDynamicCatalogRepository(database.db);
+    const schema = await dynamic.getActiveSchema(template.categoryId, { templateId: template.id }, [
+      'ADMINISTRADOR',
+    ]);
+    expect(schema?.sections).toEqual(sections);
+    expect(schema?.attributes.find((item) => item.id === attribute.id)?.sectionKey).toBe(
+      sections[0]!.key,
+    );
+    await expect(
+      repository.updateTemplateSections({
+        templateId: template.id,
+        sections: [],
+        expectedUpdatedAt: (await repository.getTemplate(template.id))!.updatedAt,
+        audit,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const entries = await database.db
+      .select()
+      .from(auditEntries)
+      .where(eq(auditEntries.resourceId, template.id));
+    expect(entries.some((entry) => Boolean(entry.changes.sections))).toBe(true);
+  });
+
+  it('allows only one section writer for the same optimistic token even with a fixed application clock', async () => {
+    const [header] = await repository.listTemplates();
+    const template = (await repository.getTemplate(header!.id))!;
+    const audit = { actorId: 'admin', correlationId: newUuid(), occurredAt: template.updatedAt };
+    const input = {
+      templateId: template.id,
+      sections: template.sections ?? [],
+      expectedUpdatedAt: template.updatedAt,
+      audit,
+    };
+    const results = await Promise.all([
+      repository.updateTemplateSections(input),
+      repository.updateTemplateSections(input),
+    ]);
+    expect(results.map((result) => result.kind).sort()).toEqual(['updated', 'version_conflict']);
+    expect((await repository.getTemplate(template.id))!.updatedAt.getTime()).toBeGreaterThan(
+      template.updatedAt.getTime(),
+    );
+  });
+
   it('returns persisted SKU totals per category, including descendants and empty branches', async () => {
     const categories = await repository.listCategories(true);
     expect(

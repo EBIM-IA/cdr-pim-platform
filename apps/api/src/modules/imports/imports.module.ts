@@ -1,3 +1,8 @@
+import { DispatchImportExecutionsUseCase } from './application/dispatch-import-executions.use-case';
+import { ImportExecutionDispatcher } from './infrastructure/import-execution-runner';
+import { DrizzleImportExecutionAdapter } from './infrastructure/persistence/drizzle-import-execution.adapter';
+import { IMPORT_EXECUTION } from './domain/ports/import-execution.port';
+import { ImportExecutionUseCases } from './application/import-execution.use-cases';
 import { Module } from '@nestjs/common';
 
 import { ApplicationsModule } from '../applications/applications.module';
@@ -27,6 +32,10 @@ import { ImportsController } from './presentation/imports.controller';
   controllers: [ImportsController],
   providers: [
     EnqueueSkeletonPingUseCase,
+    ImportExecutionUseCases,
+    DispatchImportExecutionsUseCase,
+    ImportExecutionDispatcher,
+    { provide: IMPORT_EXECUTION, useClass: DrizzleImportExecutionAdapter },
     EnqueueProductEmbeddingUseCase,
     { provide: IMPORT_BATCH_REPOSITORY, useClass: DrizzleImportBatchRepository },
     PreviewImportBatchUseCase,

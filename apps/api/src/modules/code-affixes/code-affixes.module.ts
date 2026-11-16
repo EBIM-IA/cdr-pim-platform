@@ -1,3 +1,5 @@
+import { CODE_AFFIX_SUGGESTION_WRITER } from './domain/ports/code-affix-suggestion-writer.port';
+import { BulkValidateCodeAffixesUseCase } from './application/bulk-validate-code-affixes.use-case';
 import { Module } from '@nestjs/common';
 
 import {
@@ -17,11 +19,14 @@ import { CodeAffixesController } from './presentation/code-affixes.controller';
   providers: [
     { provide: CODE_AFFIX_REPOSITORY, useClass: DrizzleCodeAffixRepository },
     ListCodeAffixesUseCase,
+    BulkValidateCodeAffixesUseCase,
     CreateCodeAffixUseCase,
+    { provide: CODE_AFFIX_SUGGESTION_WRITER, useExisting: CreateCodeAffixUseCase },
     UpdateCodeAffixUseCase,
     ValidateCodeAffixUseCase,
     DeactivateCodeAffixUseCase,
     ParseProductCodeUseCase,
   ],
+  exports: [CODE_AFFIX_REPOSITORY, CODE_AFFIX_SUGGESTION_WRITER],
 })
 export class CodeAffixesModule {}

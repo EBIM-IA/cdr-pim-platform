@@ -135,6 +135,7 @@ describe('template reference layout', () => {
       'Orden',
       'Atributo',
       'Activo',
+      'Sección',
       'Tipo',
       'Unidad',
       'Fuente',

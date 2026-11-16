@@ -4,6 +4,7 @@ export interface ImportField {
   key: string;
   label: string;
   required?: boolean;
+  aliases?: readonly string[];
 }
 export const importFields: Record<Exclude<ImportTarget, 'category'>, readonly ImportField[]> = {
   applications: [
@@ -25,7 +26,11 @@ export const importFields: Record<Exclude<ImportTarget, 'category'>, readonly Im
   homologs: [
     { key: 'unifiedCode', label: 'Código unificador', required: true },
     { key: 'externalCode', label: 'Código homólogo', required: true },
-    { key: 'externalBrand', label: 'Marca homólogo', required: true },
+    { key: 'externalBrand', label: 'Marca homólogo', required: true, aliases: ['marca', 'brand'] },
+    { key: 'name', label: 'Nombre', aliases: ['nombre', 'descripcion', 'nombre_descripcion'] },
+    { key: 'referenceType', label: 'Tipo de referencia', aliases: ['tipo_referencia'] },
+    { key: 'referenceSource', label: 'Fuente', aliases: ['fuente'] },
+    { key: 'note', label: 'Observación', aliases: ['observacion', 'observaciones', 'nota'] },
     { key: 'approvalStatus', label: 'Estado de aprobación' },
     { key: 'active', label: 'Activo' },
   ],
@@ -46,7 +51,10 @@ const normalized = (value: string) =>
 export function matchImportField(header: string, fields: readonly ImportField[]): string {
   const value = normalized(header);
   const exact = fields.find(
-    (field) => normalized(field.key) === value || normalized(field.label) === value,
+    (field) =>
+      normalized(field.key) === value ||
+      normalized(field.label) === value ||
+      field.aliases?.some((alias) => normalized(alias) === value),
   );
   if (exact) return exact.key;
   const aliases: Record<string, string> = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createGroupApplicationSchema,
+  groupApplicationSchema,
   deactivateGroupApplicationQuerySchema,
   updateGroupApplicationSchema,
 } from './application';
@@ -46,6 +47,43 @@ describe('group application contracts', () => {
         make: 'Toyota',
         model: 'Hilux',
       }).success,
+    ).toBe(false);
+  });
+
+  it('reads retained historical columns beyond 60 without relaxing write limits', () => {
+    const previous = Object.fromEntries(
+      Array.from({ length: 60 }, (_, index) => [`campo_${index}`, `Valor ${index}`]),
+    );
+    const historical = { ...previous, renamed: 'Valor vigente' };
+    const read = groupApplicationSchema
+      .pick({ additionalFields: true })
+      .parse({ additionalFields: historical });
+    expect(read.additionalFields).toEqual(historical);
+    expect(Object.keys(read.additionalFields!)).toHaveLength(61);
+    const expectedUpdatedAt = '2026-11-16T10:00:00.000Z';
+    expect(
+      updateGroupApplicationSchema.parse({
+        expectedUpdatedAt,
+        additionalFields: { renamed: 'Nuevo valor' },
+      }),
+    ).toMatchObject({ additionalFields: { renamed: 'Nuevo valor' } });
+    expect(
+      updateGroupApplicationSchema.safeParse({ expectedUpdatedAt, additionalFields: historical })
+        .success,
+    ).toBe(false);
+    expect(
+      createGroupApplicationSchema.safeParse({
+        unifiedCode: 'D1672',
+        vehicleType: 'AUTOMOTRIZ',
+        make: 'Toyota',
+        model: 'Hilux',
+        additionalFields: historical,
+      }).success,
+    ).toBe(false);
+    expect(
+      groupApplicationSchema
+        .pick({ additionalFields: true })
+        .safeParse({ additionalFields: { invalid: 'x'.repeat(501) } }).success,
     ).toBe(false);
   });
 

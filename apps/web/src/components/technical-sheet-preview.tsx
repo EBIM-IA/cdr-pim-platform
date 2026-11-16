@@ -14,7 +14,11 @@ import {
   technicalSheetBrand,
 } from '@/lib/technical-sheet-export';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
-import { technicalAttributesFromSheet, unifiedCodeFromSheet } from '@/lib/product-detail-data';
+import {
+  groupAttributesByTemplateSections,
+  technicalAttributesFromSheet,
+  unifiedCodeFromSheet,
+} from '@/lib/product-detail-data';
 import type { Product } from '@/lib/types';
 import { displayMeasurement, type MeasurementSystem } from '@/lib/units';
 
@@ -280,27 +284,33 @@ export function TechnicalSheetPreview({
               </section>
             ) : null}
 
-            <h2 className="sheet-section-title mt-7 text-xs font-extrabold uppercase tracking-[.08em] text-primary">
-              Especificaciones publicables
-            </h2>
-            {attributes.length > 0 ? (
-              <dl className="sheet-attributes grid grid-cols-1 overflow-hidden rounded-lg border sm:grid-cols-2">
-                {attributes.map((attribute) => (
-                  <div
-                    key={attribute.key}
-                    className="sheet-attribute border-b px-3 py-2.5 sm:odd:border-r"
-                  >
-                    <dt className="text-[10px] text-muted-foreground">{attribute.label}</dt>
-                    <dd className="mt-1 break-words text-xs font-bold">{attribute.printable}</dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
+            {(sheet.schema.sections?.length
+              ? groupAttributesByTemplateSections(sheet, attributes)
+              : [{ title: 'Especificaciones publicables', attributes }]
+            ).map((group) => (
+              <section key={group.title}>
+                <h2 className="sheet-section-title mt-7 text-xs font-extrabold uppercase tracking-[.08em] text-primary">
+                  {group.title}
+                </h2>
+                <dl className="sheet-attributes grid grid-cols-1 overflow-hidden rounded-lg border sm:grid-cols-2">
+                  {group.attributes.map((attribute) => (
+                    <div
+                      key={attribute.key}
+                      className="sheet-attribute border-b px-3 py-2.5 sm:odd:border-r"
+                    >
+                      <dt className="text-[10px] text-muted-foreground">{attribute.label}</dt>
+                      <dd className="mt-1 break-words text-xs font-bold">{attribute.printable}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+            {!attributes.length ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
                 No hay atributos exportables con valor para esta plantilla. Un administrador debe
                 revisar la configuración antes de entregar la ficha.
               </div>
-            )}
+            ) : null}
 
             <footer className="sheet-footer mt-6 border-t pt-3 text-[9px] leading-relaxed text-muted-foreground">
               Documento generado desde el catálogo maestro CDR. La identidad del SKU y la

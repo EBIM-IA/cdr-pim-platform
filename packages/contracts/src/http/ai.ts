@@ -84,3 +84,21 @@ export const aiExtractionCandidatesResponseSchema = z
     'Los candidatos persistidos necesitan referencias de revisión.',
   );
 export type AiExtractionCandidatesResponse = z.infer<typeof aiExtractionCandidatesResponseSchema>;
+
+/** Only identifiers and a question cross the boundary; evidence is loaded by the API. */
+export const aiSearchAssistantRequestSchema = z
+  .object({
+    query: z.string().trim().min(2).max(300),
+    question: z.string().trim().min(2).max(1000),
+    productIds: z.array(uuidSchema).max(12).optional(),
+  })
+  .strict();
+export type AiSearchAssistantRequest = z.infer<typeof aiSearchAssistantRequestSchema>;
+export const aiSearchAssistantResponseSchema = z.object({
+  answer: z.string().min(1).max(6000),
+  model: z.string().min(1).max(200),
+  simulated: z.boolean(),
+  sources: z.array(z.object({ productId: uuidSchema, sku: z.string(), name: z.string() })).max(12),
+  usage: aiUsageSchema,
+});
+export type AiSearchAssistantResponse = z.infer<typeof aiSearchAssistantResponseSchema>;

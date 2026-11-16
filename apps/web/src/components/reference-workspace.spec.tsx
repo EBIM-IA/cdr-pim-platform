@@ -90,6 +90,20 @@ afterEach(() => {
 });
 
 describe('ReferenceWorkspace report views', () => {
+  it('forwards the AX external batch reference from a direct detail link', () => {
+    window.history.replaceState({}, '', '/integrations?view=batches&axBatchId=AX%20REAL%2F2');
+    workspaceData.useWorkspaceData.mockReturnValue({
+      workspace: { ...reportsWorkspace, slug: 'integrations', rows: [] },
+      loading: false,
+      error: null,
+      reload: vi.fn(),
+    });
+    render(<ReferenceWorkspace definition={moduleDefinitions.integrations} />);
+    expect(workspaceData.useWorkspaceData).toHaveBeenLastCalledWith('integrations', {
+      axBatchId: 'AX REAL/2',
+    });
+    expect(screen.getByRole('heading', { name: 'Cabecera del lote' })).toBeVisible();
+  });
   it('requests the API projection associated with each report selector', () => {
     workspaceData.useWorkspaceData.mockReturnValue({
       workspace: reportsWorkspace,

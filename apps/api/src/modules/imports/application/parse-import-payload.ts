@@ -1,3 +1,7 @@
+import {
+  normalizeApplicationColumnHeader,
+  type ApplicationAdditionalColumn,
+} from '../../applications/domain/entities/application-columns';
 import type { PreviewImportInput } from '@cdr/contracts';
 import { ValidationError } from '@cdr/shared';
 
@@ -6,15 +10,33 @@ import type { ImportRecord, ImportRow } from '../domain/entities/import-batch';
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const MAX_ROWS = 10_000;
 
-export function parseImportPayload(input: PreviewImportInput): ImportRow[] {
+export function parseImportPayload(
+  input: PreviewImportInput,
+  additionalColumns: readonly ApplicationAdditionalColumn[] = [],
+): ImportRow[] {
   const records = input.format === 'csv' ? parseCsv(input.csv ?? '') : (input.records ?? []);
   if (records.length === 0) throw new ValidationError('The import contains no data rows');
   if (records.length > MAX_ROWS) {
     throw new ValidationError(`The import exceeds the ${MAX_ROWS} row limit`);
   }
   return records.map((rawRecord, index) => {
-    const record = canonicalRecord(input.target, rawRecord);
+    const record = canonicalRecord(input.target, rawRecord, additionalColumns);
     const errors = validateRecord(input.target, record);
+    if (
+      input.target === 'applications' &&
+      Object.keys(record).some(
+        (key) =>
+          key.startsWith('extra:') &&
+          !additionalColumns.some((column) => key === `extra:${column.key}`),
+      )
+    )
+      errors.push('Columna adicional no configurada');
+    if (input.target === 'applications')
+      for (const column of additionalColumns) {
+        const value = record[`extra:${column.key}`];
+        if (column.required && !asText(value)) errors.push(`${column.label} es obligatorio`);
+        if (asText(value).length > 500) errors.push(`${column.label} supera 500 caracteres`);
+      }
     return {
       rowNumber: index + 1,
       valid: errors.length === 0,
@@ -77,6 +99,12 @@ const aliases: Record<PreviewImportInput['target'], Readonly<Record<string, stri
     codigo_homologo: 'externalCode',
     marca: 'externalBrand',
     marca_homologo: 'externalBrand',
+    nombre: 'name',
+    descripcion: 'name',
+    tipo_referencia: 'referenceType',
+    fuente: 'referenceSource',
+    observacion: 'note',
+    observaciones: 'note',
     estado_aprobacion: 'approvalStatus',
     activo: 'active',
   },
@@ -89,13 +117,32 @@ const aliases: Record<PreviewImportInput['target'], Readonly<Record<string, stri
   },
 };
 
-function canonicalRecord(target: PreviewImportInput['target'], record: ImportRecord): ImportRecord {
+function canonicalRecord(
+  target: PreviewImportInput['target'],
+  record: ImportRecord,
+  additionalColumns: readonly ApplicationAdditionalColumn[],
+): ImportRecord {
   const result: Record<string, ImportRecord[string]> = Object.create(null) as Record<
     string,
     ImportRecord[string]
   >;
   for (const [key, value] of Object.entries(record)) {
-    const canonical = aliases[target][key] ?? key;
+    const extra =
+      target === 'applications'
+        ? additionalColumns.find((column) =>
+            [
+              `extra:${column.key}`,
+              column.key,
+              column.header,
+              column.label,
+              ...column.aliases,
+            ].some(
+              (header) =>
+                normalizeApplicationColumnHeader(header) === normalizeApplicationColumnHeader(key),
+            ),
+          )
+        : undefined;
+    const canonical = aliases[target][key] ?? (extra ? `extra:${extra.key}` : key);
     if (result[canonical] === undefined || asText(result[canonical]) === '')
       result[canonical] = value;
   }
@@ -230,6 +277,15 @@ function validateRecord(target: PreviewImportInput['target'], record: ImportReco
     if (from !== null && to !== null && from > to) errors.push('yearFrom must not exceed yearTo');
   }
   if (target === 'homologs') {
+    if (record.name !== undefined && asText(record.name).length > 500)
+      errors.push('name must contain at most 500 characters');
+    if (record.referenceType !== undefined && asText(record.referenceType).length > 160)
+      errors.push('referenceType must contain at most 160 characters');
+    if (record.referenceSource !== undefined && asText(record.referenceSource).length > 300)
+      errors.push('referenceSource must contain at most 300 characters');
+    if (record.note !== undefined && asText(record.note).length > 2000)
+      errors.push('note must contain at most 2000 characters');
+
     validateRequiredText(record, 'unifiedCode', 120, errors);
     validateRequiredText(record, 'externalCode', 160, errors);
     validateRequiredText(record, 'externalBrand', 160, errors);

@@ -10,6 +10,10 @@ import type {
 import { Activity, Database, FileArchive, Search } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { ModulePolicyEditor } from '@/components/module-policy-editor';
+import { AdministrationUsersView } from '@/components/administration-users-view';
+import { IntegrationExecutionMonitor } from '@/components/integration-execution-monitor';
+import { IntegrationSourceCandidates } from '@/components/integration-source-candidates';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -65,12 +69,14 @@ function Indicator({
   note: string;
 }) {
   return (
-    <Card className="flex gap-3 p-4">
-      <Activity className="mt-1 size-5 shrink-0 text-primary" />
-      <div>
-        <small className="text-muted-foreground">{label}</small>
-        <strong className="mt-1 block text-2xl">{value}</strong>
-        <small className="mt-1 block text-muted-foreground">{note}</small>
+    <Card className="flex items-center gap-3 px-3 py-2.5">
+      <Activity className="size-5 shrink-0 text-primary" />
+      <div className="min-w-0">
+        <small className="block text-muted-foreground">{label}</small>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <strong className="text-lg leading-tight">{value}</strong>
+          <small className="text-muted-foreground">{note}</small>
+        </div>
       </div>
     </Card>
   );
@@ -108,28 +114,35 @@ function ExternalSources() {
   const [selectedId, setSelectedId] = useState('');
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
+  const [sourceError, setSourceError] = useState('');
   const [detail, setDetail] = useState<keyof typeof sourceInfo | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let current = true;
+    setSourceError('');
     void listAdminCategories(false)
       .then((items) => {
         if (current) setCategories(items);
       })
       .catch(() => {
-        if (current) setError('No pudimos cargar la prioridad de fuentes.');
+        if (current) setSourceError('No pudimos cargar la prioridad de fuentes.');
       });
     return () => {
       current = false;
     };
-  }, []);
+  }, [revision]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
+      setLoading(true);
+      setError('');
       void fetchCatalogWorkbook(
         { q: query || undefined, page: 1, pageSize: 25, filter: [] },
         controller.signal,
       )
         .then((result) => {
+          if (controller.signal.aborted) return;
           setProducts(result.items);
           setSelectedId((id) =>
             result.items.some((item) => item.id === id) ? id : (result.items[0]?.id ?? ''),
@@ -137,13 +150,16 @@ function ExternalSources() {
         })
         .catch(() => {
           if (!controller.signal.aborted) setError('No pudimos consultar los SKU.');
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
         });
     }, 200);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [query, revision]);
   const product = products.find((item) => item.id === selectedId);
   const category = categories.find((item) => item.id === product?.category?.id);
   const sources = (Object.keys(sourceInfo) as (keyof typeof sourceInfo)[])
@@ -180,9 +196,17 @@ function ExternalSources() {
           </p>
         ) : null}
       </Card>
-      {error ? (
+      {error || sourceError ? (
         <p role="alert" className="text-xs text-red-700">
-          {error}
+          {error || sourceError}{' '}
+          <button className="underline" onClick={() => setRevision((value) => value + 1)}>
+            Reintentar
+          </button>
+        </p>
+      ) : null}
+      {loading ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Consultando SKU y fuentes…
         </p>
       ) : null}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -200,19 +224,26 @@ function ExternalSources() {
             <p className="mt-3 text-xs">{source.description}</p>
             <p className="mt-1 text-xs text-muted-foreground">{source.note}</p>
             <p className="my-4 text-xs text-muted-foreground">
-              Candidatos para este SKU: consulta pendiente de habilitar.
+              {product
+                ? `SKU en contexto: ${product.sku}. Los candidatos conservados se muestran debajo.`
+                : 'Selecciona un SKU para consultar sus candidatos.'}
             </p>
             <Button size="sm" variant="outline" onClick={() => setDetail(source.key)}>
-              Ver capacidad
+              {source.key === 'tecdoc' ? 'Enriquecer con TecDoc' : 'Ver capacidad'}
             </Button>
           </Card>
         ))}
       </div>
       <Panel title="Candidatos y conflictos del SKU">
-        <EmptyTable
-          columns={['Atributo', 'Fuente', 'Valor', 'Prioridad', 'Evidencia', 'Estado', 'Acción']}
-          message="La consulta de candidatos de fuentes todavía no está disponible."
-        />
+        {selectedId ? (
+          <IntegrationSourceCandidates
+            key={selectedId}
+            productId={selectedId}
+            {...(category ? { sourcePriority: category.sourcePriority } : {})}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">No hay SKU para estos filtros.</p>
+        )}
       </Panel>
       <div className="flex gap-2">
         <Button asChild size="sm" variant="outline">
@@ -224,8 +255,20 @@ function ExternalSources() {
       </div>
       {detail ? (
         <WorkspaceDrawer title={sourceInfo[detail].label} onClose={() => setDetail(null)}>
+          <p className="mb-3 text-xs font-semibold">SKU: {product?.sku ?? 'Sin seleccionar'}</p>
           <p className="text-sm">{sourceInfo[detail].description}</p>
           <p className="mt-3 text-sm text-muted-foreground">{sourceInfo[detail].note}</p>
+          {detail === 'tecdoc' ? (
+            <>
+              <p className="mt-4 text-sm">
+                La consulta remota necesita licencia, credenciales y contrato del proveedor. No se
+                ha ejecutado una consulta ni sustituido datos del SKU.
+              </p>
+              <Button className="mt-4" disabled>
+                Consultar SKU en TecDoc
+              </Button>
+            </>
+          ) : null}
         </WorkspaceDrawer>
       ) : null}
     </div>
@@ -257,6 +300,9 @@ export function IntegrationsReferenceView({
           pageSize: 100,
         }),
       );
+      const url = new URL(window.location.href);
+      url.searchParams.set('axBatchId', externalId);
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'No se pudo consultar el lote.');
     } finally {
@@ -383,8 +429,9 @@ export function IntegrationsReferenceView({
           ))}
         </dl>
         <p className="mt-4 text-xs text-muted-foreground">
-          El lote se recibió y validó estructuralmente. Aplicarlo al catálogo requiere las reglas de
-          sobrescritura aprobadas por CDR.
+          {batch
+            ? 'El lote se recibió y validó estructuralmente. Aplicarlo al catálogo requiere las reglas de sobrescritura aprobadas por CDR.'
+            : 'Selecciona un lote recibido para consultar su cabecera y sus registros.'}
         </p>
       </Panel>
       <Panel title="Registros recibidos">
@@ -501,29 +548,41 @@ export function IntegrationsReferenceView({
         </>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Indicator
-              label="Lotes recibidos"
-              value={inbox?.totalBatches ?? 0}
-              note="Historial durable AX"
+          {workspace.integrationMonitor ? (
+            <IntegrationExecutionMonitor
+              data={workspace.integrationMonitor}
+              axBatchIds={Object.fromEntries(
+                (inbox?.recentBatches ?? []).map((item) => [item.id, item.externalId]),
+              )}
             />
-            <Indicator
-              label="Registros recibidos"
-              value={inbox?.totalRecords ?? 0}
-              note="Conservados en el inbox"
-            />
-            <Indicator
-              label="Aplicación al catálogo"
-              value="Pendiente"
-              note="Espera reglas aprobadas por CDR"
-            />
-            <Indicator
-              label="Conectores externos"
-              value={components.length}
-              note={`${components.filter((row) => row.values.configured === true).length} configurados`}
-            />
-          </div>
-          <Panel title="Ejecuciones recientes">
+          ) : null}
+          {!workspace.integrationMonitor ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Indicator
+                label="Lotes recibidos"
+                value={inbox?.totalBatches ?? 0}
+                note="Historial durable AX"
+              />
+              <Indicator
+                label="Registros recibidos"
+                value={inbox?.totalRecords ?? 0}
+                note="Conservados en el inbox"
+              />
+              <Indicator
+                label="Aplicación al catálogo"
+                value="Pendiente"
+                note="Espera reglas aprobadas por CDR"
+              />
+              <Indicator
+                label="Conectores externos"
+                value={components.length}
+                note={`${components.filter((row) => row.values.configured === true).length} configurados`}
+              />
+            </div>
+          ) : null}
+          <Panel
+            title={workspace.integrationMonitor ? 'Lotes AX recibidos' : 'Ejecuciones recientes'}
+          >
             {recentTable}
             <p className="mt-3 text-xs text-muted-foreground">
               Se muestran los últimos 50 lotes recibidos; recepción no acredita aplicación al
@@ -585,7 +644,7 @@ const permissions = [
   ['Editar aplicaciones', 'applications:write'],
   ['Editar códigos y homólogos', 'equivalences:write'],
   ['Importaciones y carga masiva', 'imports:execute'],
-  ['Publicación por canal', 'menu:publication:view'],
+  ['Publicación por canal', 'publication:execute'],
   ['Configurar plantillas, usuarios y roles', 'administration:manage'],
   ['Consultar auditoría', 'audit:read'],
 ] as const;
@@ -608,74 +667,7 @@ export function AdministrationReferenceView({
   view: 'users' | 'roles';
   actor?: AuthenticatedActorDto;
 }) {
-  if (view === 'users')
-    return (
-      <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          {['Usuarios', 'Activos', 'Inactivos'].map((label) => (
-            <Indicator
-              key={label}
-              label={label}
-              value="—"
-              note="Directorio pendiente de habilitar"
-            />
-          ))}
-        </div>
-        <Panel title="Usuarios">
-          <div className="mb-3 flex justify-end">
-            <Button
-              size="sm"
-              disabled
-              title="El mantenimiento de usuarios está pendiente de habilitar"
-            >
-              Nuevo usuario
-            </Button>
-          </div>
-          <div className="overflow-auto">
-            <table className="w-full min-w-[650px] text-left text-xs">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['Nombre', 'Correo', 'Rol', 'Estado', 'Acciones'].map((label) => (
-                    <th key={label} className="border-b p-2.5">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {actor ? (
-                  <tr className="border-b">
-                    <th scope="row" className="p-2.5 text-left font-medium">
-                      Usuario actual
-                    </th>
-                    <td className="p-2.5">{actor.email}</td>
-                    <td className="p-2.5">{actor.roles.join(' · ')}</td>
-                    <td className="p-2.5">
-                      <StatusBadge tone="success">Sesión activa</StatusBadge>
-                    </td>
-                    <td className="p-2.5">
-                      <Button size="sm" variant="outline" disabled>
-                        Editar
-                      </Button>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-muted-foreground">
-                      Identidad de sesión no disponible.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Se muestra la identidad de la sesión actual. El directorio completo y sus altas, bajas y
-            cambios de rol están pendientes de habilitar.
-          </p>
-        </Panel>
-      </div>
-    );
+  if (view === 'users') return <AdministrationUsersView workspace={workspace} />;
   const matrix = (
     workspace as WorkspaceDto & { roleCapabilities?: { role: string; capabilities: string[] }[] }
   ).roleCapabilities;
@@ -692,6 +684,15 @@ export function AdministrationReferenceView({
         </p>
       </Card>
       <Panel title="Matriz de permisos por rol">
+        <div className="mb-3 flex justify-end">
+          <Button
+            size="sm"
+            disabled
+            title="Requiere proveedor de identidad y definición de roles administrables"
+          >
+            Crear rol
+          </Button>
+        </div>
         <div className="overflow-auto">
           <table
             aria-label="Matriz de permisos por rol"
@@ -709,6 +710,14 @@ export function AdministrationReferenceView({
               </tr>
             </thead>
             <tbody>
+              <tr className="border-t">
+                <th scope="row" className="p-3 text-left font-medium">
+                  Atributos visibles en ficha y enriquecimiento
+                </th>
+                <td className="p-3">Todos</td>
+                <td className="p-3">Marcados COMPRAS en la plantilla</td>
+                <td className="p-3">Marcados VENTAS en la plantilla</td>
+              </tr>
               {permissions.map(([label, capability]) => (
                 <tr key={capability} className="border-t">
                   <th scope="row" className="p-3 text-left font-medium">
@@ -748,53 +757,11 @@ export function AdministrationReferenceView({
           </Button>
         </div>
       </Panel>
-      <Panel title="Módulos visibles por perfil">
-        <p className="mb-4 text-xs text-muted-foreground">
-          Módulos habilitados para cada rol. La visibilidad de los atributos se configura en
-          Plantillas.
-        </p>
-        <div className="overflow-auto">
-          <table
-            aria-label="Módulos visibles por perfil"
-            className="w-full min-w-[650px] text-left text-xs"
-          >
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="p-3">Módulo</th>
-                {roles.map((role) => (
-                  <th key={role} className="p-3">
-                    {role}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {modulePermissions.map(({ label, capability }) => (
-                <tr key={capability} className="border-t">
-                  <th scope="row" className="p-3 text-left font-medium">
-                    {label}
-                  </th>
-                  {roles.map((role) => {
-                    const grants = matrix?.find((entry) => entry.role === role);
-                    const visible = Boolean(grants?.capabilities.includes(capability));
-                    return (
-                      <td key={role} className="p-3">
-                        <StatusBadge tone={visible ? 'success' : 'neutral'}>
-                          {grants ? (visible ? 'Sí' : 'No') : 'Sin información'}
-                        </StatusBadge>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          La matriz muestra los permisos vigentes. El mantenimiento de accesos por perfil está
-          pendiente de habilitar.
-        </p>
-      </Panel>
+      <ModulePolicyEditor
+        matrix={matrix ?? []}
+        modules={modulePermissions}
+        canManage={actor?.capabilities.includes('administration:manage') ?? false}
+      />
     </div>
   );
 }

@@ -1,3 +1,7 @@
+import {
+  defaultTemplateSections,
+  defaultAttributeSection,
+} from '../modules/catalog-schema/domain/entities/template-sheet-sections';
 import { catalogParameters } from '../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
 import { createHash } from 'node:crypto';
 
@@ -789,6 +793,9 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
           categoryId: categoryIdBySlug.get(template.categorySlug) as string,
           variantKey: manifestTemplateVariantKey(template),
           name: template.name,
+          sections: defaultTemplateSections(
+            template.categorySlug === 'rodamientos-y-afines-rodamiento-de-bolas-rigido',
+          ),
           version: 1,
           status: 'active',
         })),
@@ -930,6 +937,12 @@ export async function seedDemoCatalog(db: Database): Promise<DemoSeedResult> {
       return template.attributes.map((attribute, position) => ({
         templateId,
         attributeDefinitionId: definitionIdByKey.get(attribute.key) as string,
+        sectionKey: defaultAttributeSection(
+          CLIENT_TEMPLATE_MANIFEST.definitions.find(
+            (definition) => definition.key === attribute.key,
+          )!,
+          template.categorySlug === 'rodamientos-y-afines-rodamiento-de-bolas-rigido',
+        ),
         position,
         required: attribute.required,
         // Runtime propagation uses the equivalence group keyed by codigoUnificador.

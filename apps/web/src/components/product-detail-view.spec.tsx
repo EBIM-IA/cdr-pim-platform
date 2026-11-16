@@ -1,4 +1,8 @@
-import type { ProductAttributeSheetDto, ProductExperienceDto } from '@cdr/contracts';
+import type {
+  ExternalHomologDto,
+  ProductAttributeSheetDto,
+  ProductExperienceDto,
+} from '@cdr/contracts';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,12 +20,19 @@ import {
   listAuditChanges,
   listHomologs,
   listOemCodes,
+  updateHomolog,
 } from '@/lib/operational-api';
 import type { Product } from '@/lib/types';
 import { fetchProductExperience } from '@/lib/product-experience-api';
 import { listProductAssets, uploadProductAsset } from '@/lib/product-assets-api';
 
 import { ProductDetailView } from './product-detail-view';
+
+vi.mock('@/lib/technical-sheet-visibility-api', () => ({
+  getTechnicalSheetVisibility: vi.fn(async () => ({ visible: true, version: 0 })),
+  listTechnicalSheetVisibility: vi.fn(async () => []),
+  updateTechnicalSheetVisibility: vi.fn(),
+}));
 
 vi.mock('@/lib/product-draft-api', () => ({
   fetchProductDraft: vi.fn(),
@@ -54,7 +65,7 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
     }
   },
   fetchProductAttributeSheet: vi.fn(),
-  fetchCatalogWorkbook: vi.fn(async () => ({ items: [], total: 0 })),
+  fetchCatalogWorkbook: vi.fn(async () => ({ items: [], columns: [], total: 0 })),
   fetchProductTechnicalSheet: vi.fn(),
   fetchCatalogCategories: vi.fn(),
   patchProductAttributes: vi.fn(),
@@ -65,6 +76,7 @@ vi.mock('@/lib/operational-api', () => ({
   listAuditChanges: vi.fn(),
   listHomologs: vi.fn(),
   listOemCodes: vi.fn(),
+  updateHomolog: vi.fn(),
 }));
 
 vi.mock('@/lib/product-experience-api', () => ({ fetchProductExperience: vi.fn() }));
@@ -332,6 +344,61 @@ beforeEach(() => {
 });
 
 describe('ProductDetailView operational data', () => {
+  it('keeps the embedded homolog tab after Enter saves, parent reload and relation refresh', async () => {
+    let homolog: ExternalHomologDto = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      groupId: '77777777-7777-4777-8777-777777777777',
+      unifiedCode: 'D1672',
+      externalCode: 'EXT-D1672',
+      externalBrand: 'NSK',
+      name: 'Referencia anterior',
+      active: true,
+      approvalStatus: 'approved',
+      source: 'manual',
+      importBatchId: null,
+      createdAt: '2026-11-16T12:00:00.000Z',
+      updatedAt: '2026-11-16T12:00:00.000Z',
+    };
+    vi.mocked(listHomologs).mockImplementation(async () => [homolog]);
+    vi.mocked(updateHomolog).mockImplementation(async (_id, input) => {
+      homolog = { ...homolog, name: input.name, updatedAt: '2026-11-16T12:01:00.000Z' };
+      return homolog;
+    });
+    window.history.replaceState({}, '', `/products/${product.id}?view=oem`);
+    render(<ProductDetailView productId={product.id} canWriteEquivalences />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Código Unificador y Homólogos' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Homólogos 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Nombre de EXT-D1672' }));
+    const field = screen.getByRole('textbox', { name: 'Editar Nombre' });
+    fireEvent.change(field, { target: { value: 'UX-REVIEW-20261116' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() =>
+      expect(updateHomolog).toHaveBeenCalledWith(homolog.id, {
+        expectedUpdatedAt: '2026-11-16T12:00:00.000Z',
+        name: 'UX-REVIEW-20261116',
+      }),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Editar Nombre de EXT-D1672' }),
+    ).toHaveTextContent('UX-REVIEW-20261116');
+    expect(screen.getByRole('tab', { name: 'Homólogos 1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(fetchProduct).toHaveBeenCalledTimes(2);
+    const callsBeforeRefresh = vi.mocked(listHomologs).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar relaciones' }));
+    expect(
+      await screen.findByRole('button', { name: 'Editar Nombre de EXT-D1672' }),
+    ).toHaveTextContent('UX-REVIEW-20261116');
+    expect(screen.getByRole('tab', { name: 'Homólogos 1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(vi.mocked(listHomologs).mock.calls.length).toBeGreaterThan(callsBeforeRefresh);
+    expect(window.location.search).toBe('?view=oem');
+  });
+
   it.each(['COMPRAS', 'VENTAS'])(
     'renders the approved consultation ficha for %s without administration actions',
     async () => {
@@ -376,7 +443,7 @@ describe('ProductDetailView operational data', () => {
       ).toBeInTheDocument();
       expect(within(picker).getByRole('button', { name: /Uso industrial/ })).toBeInTheDocument();
       if (role === 'ADMINISTRADOR') {
-        expect(await rendered.findByText(experience.nombreGeneral)).toBeVisible();
+        expect((await rendered.findAllByText(experience.nombreGeneral))[0]).toBeVisible();
         expect(
           rendered.getByRole('region', { name: 'Descripción para e-commerce' }),
         ).toHaveTextContent(experience.nombreGeneral);
@@ -502,7 +569,7 @@ describe('ProductDetailView operational data', () => {
     });
     const view = render(<ProductDetailView productId={product.id} {...props} />);
     const rendered = within(view.container);
-    const table = await rendered.findByRole('table', { name: 'Medidas y datos de rendimiento' });
+    const table = await rendered.findByRole('table', { name: '1. Medidas y datos de rendimiento' });
     const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
     expect(row.cells[0]).toHaveTextContent('Diámetro interior');
     expect(row.cells[1]).toHaveTextContent('25 mm');
@@ -513,21 +580,21 @@ describe('ProductDetailView operational data', () => {
         .map((cell) => cell.textContent),
     ).toEqual(['Atributo y origen', 'Valor', 'Abreviatura']);
     expect(rendered.getAllByRole('table')[0]).toHaveAccessibleName(
-      'Medidas y datos de rendimiento',
+      '1. Medidas y datos de rendimiento',
     );
     if (props.showCompleteness) {
       const fold = rendered
-        .getByText('Datos base ERP', { selector: 'summary h3' })
+        .getByText(/Datos base ERP$/u, { selector: 'summary h3' })
         .closest('details')!;
       expect(fold).not.toHaveAttribute('open');
       expect(fold.parentElement?.lastElementChild).toBe(fold);
       expect(fold.querySelector('table')).not.toBeVisible();
-      fireEvent.click(within(fold).getByText('Datos base ERP', { selector: 'h3' }));
+      fireEvent.click(within(fold).getByText(/Datos base ERP$/u, { selector: 'h3' }));
       expect(fold.querySelector('table')).toBeVisible();
       expect(within(fold).queryByRole('textbox')).not.toBeInTheDocument();
     } else {
       expect(
-        rendered.queryByText('Datos base ERP', { selector: 'summary h3' }),
+        rendered.queryByText(/Datos base ERP$/u, { selector: 'summary h3' }),
       ).not.toBeInTheDocument();
     }
   });
@@ -606,13 +673,13 @@ describe('ProductDetailView operational data', () => {
       name: `${product.sku} : ${product.providerCode}`,
       level: 1,
     });
-    fireEvent.click(rendered.getByRole('tab', { name: 'Imágenes y Documentos' }));
-    fireEvent.change(await rendered.findByRole('combobox', { name: 'Tipo de activo' }), {
-      target: { value: 'FOTO' },
-    });
+    fireEvent.click(rendered.getByRole('button', { name: 'Opciones de fotografías' }));
+    fireEvent.click(rendered.getByRole('menuitem', { name: /Agregar imagen/ }));
+    vi.mocked(listProductAssets).mockResolvedValue([asset]);
     const file = new File(['photo'], asset.filename, { type: asset.mimeType });
-    fireEvent.change(rendered.getByLabelText('Archivo individual'), { target: { files: [file] } });
-    fireEvent.submit(rendered.getByRole('button', { name: 'Subir al SKU' }).closest('form')!);
+    fireEvent.change(rendered.getByLabelText('Archivo de fotografías'), {
+      target: { files: [file] },
+    });
     const gallery = rendered.getByRole('region', { name: 'Galería del producto' });
     expect(
       await within(gallery).findByRole('img', { name: `${product.name} · ${asset.filename}` }),

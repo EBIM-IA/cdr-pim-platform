@@ -25,6 +25,32 @@ describe('ExternalHomolog eligibility', () => {
     expect(homolog.eligibleForSearch).toBe(false);
   });
 
+  it('normalizes optional reference metadata and retains it across partial edits', () => {
+    const homolog = ExternalHomolog.create(
+      {
+        groupId,
+        unifiedCode: 'D1672',
+        externalCode: 'EXT-42',
+        externalBrand: 'EXTERNAL',
+        name: ' Referencia ',
+        referenceType: 'Marca alterna',
+        referenceSource: 'Fabricante',
+        note: ' Documento ',
+      },
+      now,
+    );
+    homolog.update({ externalCode: 'EXT-43', note: null }, now);
+    expect(homolog.toSnapshot()).toMatchObject({
+      name: 'Referencia',
+      referenceSource: 'Fabricante',
+      note: null,
+      source: 'manual',
+    });
+    expect(() => homolog.update({ name: 'x'.repeat(501) }, now)).toThrow(
+      'name must contain at most 500 characters',
+    );
+  });
+
   it('enforces the same code and brand limits as the HTTP contract', () => {
     expect(() =>
       ExternalHomolog.create(

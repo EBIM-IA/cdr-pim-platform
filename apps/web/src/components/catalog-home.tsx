@@ -11,6 +11,7 @@ import { CatalogSearch } from '@/components/catalog-search';
 import { StatePanel } from '@/components/state-panel';
 import { Button } from '@/components/ui/button';
 import { listCatalogParameters } from '@/lib/catalog-parameters-api';
+import { listAdminCategories } from '@/lib/catalog-admin-api';
 import { catalogHomeSettings } from '@/lib/catalog-home-api';
 import { fetchCatalogCategories, fetchCatalogWorkbook } from '@/lib/dynamic-catalog-api';
 import styles from './catalog-home.module.css';
@@ -93,20 +94,51 @@ export function mergeHomeEntries(saved: Entry[], baseline: Entry[]): Entry[] {
   ];
 }
 async function readHomeImage(file: File): Promise<string> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024)
-    throw new Error('Elige PNG, JPG o WEBP de hasta 3 MB.');
-  const bitmap = await createImageBitmap(file);
+  if (
+    !['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.type) ||
+    file.size > 3 * 1024 * 1024
+  )
+    throw new Error('Elige PNG, JPG, SVG o WEBP de hasta 3 MB.');
+  let source: CanvasImageSource;
+  let width: number, height: number;
+  let release: () => void;
+  if (file.type === 'image/svg+xml') {
+    // Decode SVG as an image, then persist only raster pixels, never executable SVG markup.
+    const url = URL.createObjectURL(file);
+    try {
+      const decoded = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new window.Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('No fue posible leer la imagen SVG.'));
+        image.src = url;
+      });
+      source = decoded;
+      width = decoded.naturalWidth;
+      height = decoded.naturalHeight;
+    } catch (failure) {
+      URL.revokeObjectURL(url);
+      throw failure;
+    }
+    release = () => URL.revokeObjectURL(url);
+  } else {
+    const bitmap = await createImageBitmap(file);
+    source = bitmap;
+    width = bitmap.width;
+    height = bitmap.height;
+    release = () => bitmap.close();
+  }
   try {
-    const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+    if (!width || !height) throw new Error('La imagen no tiene dimensiones válidas.');
+    const scale = Math.min(1, 480 / Math.max(width, height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
     const context = canvas.getContext('2d');
     if (!context) throw new Error('No fue posible preparar la imagen.');
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/png');
   } finally {
-    bitmap.close();
+    release();
   }
 }
 
@@ -115,6 +147,7 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
   const track = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const [categories, setCategories] = useState<Category[]>([]);
+  const [populatedRoots, setPopulatedRoots] = useState<ReadonlySet<string>>(new Set());
   const [settings, setSettings] = useState<CatalogHomeSettingsDto | null>(null);
   const [config, setConfig] = useState<CatalogHomeSettingsDto['config']>({
     brands: [],
@@ -157,10 +190,16 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
       fetchCatalogWorkbook({ page: 1, pageSize: 1, filter: [] }, controller.signal),
       catalogHomeSettings(undefined, controller.signal),
       listCatalogParameters('brand', controller.signal),
+      canConfigure ? listAdminCategories(true) : Promise.resolve([]),
     ])
-      .then(([items, workbook, stored, brandParameters]) => {
+      .then(([items, workbook, stored, brandParameters, adminCategories]) => {
         if (controller.signal.aborted) return;
-        const roots = homeCategoryRoots(items);
+        const roots =
+          canConfigure && adminCategories.length
+            ? adminCategories
+                .filter((category) => category.parentId === null)
+                .map(({ id, name, slug }) => ({ id, name, slug }))
+            : homeCategoryRoots(items);
         const baseline = defaults(roots, [
           ...new Set([
             ...workbook.facets.brands,
@@ -168,6 +207,11 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
           ]),
         ]);
         setCategories(roots);
+        setPopulatedRoots(
+          new Set(
+            homeCategoryRoots(items.filter((item) => item.skuCount !== 0)).map((root) => root.id),
+          ),
+        );
         setSettings(stored);
         setConfig({
           brands: mergeHomeEntries(stored.config.brands, baseline.brands),
@@ -180,6 +224,12 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
       });
     return () => controller.abort();
   }, [revision, canConfigure]);
+  useEffect(() => {
+    if (editor !== 'categories' || !settings) return;
+    const categoryId = new URLSearchParams(window.location.search).get('categoryId');
+    if (categoryId)
+      document.getElementById(`home-category-${categoryId}`)?.scrollIntoView?.({ block: 'center' });
+  }, [editor, settings]);
   const search = (q: string, filter?: { categoryId?: string; brand?: string }) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
@@ -255,7 +305,7 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
               </button>
               <div ref={track} className={styles.track}>
                 {config.categories
-                  .filter((entry) => entry.visible)
+                  .filter((entry) => entry.visible && populatedRoots.has(entry.key))
                   .map((entry) => {
                     const category = categories.find((category) => category.id === entry.key);
                     if (!category) return null;
@@ -351,10 +401,21 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
                   Activa las entradas y ordena las imágenes que verán los usuarios. PNG, JPG o WEBP
                   de hasta 3 MB.
                 </p>
+                {editor === 'brands' &&
+                config.brands.some((entry) => entry.visible && !entry.image) ? (
+                  <p
+                    role="status"
+                    className="my-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+                  >
+                    {config.brands.filter((entry) => entry.visible && !entry.image).length} marcas
+                    activadas sin imagen. Agrega su imagen para mostrarlas en el Inicio.
+                  </p>
+                ) : null}
                 <div className="max-h-96 overflow-auto">
                   {config[editor].map((entry, index) => (
                     <div
                       key={entry.key}
+                      id={editor === 'categories' ? `home-category-${entry.key}` : undefined}
                       className={styles.editorRow}
                       onDragOver={(event) => {
                         if (draggedKey && !saving) event.preventDefault();
@@ -428,7 +489,7 @@ export function CatalogHome({ canConfigure = false }: { canConfigure?: boolean }
                         <input
                           disabled={saving}
                           type="file"
-                          accept="image/png,image/jpeg,image/webp"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
                           onChange={(event) => {
                             const file = event.target.files?.[0];
                             const kind = editor;

@@ -38,6 +38,12 @@ export function QualityConflictForm({
     }
   };
   const choose = async (id: string) => {
+    setSheet(null);
+    setKey('');
+    if (!id) return;
+    setCandidates((current) =>
+      current.map((candidate) => ({ ...candidate, value: '', evidence: '', confidence: null })),
+    );
     setBusy(true);
     setError(null);
     try {
@@ -60,6 +66,21 @@ export function QualityConflictForm({
     setError(null);
     try {
       const definition = sheet.schema.columns.find((column) => column.key === key);
+      const numeric = definition?.dataType === 'number' || definition?.dataType === 'measurement';
+      if (
+        numeric &&
+        candidates.some(
+          (candidate) =>
+            !String(candidate.value ?? '').trim() ||
+            !Number.isFinite(Number(String(candidate.value).replace(',', '.'))),
+        )
+      )
+        throw new Error('Los candidatos numéricos deben contener un número válido.');
+      if (
+        definition?.dataType === 'boolean' &&
+        candidates.some((candidate) => !['true', 'false'].includes(String(candidate.value)))
+      )
+        throw new Error('Selecciona Sí o No para cada candidato.');
       const typed = candidates.map((candidate) => ({
         ...candidate,
         value:
@@ -132,7 +153,12 @@ export function QualityConflictForm({
               <select
                 className="mt-2 w-full rounded-md border p-2 text-sm"
                 value={key}
-                onChange={(event) => setKey(event.target.value)}
+                onChange={(event) => {
+                  setKey(event.target.value);
+                  setCandidates((current) =>
+                    current.map((candidate) => ({ ...candidate, value: '' })),
+                  );
+                }}
               >
                 {sheet.schema.columns
                   .filter((column) => column.sourceAuthority === 'pim' && column.permissions.edit)
@@ -167,18 +193,38 @@ export function QualityConflictForm({
                     </option>
                   ))}
                 </select>
-                <Input
-                  aria-label={`Valor ${index + 1}`}
-                  value={String(candidate.value ?? '')}
-                  onChange={(event) =>
-                    setCandidates((current) =>
-                      current.map((item, i) =>
-                        i === index ? { ...item, value: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  placeholder="Valor confirmado"
-                />
+                {sheet.schema.columns.find((column) => column.key === key)?.dataType ===
+                'boolean' ? (
+                  <select
+                    aria-label={`Valor ${index + 1}`}
+                    className="w-full rounded-md border p-2 text-sm"
+                    value={String(candidate.value ?? '')}
+                    onChange={(event) =>
+                      setCandidates((current) =>
+                        current.map((item, i) =>
+                          i === index ? { ...item, value: event.target.value } : item,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="">Selecciona un valor</option>
+                    <option value="true">Sí</option>
+                    <option value="false">No</option>
+                  </select>
+                ) : (
+                  <Input
+                    aria-label={`Valor ${index + 1}`}
+                    value={String(candidate.value ?? '')}
+                    onChange={(event) =>
+                      setCandidates((current) =>
+                        current.map((item, i) =>
+                          i === index ? { ...item, value: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    placeholder="Valor confirmado"
+                  />
+                )}
                 <Input
                   aria-label={`Evidencia ${index + 1}`}
                   value={candidate.evidence}
@@ -191,8 +237,41 @@ export function QualityConflictForm({
                   }
                   placeholder="Documento o referencia de evidencia"
                 />
+                {candidates.length > 2 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      setCandidates((current) => current.filter((_, i) => i !== index))
+                    }
+                  >
+                    Quitar candidato {index + 1}
+                  </Button>
+                )}
               </fieldset>
             ))}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || candidates.length >= 20}
+              onClick={() =>
+                setCandidates((current) => [
+                  ...current,
+                  {
+                    source:
+                      (['fabricante', 'archivo', 'tecdoc', 'manual'] as const).find(
+                        (source) => !current.some((item) => item.source === source),
+                      ) ?? 'manual',
+                    value: '',
+                    evidence: '',
+                    confidence: null,
+                  },
+                ])
+              }
+            >
+              Agregar candidato de otra fuente
+            </Button>
             <Button
               disabled={
                 busy ||

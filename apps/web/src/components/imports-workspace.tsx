@@ -1,4 +1,6 @@
 'use client';
+import { ImportExecutionProgress } from './import-execution-progress';
+import type { ImportExecutionDto } from '@cdr/contracts';
 
 import {
   previewImportSchema,
@@ -7,6 +9,8 @@ import {
   type ImportBatchDto,
   type ImportFormat,
   type ImportTarget,
+  type WorkspaceColumn,
+  type WorkspaceRow,
 } from '@cdr/contracts';
 import {
   CheckCircle2,
@@ -33,7 +37,12 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspaceData } from '@/components/use-workspace-data';
-import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
+import {
+  confirmImport,
+  enqueueImportConfirmation,
+  getImport,
+  previewImport,
+} from '@/lib/operational-api';
 import { formatWorkspaceCell, formatWorkspaceMetric } from '@/lib/workspace-view';
 import { cn } from '@/lib/utils';
 import { readFirstXlsxWorksheet } from '@/lib/xlsx-import';
@@ -45,6 +54,7 @@ import {
   parseImportSource,
   type ImportField,
 } from '@/lib/import-mapping';
+import { getApplicationColumns } from '@/lib/application-columns-api';
 import { downloadCsv } from '@/lib/tabular-export';
 import { WorkspaceDrawer } from '@/components/workspace-drawer';
 
@@ -56,6 +66,30 @@ const targetLabels: Record<ImportTarget, string> = {
   homologs: 'Homólogos externos',
   oem: 'Códigos OEM por grupo automotriz',
 };
+
+const importStatusLabels: Readonly<Record<string, string>> = {
+  previewed: 'Vista previa',
+  queued: 'En cola',
+  processing: 'Procesando',
+  confirmed: 'Confirmado',
+  failed: 'Fallido',
+};
+function importHistoryCell(row: WorkspaceRow, column: WorkspaceColumn): string {
+  const value = row.values[column.key];
+  const normalized = typeof value === 'string' ? value.toLocaleLowerCase('es') : '';
+  if (column.key === 'target' && Object.hasOwn(targetLabels, normalized))
+    return targetLabels[normalized as ImportTarget];
+  if (column.key === 'status' && Object.hasOwn(importStatusLabels, normalized))
+    return importStatusLabels[normalized]!;
+  if (column.key === 'originalFileName' && !value) return 'Sin archivo registrado';
+  if (column.key === 'sourceFileFormat' && !value) return 'No registrado';
+  if (
+    (column.key === 'sourceFileFormat' || column.key === 'format') &&
+    ['csv', 'xlsx', 'json'].includes(normalized)
+  )
+    return normalized.toUpperCase();
+  return formatWorkspaceCell(value, column);
+}
 
 const csvExamples: Record<ImportTarget, string> = {
   category: 'sku,descripcion_tecnica\nD1672,Descripción técnica actualizada por importación',
@@ -169,6 +203,14 @@ function BatchMetrics({ batch, result = false }: { batch: ImportBatchDto; result
   );
 }
 
+function importFieldLabel(target: ImportTarget, key: string): string {
+  const defined =
+    target === 'category' ? undefined : importFields[target].find((field) => field.key === key);
+  if (defined) return defined.label;
+  if (key === 'sku') return 'Código artículo';
+  return key.replace(/^extra:/u, '').replace(/_/gu, ' ');
+}
+
 function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
   const [selectedRow, setSelectedRow] = useState<ImportRowDto | null>(null);
   const columns = useMemo(() => {
@@ -208,7 +250,7 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
                   <td className="px-4 py-3 font-semibold">{row.rowNumber}</td>
                   <td className="px-4 py-3 font-mono text-xs">{String(identifier)}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {columns.join(', ') || '—'}
+                    {columns.map((key) => importFieldLabel(batch.target, key)).join(', ') || '—'}
                   </td>
                   <td className={cn('px-4 py-3 text-xs', !row.valid && 'text-red-700')}>
                     {row.errors.length > 0 ? (
@@ -273,7 +315,7 @@ function BatchRowsTable({ batch }: { batch: ImportBatchDto }) {
           <dl className="mt-4 divide-y rounded border">
             {Object.entries(selectedRow.data).map(([key, value]) => (
               <div key={key} className="grid grid-cols-2 gap-3 p-3 text-xs">
-                <dt className="font-semibold">{key}</dt>
+                <dt className="font-semibold">{importFieldLabel(batch.target, key)}</dt>
                 <dd className="break-words">
                   {Array.isArray(value) ? value.join('; ') : String(value ?? '—')}
                 </dd>
@@ -291,7 +333,12 @@ function downloadImportErrors(batch: ImportBatchDto) {
   const fields = [...new Set(rows.flatMap((row) => Object.keys(row.data)))];
   downloadCsv(
     {
-      headers: ['Fila', ...fields, 'Errores', 'Advertencias'],
+      headers: [
+        'Fila',
+        ...fields.map((key) => importFieldLabel(batch.target, key)),
+        'Errores',
+        'Advertencias',
+      ],
       rows: rows.map((row) => [
         row.rowNumber,
         ...fields.map((field) => {
@@ -347,6 +394,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [fileName, setFileName] = useState('aplicaciones.csv');
   const [idempotencyKey, setIdempotencyKey] = useState(() => newKey('applications'));
   const [batch, setBatch] = useState<ImportBatchDto | null>(null);
+  const [execution, setExecution] = useState<ImportExecutionDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ImportMode>('history');
@@ -358,6 +406,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
   const [dragging, setDragging] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [correctionBatchId, setCorrectionBatchId] = useState('');
   useEffect(() => {
     if (mode !== 'new' || !dirty) return;
     const handler = (event: BeforeUnloadEvent) => event.preventDefault();
@@ -401,7 +450,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     return (history.workspace?.rows ?? []).filter((row) => {
       const cells = (history.workspace?.columns ?? []).map((column) => ({
         key: column.key,
-        value: formatWorkspaceCell(row.values[column.key], column),
+        value: importHistoryCell(row, column),
       }));
       return (
         normalize([row.id, ...cells.map((cell) => cell.value)].join(' ')).includes(
@@ -416,13 +465,51 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     });
   }, [history.workspace, historyQuery, historyFilters]);
 
+  const [applicationExtraFields, setApplicationExtraFields] = useState<ImportField[]>([]);
+  const [applicationColumnsLoading, setApplicationColumnsLoading] = useState(false);
+  const [applicationColumnsError, setApplicationColumnsError] = useState('');
+  const [applicationColumnsRevision, setApplicationColumnsRevision] = useState(0);
+  useEffect(() => {
+    if (target !== 'applications') return;
+    const controller = new AbortController();
+    setApplicationColumnsLoading(true);
+    setApplicationColumnsError('');
+    void getApplicationColumns(controller.signal)
+      .then((settings) => {
+        if (!controller.signal.aborted)
+          setApplicationExtraFields((current) =>
+            !settings.columns.length && !current.length
+              ? current
+              : settings.columns.map((column) => ({
+                  key: `extra:${column.key}`,
+                  label: column.label,
+                  required: column.required,
+                  aliases: [column.key, column.header, ...column.aliases],
+                })),
+          );
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          setApplicationColumnsError(
+            failure instanceof Error
+              ? failure.message
+              : 'No se pudieron leer las columnas de aplicaciones',
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setApplicationColumnsLoading(false);
+      });
+    return () => controller.abort();
+  }, [target, applicationColumnsRevision]);
   const columns = useMemo(() => sourceColumns(payload, format), [format, payload]);
   const fields = useMemo<readonly ImportField[]>(
     () =>
       target === 'category'
         ? [{ key: 'sku', label: 'Código artículo (SKU)', required: true }, ...categoryFields]
-        : importFields[target],
-    [target, categoryFields],
+        : target === 'applications'
+          ? [...importFields.applications, ...applicationExtraFields]
+          : importFields[target],
+    [target, categoryFields, applicationExtraFields],
   );
   useEffect(() => {
     setMapping(
@@ -535,6 +622,7 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
 
   const reset = () => {
     setDirty(false);
+    setCorrectionBatchId('');
     setPayload(format === 'csv' ? csvExamples[target] : '[]');
     setFileName(`${target}.${format}`);
     setIdempotencyKey(newKey(target));
@@ -545,6 +633,20 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
 
   const startNew = () => {
     reset();
+    navigate('new');
+  };
+
+  const reprocessCorrected = () => {
+    if (!batch || !canExecute || loading) return;
+    const original = batch;
+    reset();
+    setTarget(original.target);
+    setCategoryCode(original.categoryCode ?? '');
+    setFormat('csv');
+    setPayload('');
+    setFileName('');
+    setIdempotencyKey(newKey(original.target));
+    setCorrectionBatchId(original.id);
     navigate('new');
   };
 
@@ -612,6 +714,12 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     const parsed = previewImportSchema.safeParse({
       target,
       format: 'json',
+      ...(/\.(csv|xlsx)$/iu.test(fileName)
+        ? {
+            originalFileName: fileName.trim(),
+            sourceFileFormat: /\.xlsx$/iu.test(fileName) ? 'xlsx' : 'csv',
+          }
+        : {}),
       idempotencyKey,
       ...(target === 'category' ? { categoryCode, templateId } : {}),
       records,
@@ -653,9 +761,16 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      const confirmed = await confirmImport(batch.id);
-      setBatch(confirmed);
-      navigate('result', confirmed.id);
+      if (batch.executionMode === 'asynchronous') {
+        const queued = await enqueueImportConfirmation(batch.id);
+        setExecution(queued);
+        navigate('result', batch.id);
+      } else {
+        const confirmed = await confirmImport(batch.id);
+        setExecution(null);
+        setBatch(confirmed);
+        navigate('result', confirmed.id);
+      }
       history.reload();
     } catch (requestError) {
       setError(
@@ -687,9 +802,37 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
         description={pageDescription}
         actions={
           mode === 'history' ? (
-            <Button onClick={startNew}>
-              <Plus aria-hidden="true" className="size-4" /> Nueva importación
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={history.loading || !!history.error || !historyRows.length}
+                title="Exporta los lotes consultados con los filtros actuales"
+                aria-label="Exportar historial CSV"
+                onClick={() => {
+                  if (!history.workspace) return;
+                  downloadCsv(
+                    {
+                      headers: ['Lote', ...history.workspace.columns.map((column) => column.label)],
+                      rows: historyRows.map((row) => [
+                        row.id,
+                        ...history.workspace!.columns.map((column) =>
+                          typeof row.values[column.key] === 'number'
+                            ? row.values[column.key]
+                            : importHistoryCell(row, column),
+                        ),
+                      ]),
+                    },
+                    'Historial de importaciones',
+                  );
+                }}
+              >
+                <Download aria-hidden="true" className="size-4" />
+                Exportar
+              </Button>
+              <Button onClick={startNew}>
+                <Plus aria-hidden="true" className="size-4" /> Nueva importación
+              </Button>
+            </div>
           ) : (
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => navigate('history')}>
@@ -708,7 +851,11 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
         }
         actions={
           mode === 'history'
-            ? ['Abre el resultado de un lote.', 'Inicia una nueva importación.']
+            ? [
+                'Filtra y exporta los lotes consultados.',
+                'Abre el resultado de un lote.',
+                'Inicia una nueva importación.',
+              ]
             : [
                 'Selecciona el archivo y su destino.',
                 'Revisa columnas, identidad y validación por fila.',
@@ -748,18 +895,27 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
           />
         ) : history.workspace ? (
           <div className="space-y-5">
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores">
-              {history.workspace.metrics.slice(0, 4).map((metric, index) => {
-                const Icon = [UploadCloud, CheckCircle2, XCircle, Clock3][index] ?? UploadCloud;
+            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores">
+              {(
+                [
+                  ['batches', 'Lotes importados', UploadCloud],
+                  ['applied-rows', 'Registros aplicados', CheckCircle2],
+                  ['invalid-rows', 'Con error', XCircle],
+                  ['processing', 'En proceso', Clock3],
+                ] as const
+              ).map(([key, label, Icon]) => {
+                const metric = history.workspace?.metrics.find((item) => item.key === key);
                 return (
-                  <Card key={metric.key} className="flex min-h-[118px] items-start gap-3 p-5">
-                    <span className="grid size-9 place-items-center rounded-full bg-orange-100 text-primary">
+                  <Card key={key} className="flex min-h-16 items-center gap-3 px-4 py-2">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-orange-100 text-primary">
                       <Icon className="size-4" aria-hidden="true" />
                     </span>
                     <span>
-                      <small className="text-muted-foreground">{metric.label}</small>
-                      <strong className="mt-1 block text-2xl">
-                        {formatWorkspaceMetric(metric)}
+                      <small className="text-muted-foreground">{label}</small>
+                      <strong className="mt-0.5 block text-lg leading-5">
+                        {metric && typeof metric.value === 'number'
+                          ? formatWorkspaceMetric(metric)
+                          : '—'}
                       </strong>
                     </span>
                   </Card>
@@ -770,7 +926,10 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
               <div className="flex items-center justify-between border-b p-5">
                 <div>
                   <h2 className="font-semibold">Lotes de importación</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Historial real persistido.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Lotes guardados y resultados por registro. Los archivos antiguos sin metadata se
+                    muestran como no registrados.
+                  </p>
                 </div>
                 <Button variant="outline" onClick={history.reload}>
                   Actualizar
@@ -876,11 +1035,24 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                         <tr key={row.id} className="hover:bg-orange-50/40">
                           <td className="px-4 py-3 font-mono text-xs">{row.id.slice(0, 8)}</td>
                           {history.workspace?.columns.map((column) => {
-                            const value = formatWorkspaceCell(row.values[column.key], column);
+                            const value = importHistoryCell(row, column);
+                            const rawStatus = String(row.values.status ?? '').toLowerCase();
                             return (
                               <td key={column.key} className="px-4 py-3">
                                 {column.type === 'status' ? (
-                                  <StatusBadge tone={statusTone(value)}>{value}</StatusBadge>
+                                  <StatusBadge
+                                    tone={
+                                      rawStatus === 'confirmed'
+                                        ? 'success'
+                                        : rawStatus === 'failed'
+                                          ? 'danger'
+                                          : rawStatus === 'processing' || rawStatus === 'queued'
+                                            ? 'warning'
+                                            : 'info'
+                                    }
+                                  >
+                                    {value}
+                                  </StatusBadge>
                                 ) : (
                                   value
                                 )}
@@ -927,6 +1099,16 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
             <div className="mt-6">
               {step === 0 ? (
                 <div className="space-y-5">
+                  {correctionBatchId ? (
+                    <p
+                      role="status"
+                      className="rounded border border-blue-200 bg-blue-50 p-3 text-xs"
+                    >
+                      Carga el archivo con las filas corregidas del lote{' '}
+                      {correctionBatchId.slice(0, 8)}. Se validará como un lote nuevo; el resultado
+                      anterior se conserva.
+                    </p>
+                  ) : null}
                   <div className="grid gap-3 md:grid-cols-2">
                     <Select
                       label="Destino"
@@ -1151,6 +1333,19 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                       Leyendo atributos de la plantilla…
                     </p>
                   ) : null}
+                  {target === 'applications' && applicationColumnsError ? (
+                    <p role="alert" className="mt-2 text-sm text-destructive">
+                      {applicationColumnsError}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-2"
+                        onClick={() => setApplicationColumnsRevision((value) => value + 1)}
+                      >
+                        Reintentar columnas
+                      </Button>
+                    </p>
+                  ) : null}
                   {schemaError ? (
                     <p role="alert" className="text-xs text-red-700">
                       {schemaError}
@@ -1208,7 +1403,8 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                   </div>
                   <dl className="grid gap-0 divide-y p-5 text-sm">
                     {[
-                      ['Archivo', fileName],
+                      ['Archivo', batch.originalFileName ?? 'Sin archivo registrado'],
+                      ['Formato', batch.sourceFileFormat?.toUpperCase() ?? 'No registrado'],
                       ['Destino', targetLabels[batch.target]],
                       ['Registros', String(batch.totalRows)],
                       ['Válidos', String(batch.validRows)],
@@ -1252,7 +1448,11 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     !canExecute ||
                     loading ||
                     fileLoading ||
-                    (step === 2 && (schemaLoading || !!schemaError)) ||
+                    (step === 2 &&
+                      (schemaLoading ||
+                        !!schemaError ||
+                        (target === 'applications' &&
+                          (applicationColumnsLoading || !!applicationColumnsError)))) ||
                     !payload.trim() ||
                     (step >= 1 && !categorySelectionReady)
                   }
@@ -1282,6 +1482,18 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
           </div>
         ) : batch ? (
           <div className="space-y-5">
+            {batch.executionMode === 'asynchronous' ? (
+              <ImportExecutionProgress
+                key={batch.id}
+                batchId={batch.id}
+                onBatch={setBatch}
+                onExecution={setExecution}
+              />
+            ) : (
+              <p className="rounded border bg-slate-50 p-3 text-xs text-muted-foreground">
+                El resultado y sus validaciones están guardados en el historial de importaciones.
+              </p>
+            )}
             <BatchMetrics batch={batch} result />
             <Card className="overflow-hidden">
               <div className="flex flex-col justify-between gap-3 border-b p-5 sm:flex-row sm:items-center">
@@ -1293,11 +1505,18 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                         ? 'Confirmado'
                         : batch.status === 'failed'
                           ? 'Fallido'
-                          : 'Vista previa'}
+                          : batch.status === 'processing'
+                            ? 'Procesando'
+                            : 'Vista previa'}
                     </StatusBadge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Lote {batch.id} · creado {new Date(batch.createdAt).toLocaleString('es-PE')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Archivo: <strong>{batch.originalFileName ?? 'Sin archivo registrado'}</strong>
+                    {' · '}Formato:{' '}
+                    <strong>{batch.sourceFileFormat?.toUpperCase() ?? 'No registrado'}</strong>
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1309,7 +1528,14 @@ export function ImportsWorkspace({ canExecute }: { canExecute: boolean }) {
                     <Download className="size-3.5" />
                     Descargar errores y advertencias
                   </Button>
-                  {batch.status === 'previewed' ? (
+                  {canExecute &&
+                  batch.rows.some((row) => !row.valid) &&
+                  batch.status !== 'processing' ? (
+                    <Button variant="outline" onClick={reprocessCorrected}>
+                      Reprocesar corregidos
+                    </Button>
+                  ) : null}
+                  {batch.status === 'previewed' && !execution ? (
                     <Button
                       onClick={() => void confirm()}
                       disabled={!canExecute || loading || batch.validRows === 0}

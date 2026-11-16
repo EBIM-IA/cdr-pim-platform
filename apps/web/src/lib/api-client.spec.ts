@@ -168,6 +168,34 @@ describe('ApiClient', () => {
     ]);
   });
 
+  it.each([true, false])(
+    'preserves unified-code grouping=%s from the BFF to the API',
+    async (groupByUnifiedCode) => {
+      const fetchMock = mockFetch(200, {
+        columns: [],
+        facets: { brands: [], applicationTypes: [], statuses: [] },
+        items: [],
+        page: 1,
+        pageSize: 25,
+        total: 93,
+        totalArticles: 97,
+        totalBrands: 29,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const result = await client.listCatalogWorkbook({
+        groupByUnifiedCode,
+        page: 1,
+        pageSize: 25,
+        filter: [],
+      });
+      const [rawUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(rawUrl).searchParams.get('groupByUnifiedCode')).toBe(
+        String(groupByUnifiedCode),
+      );
+      expect(result).toMatchObject({ total: 93, totalArticles: 97, totalBrands: 29 });
+    },
+  );
+
   it('sends an optimistic version when updating a dynamic attribute', async () => {
     const fetchMock = mockFetch(200, {
       productId: '11111111-1111-4111-8111-111111111111',

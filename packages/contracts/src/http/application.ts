@@ -5,6 +5,37 @@ import { uuidSchema } from './common';
 export const applicationVehicleTypeSchema = z.enum(['AUTOMOTRIZ', 'INDUSTRIAL']);
 export type ApplicationVehicleType = z.infer<typeof applicationVehicleTypeSchema>;
 
+// Archived/renamed columns retain their values, so stored rows can contain more than
+// 60 historical keys even though each write and the active configuration remain limited.
+const storedApplicationAdditionalFieldsSchema = z.record(
+  z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),
+  z.string().trim().max(500).nullable(),
+);
+export const applicationAdditionalFieldsSchema = storedApplicationAdditionalFieldsSchema.refine(
+  (fields) => Object.keys(fields).length <= 60,
+  'Máximo 60 campos adicionales',
+);
+export const applicationColumnSchema = z.object({
+  key: z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),
+  header: z.string().trim().min(1).max(120),
+  label: z.string().trim().min(1).max(160),
+  required: z.boolean(),
+  aliases: z.array(z.string().trim().min(1).max(120)).max(20),
+});
+export const applicationColumnSettingsSchema = z.object({
+  columns: z.array(applicationColumnSchema).max(60),
+  version: z.number().int().min(0),
+});
+export const updateApplicationColumnSettingsSchema = z.object({
+  columns: z.array(applicationColumnSchema).max(60),
+  expectedVersion: z.number().int().min(0),
+});
+export type ApplicationColumnDto = z.infer<typeof applicationColumnSchema>;
+export type ApplicationColumnSettingsDto = z.infer<typeof applicationColumnSettingsSchema>;
+export type UpdateApplicationColumnSettingsInput = z.infer<
+  typeof updateApplicationColumnSettingsSchema
+>;
+
 export const groupApplicationSchema = z.object({
   id: uuidSchema,
   groupId: uuidSchema,
@@ -22,6 +53,7 @@ export const groupApplicationSchema = z.object({
   subarea: z.string().max(200).nullable(),
   engine: z.string().max(200).nullable(),
   notes: z.string().max(2_000).nullable(),
+  additionalFields: storedApplicationAdditionalFieldsSchema.optional(),
   active: z.boolean(),
   verificationStatus: z.enum(['pending', 'verified']).optional(),
   source: z.enum(['manual', 'import']),
@@ -49,6 +81,7 @@ const applicationVehicleTypeWriteSchema = z.preprocess(
 );
 
 const groupApplicationWriteFieldsSchema = z.object({
+  additionalFields: applicationAdditionalFieldsSchema.optional(),
   vehicleType: applicationVehicleTypeWriteSchema,
   verificationStatus: z.enum(['pending', 'verified']).optional(),
   make: z.string().trim().min(1).max(160),
@@ -85,6 +118,7 @@ export type CreateGroupApplicationInput = z.infer<typeof createGroupApplicationS
 
 export const updateGroupApplicationSchema = z
   .object({
+    additionalFields: applicationAdditionalFieldsSchema.optional(),
     verificationStatus: z.enum(['pending', 'verified']).optional(),
     expectedUpdatedAt: z.string().datetime({ offset: true }),
     vehicleType: applicationVehicleTypeWriteSchema.optional(),
@@ -104,6 +138,8 @@ export const updateGroupApplicationSchema = z
   })
   .refine(
     (value) =>
+      value.additionalFields !== undefined ||
+      value.verificationStatus !== undefined ||
       value.vehicleType !== undefined ||
       value.make !== undefined ||
       value.model !== undefined ||

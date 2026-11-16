@@ -180,6 +180,30 @@ export function EcommerceDescriptionCard({
           Todavía no hay una descripción guardada para esta variante.
         </p>
       )}
+      {canManage && value?.generationPrompt ? (
+        <details className="mt-3 rounded border bg-white p-3 text-xs">
+          <summary className="cursor-pointer font-semibold">
+            Ver instrucción exacta enviada al modelo
+          </summary>
+          <p className="mt-2 text-muted-foreground">
+            Modelo: {value.model} · máximo {value.generationPrompt.maxOutputTokens} tokens ·
+            temperatura {value.generationPrompt.temperature}
+          </p>
+          <strong className="mt-3 block">Instrucción</strong>
+          <pre className="mt-1 whitespace-pre-wrap break-words">
+            {value.generationPrompt.instruction}
+          </pre>
+          <strong className="mt-3 block">Datos enviados</strong>
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words">
+            {value.generationPrompt.input}
+          </pre>
+        </details>
+      ) : canManage && value ? (
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Esta versión anterior no conserva el prompt. La próxima generación guardará la instrucción
+          y los datos exactos.
+        </p>
+      ) : null}
       {value?.stale ? (
         <p className="mt-3 text-xs text-amber-900">
           Los datos cambiaron. Revisa o regenera el texto antes de aprobarlo.

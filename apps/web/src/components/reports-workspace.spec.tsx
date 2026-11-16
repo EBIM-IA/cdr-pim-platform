@@ -83,15 +83,15 @@ beforeEach(() => {
 afterEach(cleanup);
 const capabilities = ['menu:ai-quality:view', 'menu:products:view', 'menu:reports:view'];
 describe('ReportsWorkspace', () => {
-  it('renders the designer structure with seven reports and eight real indicator cards', async () => {
+  it('renders nine reports and eight real indicator cards', async () => {
     render(<ReportsWorkspace actorId="admin" canManageFormats capabilities={capabilities} />);
     await waitFor(() =>
       expect(
         within(screen.getByRole('article', { name: 'Catálogo / exportación' })).getByText('105'),
       ).toBeInTheDocument(),
     );
-    expect(screen.getAllByRole('article')).toHaveLength(15);
-    expect(screen.getAllByRole('button', { name: /^Excel /u })).toHaveLength(7);
+    expect(screen.getAllByRole('article')).toHaveLength(17);
+    expect(screen.getAllByRole('button', { name: /^Excel /u })).toHaveLength(9);
     expect(screen.getByRole('heading', { name: 'Reportes del cliente' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Abrir Calidad del catálogo' })).toHaveAttribute(
       'href',
@@ -107,7 +107,7 @@ describe('ReportsWorkspace', () => {
     expect(screen.queryByText('18.420')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Exportar todo (Excel)' }));
     await waitFor(() => expect(mocks.downloadWorkbookXlsx).toHaveBeenCalled());
-    expect(mocks.downloadWorkbookXlsx.mock.calls[0]?.[0]).toHaveLength(7);
+    expect(mocks.downloadWorkbookXlsx.mock.calls[0]?.[0]).toHaveLength(9);
   });
   it('preserves the search-report indicators and two-panel hierarchy without invented telemetry', async () => {
     mocks.view = 'view=searches';
@@ -121,7 +121,7 @@ describe('ReportsWorkspace', () => {
     expect(screen.getAllByRole('columnheader', { name: 'Última consulta' })).toHaveLength(2);
     expect(screen.getByRole('link', { name: 'Abrir búsqueda' })).toHaveAttribute(
       'href',
-      '/products?view=search',
+      '/quality?view=search',
     );
     expect(screen.queryByText('18.420')).not.toBeInTheDocument();
     expect(screen.queryByText('94,8%')).not.toBeInTheDocument();
@@ -149,6 +149,8 @@ describe('ReportsWorkspace', () => {
       ).toBeVisible(),
     );
     expect(screen.getAllByText('6205')).toHaveLength(2);
+    for (const link of screen.getAllByRole('link', { name: 'Repetir consulta' }))
+      expect(link).toHaveAttribute('href', '/quality?view=search&q=6205');
     expect(screen.queryByText('Sin consultas registradas para analizar.')).not.toBeInTheDocument();
   });
 
@@ -255,7 +257,20 @@ describe('ReportsWorkspace', () => {
     );
     expect(saved).toContain('Cliente');
     expect(saved).not.toContain('No debe guardarse');
-    expect(saved).not.toContain('6205');
+    // Random format identifiers can contain a SKU's digits; validate the saved shape instead.
+    const savedRequest = mocks.reportSettings.mock.calls.find(
+      (call) => call[0]?.operation === 'save-format',
+    )?.[0];
+    expect(savedRequest.format).toEqual({
+      id: expect.stringMatching(/^personal-/u),
+      file: 'Cliente.csv',
+      title: 'Cliente',
+      fields: [
+        { header: 'Código artículo', field: 'sku' },
+        { header: 'Descripción', field: 'name' },
+        { header: 'Nota', field: '' },
+      ],
+    });
     await waitFor(() =>
       expect(mocks.push).toHaveBeenCalledWith(expect.stringContaining('/reports?view=personal-')),
     );

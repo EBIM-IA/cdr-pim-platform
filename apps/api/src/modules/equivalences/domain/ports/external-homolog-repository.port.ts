@@ -30,7 +30,8 @@ export interface ExternalHomologRepositoryPort {
   findGroupByCode(code: string): Promise<{ id: Uuid; code: string } | null>;
   findById(id: Uuid): Promise<ExternalHomolog | null>;
   list(unifiedCode?: string, includeInactive?: boolean): Promise<ExternalHomolog[]>;
-  searchEligible(externalCode: string): Promise<EligibleHomologMatch[]>;
+  /** Exact code or partial name of active, approved external references only. */
+  searchEligible(query: string): Promise<EligibleHomologMatch[]>;
   /** Inserts the aggregate and its immutable audit event in one transaction. */
   insertWithAudit(homolog: ExternalHomolog, audit: HomologAuditWriteContext): Promise<void>;
   /** Optimistically updates the aggregate and audit event in one transaction. */

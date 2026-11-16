@@ -1,3 +1,7 @@
+import { BootstrapCodeAffixesUseCase } from '../application/bootstrap-code-affixes.use-case';
+import { bootstrapCodeAffixesSchema, type BootstrapCodeAffixesInput } from '@cdr/contracts';
+import { SearchAssistantUseCase } from '../application/search-assistant.use-case';
+import { aiSearchAssistantRequestSchema, type AiSearchAssistantRequest } from '@cdr/contracts';
 import { Inject } from '@nestjs/common';
 import {
   QUALITY_CANDIDATE_CAPTURE,
@@ -32,10 +36,45 @@ import {
 @RequireCapabilities(Capability.CatalogRead, Capability.AiQualityExecute)
 export class AiController {
   constructor(
+    private readonly bootstrapAffixes: BootstrapCodeAffixesUseCase,
+    private readonly searchAssistant: SearchAssistantUseCase,
     private readonly generateProposal: GenerateCommercialProposalUseCase,
     private readonly extractCandidates: ExtractAssetCandidatesUseCase,
     @Inject(QUALITY_CANDIDATE_CAPTURE) private readonly capture: QualityCandidateCapturePort,
   ) {}
+
+  @Post('code-affixes/bootstrap')
+  @HttpCode(200)
+  @RateLimit('ai')
+  @RequireCapabilities(Capability.AdministrationManage)
+  async bootstrap(
+    @Body(new ZodValidationPipe(bootstrapCodeAffixesSchema)) body: BootstrapCodeAffixesInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) {
+    const result = await this.bootstrapAffixes.execute(body, actor);
+    return {
+      ...result,
+      items: result.items.map((rule) => {
+        const value = rule.toSnapshot();
+        return {
+          ...value,
+          createdAt: value.createdAt.toISOString(),
+          updatedAt: value.updatedAt.toISOString(),
+          validatedAt: value.validatedAt?.toISOString() ?? null,
+        };
+      }),
+    };
+  }
+
+  @Post('search-assistant')
+  @HttpCode(200)
+  @RateLimit('ai')
+  search(
+    @Body(new ZodValidationPipe(aiSearchAssistantRequestSchema)) body: AiSearchAssistantRequest,
+    @CurrentActor() actor: AuthenticatedActor,
+  ) {
+    return this.searchAssistant.execute(body, actor);
+  }
 
   @Post('products/:productId/commercial-proposal')
   @HttpCode(200)

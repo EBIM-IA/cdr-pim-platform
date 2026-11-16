@@ -13,15 +13,24 @@ export interface EquivalenceCatalog {
   items: CatalogWorkbookProductDto[];
   columns: CatalogWorkbookColumnDto[];
 }
-export async function fetchEquivalenceCatalog(signal?: AbortSignal): Promise<EquivalenceCatalog> {
-  const first = await fetchCatalogWorkbook({ page: 1, pageSize: 100, filter: [] }, signal);
+export async function fetchEquivalenceCatalog(
+  signal?: AbortSignal,
+  unifiedCode?: string,
+): Promise<EquivalenceCatalog> {
+  const scope = unifiedCode
+    ? { columnFilter: [JSON.stringify({ key: 'base:unifier', values: [`value:${unifiedCode}`] })] }
+    : {};
+  const first = await fetchCatalogWorkbook(
+    { page: 1, pageSize: 100, filter: [], ...scope },
+    signal,
+  );
   const items = [...first.items],
     ids = new Set(items.map((item) => item.id));
   let page = 2;
   const columns = new Map(first.columns.map((column) => [column.key, column]));
   while (items.length < first.total) {
     const next: CatalogWorkbookResultDto = await fetchCatalogWorkbook(
-      { page: page++, pageSize: 100, filter: [] },
+      { page: page++, pageSize: 100, filter: [], ...scope },
       signal,
     );
     let added = 0;
@@ -82,6 +91,10 @@ export interface EquivalenceRelation {
   approvalStatus: 'pending' | 'approved' | 'rejected';
   active: boolean;
   source: 'manual' | 'import';
+  name?: string | null;
+  referenceType?: string | null;
+  referenceSource?: string | null;
+  note?: string | null;
   updatedAt: string;
 }
 export function homologRelation(row: ExternalHomologDto): EquivalenceRelation {
@@ -89,6 +102,10 @@ export function homologRelation(row: ExternalHomologDto): EquivalenceRelation {
     id: row.id,
     unifiedCode: row.unifiedCode,
     code: row.externalCode,
+    name: row.name,
+    referenceType: row.referenceType,
+    referenceSource: row.referenceSource,
+    note: row.note,
     brand: row.externalBrand,
     approvalStatus: row.approvalStatus,
     active: row.active,

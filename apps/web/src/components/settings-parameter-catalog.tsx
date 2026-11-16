@@ -185,9 +185,18 @@ export function SettingsParameterCatalog({
             />
           </label>
           {error ? (
-            <p role="alert" className="mt-3 text-xs text-red-700">
+            <div role="alert" className="mt-3 text-xs text-red-700">
               {error}
-            </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 block"
+                onClick={() => setRefresh((value) => value + 1)}
+                disabled={loading}
+              >
+                Reintentar catálogo
+              </Button>
+            </div>
           ) : null}
           {notice ? (
             <p role="status" className="mt-3 text-xs text-emerald-800">

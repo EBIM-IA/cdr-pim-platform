@@ -8,8 +8,33 @@ import { GetProductAttributeSheetUseCase } from './get-product-attribute-sheet.u
 import { toProductAttributeSheetDto } from '../presentation/dynamic-catalog.presenter';
 
 const id = (): Uuid => randomUUID() as Uuid;
+const visibility = {
+  get: vi.fn().mockResolvedValue({ visible: true }),
+  getMany: vi.fn(),
+  save: vi.fn(),
+};
+const admin = { id: 'admin', email: 'admin@example.test', roles: ['ADMINISTRADOR'] as const };
 
 describe('GetProductAttributeSheetUseCase', () => {
+  it('blocks hidden commercial sheets for consultation profiles before loading attributes', async () => {
+    const getProductSheet = vi.fn();
+    const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
+    const policy = {
+      get: vi.fn().mockResolvedValue({ visible: false }),
+      getMany: vi.fn(),
+      save: vi.fn(),
+    };
+    for (const role of ['COMPRAS', 'VENTAS'] as const) {
+      await expect(
+        new GetProductAttributeSheetUseCase(repository, policy).executeTechnicalSheet(id(), {
+          id: 'reader',
+          email: 'reader@example.test',
+          roles: [role],
+        }),
+      ).rejects.toThrow('not found');
+    }
+    expect(getProductSheet).not.toHaveBeenCalled();
+  });
   it('preserves canonical completeness in the product sheet response', async () => {
     const productId = id();
     const getProductSheet = vi.fn().mockResolvedValue({
@@ -29,11 +54,14 @@ describe('GetProductAttributeSheetUseCase', () => {
       completeness: 60,
     });
     const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
-    const sheet = await new GetProductAttributeSheetUseCase(repository).execute(productId, {
-      id: 'admin-test',
-      email: 'admin@example.test',
-      roles: ['ADMINISTRADOR'],
-    });
+    const sheet = await new GetProductAttributeSheetUseCase(repository, visibility).execute(
+      productId,
+      {
+        id: 'admin-test',
+        email: 'admin@example.test',
+        roles: ['ADMINISTRADOR'],
+      },
+    );
 
     expect(toProductAttributeSheetDto(sheet).completeness).toBe(60);
   });
@@ -103,9 +131,10 @@ describe('GetProductAttributeSheetUseCase', () => {
     });
     const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
 
-    const result = await new GetProductAttributeSheetUseCase(repository).executeTechnicalSheet(
-      productId,
-    );
+    const result = await new GetProductAttributeSheetUseCase(
+      repository,
+      visibility,
+    ).executeTechnicalSheet(productId, admin);
 
     expect(getProductSheet).toHaveBeenCalledWith(productId, ['ADMINISTRADOR', 'COMPRAS', 'VENTAS']);
     expect(result.schema.attributes.map((attribute) => attribute.key)).toEqual(['diametro']);

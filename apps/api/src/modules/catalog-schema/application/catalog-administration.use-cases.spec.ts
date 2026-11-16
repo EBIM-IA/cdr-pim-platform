@@ -47,6 +47,7 @@ const attribute = {
 
 function repository(): CatalogAdministrationRepositoryPort {
   return {
+    updateTemplateSections: async () => ({ kind: 'not_found' }),
     listCategories: async () => [],
     updateCategory: async () => ({ kind: 'not_found' }),
     listTemplates: async () => [],

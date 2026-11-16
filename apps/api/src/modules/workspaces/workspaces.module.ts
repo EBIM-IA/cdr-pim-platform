@@ -1,3 +1,4 @@
+import { IdentityModule } from '../identity/identity.module';
 import { Module } from '@nestjs/common';
 import { REPORT_SETTINGS } from './domain/ports/report-settings.port';
 import { ReportSettingsUseCase } from './application/report-settings.use-case';
@@ -11,7 +12,7 @@ import { PostgresWorkspaceReadModel } from './infrastructure/postgres-workspace-
 import { WorkspacesController } from './presentation/workspaces.controller';
 
 @Module({
-  imports: [ProductCatalogsModule],
+  imports: [ProductCatalogsModule, IdentityModule],
   controllers: [WorkspacesController, ReportSettingsController],
   providers: [
     { provide: WORKSPACE_READ_MODEL, useClass: PostgresWorkspaceReadModel },
