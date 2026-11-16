@@ -30,6 +30,7 @@ import {
   type ExcelTableColumn,
   useExcelTableRows,
 } from '@/components/excel-table-filter';
+import { CatalogTechnicalSheetsButton } from '@/components/catalog-technical-sheets-button';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -104,6 +105,37 @@ export function serializeWorkbookSort(
 ): string | undefined {
   return sort ? JSON.stringify(sort) : undefined;
 }
+
+const unifiedGroupColumns: readonly WorkbookColumn[] = [
+  {
+    key: 'base:unifier',
+    label: 'Código Unificador',
+    group: 'identity',
+    exportable: false,
+    getValue: (row) => row.unifiedCode ?? row.sku,
+  },
+  {
+    key: 'base:name',
+    label: 'Descripción',
+    group: 'identity',
+    exportable: false,
+    getValue: (row) => row.name,
+  },
+  {
+    key: 'base:application',
+    label: 'Tipo de Aplicación',
+    group: 'identity',
+    exportable: false,
+    getValue: (row) => row.applicationTypes.join(', '),
+  },
+  {
+    key: 'base:brand',
+    label: 'Marca de Artículo',
+    group: 'identity',
+    exportable: false,
+    getValue: (row) => row.brand,
+  },
+];
 
 const baseColumns: readonly WorkbookColumn[] = [
   {
@@ -290,8 +322,9 @@ export function CatalogWorkbookTable({
   const [rows, setRows] = useState<CatalogWorkbookProductDto[]>([]);
   const [dynamicColumns, setDynamicColumns] = useState<CatalogWorkbookColumnDto[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
+  const [groupCounts, setGroupCounts] = useState({ articles: 0, brands: 0 });
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -317,34 +350,37 @@ export function CatalogWorkbookTable({
   }, [loading, editing, rows]);
 
   const columns = useMemo<WorkbookColumn[]>(
-    () => [
-      ...baseColumns
-        .filter(
-          (column) =>
-            (showDescriptionAndTemplate ||
-              (column.key !== 'base:name' && column.key !== 'base:template')) &&
-            (showStatus || column.key !== 'base:status'),
-        )
-        .map((column) =>
-          column.key === 'base:status' && !showCompleteness
-            ? {
-                ...column,
-                label: 'Estado',
-                getValue: (row: CatalogWorkbookProductDto) =>
-                  statusLabel(row.status as ProductStatus),
-              }
-            : column,
-        ),
-      ...dynamicColumns.map((attribute) => ({
-        key: `attribute:${attribute.key}`,
-        label: `${attribute.label}${attribute.unit ? ` (${attribute.unit})` : ''}`,
-        group: 'attribute' as const,
-        attribute,
-        exportable: attribute.permissions.export,
-        getValue: (row: CatalogWorkbookProductDto) => attributeCell(row, attribute.key),
-      })),
-    ],
-    [dynamicColumns, showCompleteness, showDescriptionAndTemplate, showStatus],
+    () =>
+      !showCompleteness && !canEdit
+        ? [...unifiedGroupColumns]
+        : [
+            ...baseColumns
+              .filter(
+                (column) =>
+                  (showDescriptionAndTemplate ||
+                    (column.key !== 'base:name' && column.key !== 'base:template')) &&
+                  (showStatus || column.key !== 'base:status'),
+              )
+              .map((column) =>
+                column.key === 'base:status' && !showCompleteness
+                  ? {
+                      ...column,
+                      label: 'Estado',
+                      getValue: (row: CatalogWorkbookProductDto) =>
+                        statusLabel(row.status as ProductStatus),
+                    }
+                  : column,
+              ),
+            ...dynamicColumns.map((attribute) => ({
+              key: `attribute:${attribute.key}`,
+              label: `${attribute.label}${attribute.unit ? ` (${attribute.unit})` : ''}`,
+              group: 'attribute' as const,
+              attribute,
+              exportable: attribute.permissions.export,
+              getValue: (row: CatalogWorkbookProductDto) => attributeCell(row, attribute.key),
+            })),
+          ],
+    [canEdit, dynamicColumns, showCompleteness, showDescriptionAndTemplate, showStatus],
   );
   const columnOrder = usePersistentColumnOrder({
     screenKey: 'products-catalog',
@@ -398,7 +434,7 @@ export function CatalogWorkbookTable({
         pageSize,
         filter: [],
         columnFilter: serializedColumnFilters,
-        groupByUnifiedCode: !showCompleteness,
+        groupByUnifiedCode: !showCompleteness && !canEdit,
         ...(serializedSort ? { sort: serializedSort } : {}),
         ...(q ? { q } : {}),
         ...(brand ? { brand } : {}),
@@ -417,6 +453,10 @@ export function CatalogWorkbookTable({
           ),
         );
         setTotal(result.total);
+        setGroupCounts({
+          articles: result.totalArticles ?? result.total,
+          brands: result.totalBrands ?? result.facets.brands.length,
+        });
         onFacetsChange?.(result.facets);
         setEditing(null);
       })
@@ -510,7 +550,7 @@ export function CatalogWorkbookTable({
           pageSize: WORKBOOK_EXPORT_PAGE_SIZE,
           filter: [],
           columnFilter: serializedColumnFilters,
-          groupByUnifiedCode: !showCompleteness,
+          groupByUnifiedCode: !showCompleteness && !canEdit,
           ...(serializedSort ? { sort: serializedSort } : {}),
           ...(q ? { q } : {}),
           ...(brand ? { brand } : {}),
@@ -681,90 +721,85 @@ export function CatalogWorkbookTable({
 
   const consultation = !canEdit && !showCompleteness;
   const showFilterSummary =
-    !consultation ||
     table.filteredColumnKeys.length > 0 ||
     Object.values(columnExpressions).some((expression) => expression.trim()) ||
-    (table.sort && (table.sort.key !== 'base:unifier' || table.sort.direction !== 'asc'));
+    (table.sort &&
+      (table.sort.key !== (showCompleteness ? 'base:sku' : 'base:unifier') ||
+        table.sort.direction !== 'asc'));
 
   return (
     <Card className="min-w-0 overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 text-[11px] text-muted-foreground">
-        {consultation ? (
-          <p>
-            {formatNumber(total)} {total === 1 ? 'artículo' : 'artículos'} · agrupados por código
-            unificador
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-4">
-            <span>
-              {showCompleteness
-                ? 'Identidad y base ERP · solo lectura'
-                : 'Artículos agrupados por código unificador'}
-            </span>
-            <span>
-              {canEdit
-                ? 'Haz clic en una celda PIM editable y pulsa Enter para guardar.'
-                : 'Selecciona un artículo para consultar su ficha.'}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden="true"
-                className="size-3 rounded-sm border bg-[repeating-linear-gradient(135deg,#f8fafc,#f8fafc_3px,#e2e8f0_3px,#e2e8f0_4px)]"
-              />
-              Tramado: no aplica a la plantilla
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span aria-hidden="true" className="cdr-missing-swatch size-3 rounded-sm border" />
-              Rosado: atributo obligatorio sin valor
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-2">
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-1 border-b px-3 py-1 text-[11px] text-muted-foreground">
+        <span>
+          {formatNumber(total)}{' '}
+          {consultation ? (total === 1 ? 'código unificador' : 'códigos unificadores') : 'SKU'}
+          {consultation
+            ? ` · ${formatNumber(groupCounts.articles)} ${groupCounts.articles === 1 ? 'artículo' : 'artículos'} · ${formatNumber(groupCounts.brands)} ${groupCounts.brands === 1 ? 'marca' : 'marcas'}`
+            : ''}
+        </span>
+        <div className="flex items-center gap-1 [&_button]:h-7 [&_button]:px-2">
           <Button
             type="button"
             size="sm"
             variant="ghost"
             aria-label="Actualizar"
+            title="Actualizar"
             onClick={() => setRevision((value) => value + 1)}
             disabled={loading}
           >
             <RefreshCw aria-hidden="true" className={cn('size-3.5', loading && 'animate-spin')} />
-            <span className={consultation ? 'sr-only' : undefined}>Actualizar</span>
           </Button>
           {canEdit ? (
             <>
               <Button
                 type="button"
+                size="sm"
                 variant="outline"
                 disabled={loading || exporting || total === 0}
                 onClick={() => void exportFilteredView('csv')}
-                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+                aria-label={`CSV · ${formatNumber(total)} ${total === 1 ? 'fila' : 'filas'}`}
+                title="Exportar vista filtrada CSV"
               >
                 <Download aria-hidden="true" className="size-4" />
-                CSV · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
               </Button>
               <Button
                 type="button"
+                size="sm"
                 variant="outline"
                 disabled={loading || exporting || total === 0}
                 onClick={() => void exportFilteredView('xlsx')}
-                title={`Exporta toda la vista filtrada (máximo ${formatNumber(WORKBOOK_EXPORT_LIMIT)} filas)`}
+                aria-label={`XLSX · ${formatNumber(total)} ${total === 1 ? 'fila' : 'filas'}`}
+                title="Exportar vista filtrada Excel"
               >
                 <FileSpreadsheet aria-hidden="true" className="size-4" />
-                XLSX · {formatNumber(total)} {total === 1 ? 'fila' : 'filas'}
               </Button>
             </>
           ) : null}
+          <CatalogTechnicalSheetsButton
+            compact
+            query={{
+              filter: [],
+              columnFilter: serializedColumnFilters,
+              groupByUnifiedCode: consultation,
+              ...(q ? { q } : {}),
+              ...(brand ? { brand } : {}),
+              ...(status ? { status } : {}),
+              ...(applicationType ? { applicationType } : {}),
+              ...(completeness ? { completeness } : {}),
+              ...(categoryId ? { categoryId } : {}),
+              ...(serializedSort ? { sort: serializedSort } : {}),
+            }}
+          />
           <Button
             type="button"
-            variant="outline"
+            size="sm"
+            variant="ghost"
             disabled={columnOrder.isDefaultOrder}
             onClick={columnOrder.resetOrder}
             title="Restaurar el orden original de las columnas"
             aria-label="Restaurar columnas"
           >
             <Columns3 aria-hidden="true" className="size-4" />
-            <span className={consultation ? 'sr-only' : undefined}>Restaurar columnas</span>
           </Button>
         </div>
       </div>
@@ -844,6 +879,7 @@ export function CatalogWorkbookTable({
                 <ExcelTableHeader
                   key={column.key}
                   columnKey={column.key}
+                  filterHelp={index === 0}
                   label={column.label}
                   options={table.getValueOptions(column.key)}
                   selectedValues={table.filters[column.key]}
@@ -898,18 +934,6 @@ export function CatalogWorkbookTable({
           <tbody className="divide-y">
             {displayRows.map((row, rowIndex) => (
               <Fragment key={row.id}>
-                {!showCompleteness &&
-                (rowIndex === 0 || displayRows[rowIndex - 1]?.unifiedCode !== row.unifiedCode) ? (
-                  <tr className="bg-[#f1f1ed]">
-                    <th
-                      scope="rowgroup"
-                      colSpan={orderedColumns.length + 1}
-                      className="px-4 py-3 text-left text-xs font-bold"
-                    >
-                      Código unificador · {row.unifiedCode || 'Sin código unificador'}
-                    </th>
-                  </tr>
-                ) : null}
                 <tr
                   key={row.id}
                   aria-selected={selectedRowId === row.id}
@@ -943,7 +967,34 @@ export function CatalogWorkbookTable({
                               'border-l-2 border-l-slate-200',
                           )}
                         >
-                          {column.key === 'base:sku' ? (
+                          {consultation && column.key === 'base:unifier' ? (
+                            <div>
+                              <Link
+                                className="font-semibold hover:text-primary"
+                                href={`/products/${encodeURIComponent(row.id)}`}
+                              >
+                                {row.unifiedCode || row.sku}
+                              </Link>
+                              <small className="mt-1 block text-muted-foreground">
+                                {row.unifiedCode
+                                  ? `${row.groupMembers?.length ?? 1} ${(row.groupMembers?.length ?? 1) === 1 ? 'equivalencia' : 'equivalencias'}`
+                                  : 'Sin código unificador'}
+                              </small>
+                            </div>
+                          ) : consultation && column.key === 'base:brand' ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(row.groupMembers ?? [row]).map((member) => (
+                                <Link
+                                  key={member.id}
+                                  title={`${member.brand ?? ''} · ${member.sku}`}
+                                  className="rounded-full border px-2 py-1 text-[11px] hover:border-primary"
+                                  href={`/products/${encodeURIComponent(member.id)}`}
+                                >
+                                  {member.brand || member.sku}
+                                </Link>
+                              ))}
+                            </div>
+                          ) : column.key === 'base:sku' ? (
                             <Link
                               href={`/products/${encodeURIComponent(row.id)}`}
                               className="whitespace-nowrap font-semibold hover:text-primary"

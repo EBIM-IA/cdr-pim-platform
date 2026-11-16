@@ -72,7 +72,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 7px;
-  padding: 10px 14px;
+  padding: 6px 12px;
   border-bottom: 1px solid #e9eaec;
 }
 .tableHeading h2 {
@@ -80,7 +80,8 @@
   font-weight: 700;
 }
 .tableHeading p {
-  flex: 1;
+  flex: 1 1 280px;
+  min-width: 180px;
   color: #737b84;
   font-size: 11px;
 }

@@ -1,3 +1,5 @@
+import type { BootstrapCodeAffixesUseCase } from '../application/bootstrap-code-affixes.use-case';
+import type { SearchAssistantUseCase } from '../application/search-assistant.use-case';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RATE_LIMIT_PROFILE } from '../../../shared/http/rate-limit';
@@ -26,6 +28,8 @@ describe('AiController', () => {
       outputTokens: 8,
     });
     const controller = new AiController(
+      { execute: vi.fn() } as unknown as BootstrapCodeAffixesUseCase,
+      { execute: vi.fn() } as unknown as SearchAssistantUseCase,
       { execute } as unknown as GenerateCommercialProposalUseCase,
       { execute: vi.fn() } as unknown as ExtractAssetCandidatesUseCase,
       {

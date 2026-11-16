@@ -21,6 +21,22 @@ export interface ReportDefinition {
 }
 export const REPORT_DEFINITIONS: readonly ReportDefinition[] = [
   {
+    id: 'duplicates',
+    format: 'duplicates',
+    title: 'Reporte de posibles duplicados',
+    icon: 'reports',
+    description:
+      'Pares detectados, estado de revisión, decisión, motivo y responsables. No fusiona productos.',
+  },
+  {
+    id: 'integration-batches',
+    format: 'integration_batches',
+    title: 'Reporte de integraciones',
+    icon: 'reports',
+    description:
+      'Lotes AX recibidos, registros, origen y correlación. La recepción no acredita aplicación al catálogo.',
+  },
+  {
     id: 'attribute-report',
     format: 'attribute_changes',
     title: 'Reporte de atributos',

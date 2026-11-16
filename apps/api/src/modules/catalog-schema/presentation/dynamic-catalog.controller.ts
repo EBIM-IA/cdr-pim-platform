@@ -144,8 +144,13 @@ export class DynamicCatalogController {
     summary: 'Get the backend-filtered, customer-facing technical sheet for a product',
   })
   @ApiOkResponse({ schema: openApiSchema(productAttributeSheetSchema) })
-  async technicalSheet(@Param('productId') productId: string): Promise<ProductAttributeSheetDto> {
-    return toProductAttributeSheetDto(await this.getProductSheet.executeTechnicalSheet(productId));
+  async technicalSheet(
+    @Param('productId') productId: string,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<ProductAttributeSheetDto> {
+    return toProductAttributeSheetDto(
+      await this.getProductSheet.executeTechnicalSheet(productId, actor),
+    );
   }
 
   @Patch('products/:productId/template')

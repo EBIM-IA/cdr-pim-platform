@@ -59,7 +59,9 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
     return rows.map((row) => this.toDomain(row.homolog, row.unifiedCode));
   }
 
-  async searchEligible(externalCode: string): Promise<EligibleHomologMatch[]> {
+  async searchEligible(query: string): Promise<EligibleHomologMatch[]> {
+    const term = query.trim();
+    if (!term) return [];
     const homologRows = await this.db
       .select({ homolog: externalHomologs, unifiedCode: equivalenceGroups.code })
       .from(externalHomologs)
@@ -68,7 +70,9 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
         and(
           eq(externalHomologs.active, true),
           eq(externalHomologs.approvalStatus, 'approved'),
-          sql`lower(${externalHomologs.externalCode}) = lower(${externalCode.trim()})`,
+          sql`(lower(${externalHomologs.externalCode}) = lower(${term})
+            OR strpos(lower(translate(coalesce(${externalHomologs.name}, ''),
+              'ÁÉÍÓÚÜÑ', 'áéíóúüñ')), ${term.toLocaleLowerCase('es')}) > 0)`,
         ),
       );
     if (homologRows.length === 0) return [];
@@ -195,6 +199,10 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
             groupId: snapshot.groupId,
             externalCode: snapshot.externalCode,
             externalBrand: snapshot.externalBrand,
+            name: snapshot.name ?? null,
+            referenceType: snapshot.referenceType ?? null,
+            referenceSource: snapshot.referenceSource ?? null,
+            note: snapshot.note ?? null,
             active: snapshot.active,
             approvalStatus: snapshot.approvalStatus,
             source: 'import',
@@ -207,6 +215,10 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
             set: {
               externalCode: snapshot.externalCode,
               externalBrand: snapshot.externalBrand,
+              name: snapshot.name ?? null,
+              referenceType: snapshot.referenceType ?? null,
+              referenceSource: snapshot.referenceSource ?? null,
+              note: snapshot.note ?? null,
               active: snapshot.active,
               approvalStatus: snapshot.approvalStatus,
               source: 'import',
@@ -243,6 +255,11 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
       unifiedCode,
       externalCode: row.externalCode,
       externalBrand: row.externalBrand,
+      name: row.name,
+      referenceType: row.referenceType,
+      referenceSource: row.referenceSource,
+      note: row.note,
+
       active: row.active,
       approvalStatus: row.approvalStatus as ExternalHomologSnapshot['approvalStatus'],
       source: row.source as ExternalHomologSnapshot['source'],
@@ -269,6 +286,10 @@ function toMutableRow(snapshot: ExternalHomologSnapshot) {
   return {
     externalCode: snapshot.externalCode,
     externalBrand: snapshot.externalBrand,
+    name: snapshot.name ?? null,
+    referenceType: snapshot.referenceType ?? null,
+    referenceSource: snapshot.referenceSource ?? null,
+    note: snapshot.note ?? null,
     active: snapshot.active,
     approvalStatus: snapshot.approvalStatus,
     updatedAt: snapshot.updatedAt,
@@ -284,6 +305,11 @@ function homologChanges(
     'unifiedCode',
     'externalCode',
     'externalBrand',
+    'name',
+    'referenceType',
+    'referenceSource',
+    'note',
+
     'active',
     'approvalStatus',
   ] as const;

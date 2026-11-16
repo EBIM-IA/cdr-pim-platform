@@ -177,6 +177,8 @@ const publicationColumns = [
   dateColumn('updatedAt', 'Última actualización'),
 ];
 const titles: Record<Exclude<ReportFormat, 'summary'>, string> = {
+  duplicates: 'Reporte de posibles duplicados',
+  integration_batches: 'Reporte de integraciones',
   attribute_changes: 'Reporte de atributos',
   general_results: 'Reporte general (resultados)',
   period_results: 'Resultados de periodo',
@@ -317,7 +319,9 @@ export class PostgresReportsReadModel {
         (SELECT COUNT(DISTINCT member.group_id)::int FROM equivalence_group_members member JOIN report_products product ON product.id=member.product_id) AS unifiers,
         (SELECT COUNT(*)::int FROM audit_entries WHERE ${dateFilter('occurred_at')}) AS audit,
         (SELECT COUNT(*)::int FROM quality_review_items WHERE kind='duplicate' AND status='pending') AS duplicates,
+        (SELECT COUNT(*)::int FROM (${this.operationalSelection('duplicates')}) rows) AS "duplicateRows",
         (SELECT COUNT(*)::int FROM ax_inbound_batches WHERE ${dateFilter('received_at')}) AS integrations,
+        (SELECT COUNT(*)::int FROM (${this.operationalSelection('integration_batches')}) rows) AS "integrationRows",
         (SELECT COUNT(*)::int FROM search_events WHERE ${dateFilter('occurred_at')}) AS searches`,
         this.parameters(query),
       ),
@@ -345,6 +349,8 @@ export class PostgresReportsReadModel {
                     edited_information: 'edited',
                     documents_by_sku: 'documents',
                     publication_by_sku: 'products',
+                    duplicates: 'duplicateRows',
+                    integration_batches: 'integrationRows',
                   } as const
                 )[format as keyof typeof titles]
               ] ?? 0),
@@ -593,6 +599,30 @@ export class PostgresReportsReadModel {
   }
   private columns(format: Exclude<ReportFormat, 'summary'>): WorkspaceColumn[] {
     switch (format) {
+      case 'duplicates':
+        return [
+          textColumn('sku', 'SKU'),
+          textColumn('otherSku', 'SKU comparado'),
+          textColumn('name', 'Descripción'),
+          textColumn('status', 'Estado de revisión'),
+          textColumn('decision', 'Decisión'),
+          textColumn('reason', 'Motivo'),
+          textColumn('requestedBy', 'Detectado por'),
+          textColumn('decidedBy', 'Revisado por'),
+          dateColumn('createdAt', 'Detectado'),
+          dateColumn('updatedAt', 'Última decisión'),
+        ];
+      case 'integration_batches':
+        return [
+          textColumn('batch', 'Lote AX'),
+          textColumn('source', 'Origen'),
+          textColumn('status', 'Recepción'),
+          numberColumn('records', 'Registros recibidos'),
+          dateColumn('sentAt', 'Enviado'),
+          dateColumn('receivedAt', 'Recibido'),
+          textColumn('correlationId', 'Correlación'),
+          textColumn('application', 'Aplicación al catálogo'),
+        ];
       case 'attribute_changes':
         return attributesColumns;
       case 'general_results':
@@ -608,6 +638,101 @@ export class PostgresReportsReadModel {
       case 'publication_by_sku':
         return publicationColumns;
     }
+  }
+
+  private operationalSelection(format: 'duplicates' | 'integration_batches'): string {
+    return format === 'duplicates'
+      ? `SELECT review.id::text AS id, product.sku, product.name,
+          review.data->'productB'->>'sku' AS "otherSku", review.status,
+          review.data->>'duplicateDecision' AS decision, review.data->>'reason' AS reason,
+          review.data->>'requestedBy' AS "requestedBy", review.data->>'decidedBy' AS "decidedBy",
+          review.created_at AS "createdAt", review.updated_at AS "updatedAt"
+        FROM quality_review_items review JOIN products product ON product.id = review.product_id
+        WHERE review.kind = 'duplicate' AND ${dateFilter('review.created_at')}
+          AND ($2 = '' OR POSITION(LOWER($2) IN LOWER(CONCAT_WS(' ', product.sku, product.name, product.brand, review.data->'productB'->>'sku', review.data->'productB'->>'name', review.data->'productB'->>'brand', review.status, review.data->>'reason', review.data->>'duplicateDecision', review.data->>'requestedBy', review.data->>'decidedBy'))) > 0)
+          AND ($1::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM product_template_assignments assignment JOIN attribute_templates template ON template.id=assignment.template_id
+            WHERE assignment.product_id=product.id AND template.category_id IN (SELECT id FROM selected_categories)))`
+      : `SELECT batch.id::text AS id, batch.external_batch_id AS batch,
+          batch.source_system AS source, 'Recibido'::text AS status,
+          batch.record_count AS records, batch.sent_at AS "sentAt", batch.received_at AS "receivedAt",
+          batch.correlation_id AS "correlationId", 'Pendiente de reglas de CDR'::text AS application
+        FROM ax_inbound_batches batch
+        WHERE ${dateFilter('batch.received_at')}
+          AND ($2 = '' OR POSITION(LOWER($2) IN LOWER(CONCAT_WS(' ', batch.external_batch_id, batch.source_system, batch.correlation_id))) > 0)
+          AND ($1::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM ax_inbound_records record
+            JOIN products product ON product.sku = record.item_code
+            JOIN product_template_assignments assignment ON assignment.product_id = product.id
+            JOIN attribute_templates template ON template.id = assignment.template_id
+            WHERE record.batch_id = batch.id AND template.category_id IN (SELECT id FROM selected_categories)))`;
+  }
+
+  private async readOperational(
+    format: 'duplicates' | 'integration_batches',
+    query: WorkspaceQuery,
+  ): Promise<WorkspaceDto> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 250;
+    const duplicates = format === 'duplicates';
+    const selection = this.operationalSelection(format);
+    const prefix = `${this.base()}, operational_rows AS (${selection})`;
+    const [count, data] = await Promise.all([
+      this.sql.unsafe<{ total: number }[]>(
+        `${prefix} SELECT COUNT(*)::int AS total FROM operational_rows`,
+        this.parameters(query),
+      ),
+      this.sql.unsafe<(Record<string, Cell> & { id: string })[]>(
+        `${prefix} SELECT * FROM operational_rows ORDER BY "${duplicates ? 'createdAt' : 'receivedAt'}" DESC, id LIMIT $5 OFFSET $6`,
+        [...this.parameters(query), pageSize, (page - 1) * pageSize],
+      ),
+    ]);
+    const columns = this.columns(format);
+    const totalRows = count[0]?.total ?? 0;
+    return {
+      slug: 'reports',
+      operationalStatus: 'operational',
+      generatedAt: new Date().toISOString(),
+      metrics: [
+        {
+          key: 'rows',
+          label: duplicates ? 'Pares detectados' : 'Lotes recibidos',
+          value: totalRows,
+          format: 'integer',
+        },
+      ],
+      columns,
+      rows: data.map((row) => ({
+        id: row.id,
+        values: Object.fromEntries(
+          columns.map((column) => [
+            column.key,
+            column.type === 'datetime' ? iso(row[column.key]) : (row[column.key] ?? null),
+          ]),
+        ),
+      })),
+      totalRows,
+      notices: [
+        dateNotice,
+        {
+          id: 'operational-report-scope',
+          severity: 'info',
+          title: duplicates ? 'Decisión humana' : 'Recepción AX',
+          message: duplicates
+            ? 'Incluye revisiones pendientes y decididas. Las decisiones no fusionan SKU automáticamente.'
+            : 'Incluye todos los lotes recibidos que coinciden con los filtros. No representa errores, reintentos ni aplicación al catálogo; esas operaciones dependen de las reglas de CDR.',
+        },
+      ],
+      actions: [
+        {
+          id: 'refresh',
+          label: 'Actualizar datos',
+          availability: 'supported',
+          method: 'GET',
+          endpoint: `/api/v1/workspaces/reports?report=${format}`,
+        },
+      ],
+    };
   }
 
   private productValues(row: ProductRow): Record<string, Cell> {
@@ -636,6 +761,8 @@ export class PostgresReportsReadModel {
     format: Exclude<ReportFormat, 'summary'>,
     query: WorkspaceQuery,
   ): Promise<WorkspaceDto> {
+    if (format === 'duplicates' || format === 'integration_batches')
+      return this.readOperational(format, query);
     if (format === 'period_results') return this.readPeriod(query);
     const page = query.page ?? 1,
       pageSize = query.pageSize ?? 250;

@@ -17,7 +17,8 @@
     "@cdr/messaging": "workspace:*",
     "@cdr/shared": "workspace:*",
     "@cdr/storage": "workspace:*",
-    "zod": "^4.6.6"
+    "zod": "^4.6.6",
+    "@cdr/api": "workspace:*"
   },
   "devDependencies": {
     "@cdr/eslint-config": "workspace:*",

@@ -15,11 +15,15 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProductGallery } from '@/components/product-gallery';
 import { ProductThumbnail } from '@/components/product-thumbnail';
+import { listTechnicalSheetVisibility } from '@/lib/technical-sheet-visibility-api';
 import { StickyProductNavigation } from '@/components/sticky-product-navigation';
 import { TechnicalSheetPreview } from '@/components/technical-sheet-preview';
 import { Button } from '@/components/ui/button';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
-import { technicalAttributesFromSheet } from '@/lib/product-detail-data';
+import {
+  groupAttributesByTemplateSections,
+  technicalAttributesFromSheet,
+} from '@/lib/product-detail-data';
 import { listProductAssets, productAssetDownloadUrl } from '@/lib/product-assets-api';
 import {
   downloadTechnicalSheetPdf,
@@ -56,7 +60,17 @@ export function vehicleMatches(application: GroupApplicationDto, query: string):
         Number(year) <= (application.yearTo ?? application.yearFrom)))
   );
 }
-function SheetActions({ id, sku, product }: { id: string; sku: string; product: Product }) {
+function SheetActions({
+  id,
+  sku,
+  product,
+  visible,
+}: {
+  id: string;
+  sku: string;
+  product: Product;
+  visible: boolean;
+}) {
   const [preview, setPreview] = useState<{
     sheet: ProductAttributeSheetDto;
     assets: ProductAssetDto[];
@@ -92,6 +106,7 @@ function SheetActions({ id, sku, product }: { id: string; sku: string; product: 
       setBusy(false);
     }
   };
+  if (!visible) return null;
   return (
     <>
       <div className={styles.sheetActions}>
@@ -169,6 +184,7 @@ export function SalesProductDetail({
   const [members, setMembers] = useState<CatalogWorkbookProductDto[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [visibleSheets, setVisibleSheets] = useState<ReadonlySet<string>>(new Set());
   const [vehicleQuery, setVehicleQuery] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState('sales-characteristics');
@@ -176,7 +192,7 @@ export function SalesProductDetail({
   const attributes = sheet
     ? technicalAttributesFromSheet(sheet).filter(
         (attribute) =>
-          attribute.authority !== 'erp' &&
+          (Boolean(sheet.schema.sections?.length) || attribute.authority !== 'erp') &&
           attribute.value !== null &&
           String(attribute.value).trim() !== '',
       )
@@ -224,10 +240,20 @@ export function SalesProductDetail({
   const compatible = [
     ...homologs
       .filter((row) => row.active && row.approvalStatus === 'approved')
-      .map((row) => ({ id: row.id, brand: row.externalBrand, code: row.externalCode })),
+      .map((row) => ({
+        id: row.id,
+        kind: 'HOMÓLOGO',
+        brand: row.externalBrand,
+        code: row.externalCode,
+      })),
     ...oemCodes
       .filter((row) => row.active && row.approvalStatus === 'approved')
-      .map((row) => ({ id: row.id, brand: row.brands.join(' · '), code: row.oemCode })),
+      .map((row) => ({
+        id: row.id,
+        kind: 'OEM',
+        brand: row.brands.join(' · '),
+        code: row.oemCode,
+      })),
   ];
   useEffect(() => {
     if (!code) return;
@@ -291,6 +317,25 @@ export function SalesProductDetail({
     providerCode: product.providerCode,
   };
   const equivalents = members.length ? members : [current];
+  const sheetIdsKey = equivalents
+    .map((member) => member.id)
+    .sort()
+    .join(',');
+  useEffect(() => {
+    const controller = new AbortController();
+    setVisibleSheets(new Set());
+    void listTechnicalSheetVisibility(sheetIdsKey.split(',').filter(Boolean), controller.signal)
+      .then((policies) => {
+        if (!controller.signal.aborted)
+          setVisibleSheets(
+            new Set(policies.filter((policy) => policy.visible).map((policy) => policy.productId)),
+          );
+      })
+      .catch(() => {
+        /* Keep actions hidden until the server confirms visibility. */
+      });
+    return () => controller.abort();
+  }, [sheetIdsKey]);
   return (
     <div className={styles.page} data-column-resize="off">
       <Link href="/products" className={styles.back}>
@@ -298,6 +343,8 @@ export function SalesProductDetail({
       </Link>
       <StickyProductNavigation
         anchorId="sales-identity"
+        sku={product.sku}
+        unifiedCode={code}
         title={code ?? product.sku}
         subtitle={`${product.brand} · ${product.sku}`}
         thumbnail={<ProductThumbnail product={product} assets={assets} />}
@@ -437,76 +484,105 @@ export function SalesProductDetail({
           ) : null}
           <section className={styles.card} id="sales-characteristics">
             <h2>Características técnicas</h2>
-            <div className={styles.specifications}>
-              <div>
-                <h3>Medidas y equivalencias</h3>
-                <div className={styles.scroll}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th scope="col">Medida</th>
-                        <th scope="col">Métrico</th>
-                        <th scope="col">Imperial</th>
-                        <th scope="col">Abrev.</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {measurements.map((attribute) => {
-                        const symbol = /^\(\s*([^)]+)\)\s*(.*)/u.exec(attribute.label);
-                        const hint = {
-                          unit: attribute.unit ?? undefined,
-                          attributeKey: attribute.key,
-                        };
-                        return (
-                          <tr key={attribute.key}>
-                            <th scope="row">
-                              {(symbol?.[2] ?? attribute.label)
-                                .replace(/\s*\[[^\]]+\]\s*:?\s*$/u, '')
-                                .replace(/\s*:\s*$/u, '')}
-                            </th>
-                            <td>
-                              {displayMeasurement(attribute.value!, hint, 'metric')?.primary.text ??
-                                String(attribute.value)}
-                            </td>
-                            <td>
-                              {displayMeasurement(attribute.value!, hint, 'imperial')?.primary
-                                .text ?? '—'}
-                            </td>
-                            <td>{symbol?.[1] ?? ''}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+            {sheet?.schema.sections?.length ? (
+              <div className="grid gap-4">
+                {groupAttributesByTemplateSections(sheet, attributes).map((group) => (
+                  <section key={group.title}>
+                    <h3>{group.title}</h3>
+                    <dl className={styles.kv}>
+                      {group.attributes.map((attribute) => (
+                        <div key={attribute.key}>
+                          <dt>{attribute.label}</dt>
+                          <dd>
+                            {displayMeasurement(
+                              attribute.value!,
+                              { unit: attribute.unit ?? undefined, attributeKey: attribute.key },
+                              'metric',
+                            )?.primary.text ??
+                              (typeof attribute.value === 'boolean'
+                                ? attribute.value
+                                  ? 'Sí'
+                                  : 'No'
+                                : `${String(attribute.value)}${attribute.unit ? ` ${attribute.unit}` : ''}`)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <div className={styles.specifications}>
+                <div>
+                  <h3>Medidas y equivalencias</h3>
+                  <div className={styles.scroll}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th scope="col">Medida</th>
+                          <th scope="col">Métrico</th>
+                          <th scope="col">Imperial</th>
+                          <th scope="col">Abrev.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {measurements.map((attribute) => {
+                          const symbol = /^\(\s*([^)]+)\)\s*(.*)/u.exec(attribute.label);
+                          const hint = {
+                            unit: attribute.unit ?? undefined,
+                            attributeKey: attribute.key,
+                          };
+                          return (
+                            <tr key={attribute.key}>
+                              <th scope="row">
+                                {(symbol?.[2] ?? attribute.label)
+                                  .replace(/\s*\[[^\]]+\]\s*:?\s*$/u, '')
+                                  .replace(/\s*:\s*$/u, '')}
+                              </th>
+                              <td>
+                                {displayMeasurement(attribute.value!, hint, 'metric')?.primary
+                                  .text ?? String(attribute.value)}
+                              </td>
+                              <td>
+                                {displayMeasurement(attribute.value!, hint, 'imperial')?.primary
+                                  .text ?? '—'}
+                              </td>
+                              <td>{symbol?.[1] ?? ''}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!measurements.length ? (
+                    <p className={styles.muted}>Sin medidas registradas.</p>
+                  ) : null}
                 </div>
-                {!measurements.length ? (
-                  <p className={styles.muted}>Sin medidas registradas.</p>
-                ) : null}
+                <div>
+                  <h3>Características</h3>
+                  <dl className={styles.kv}>
+                    {characteristics.map((attribute) => (
+                      <div key={attribute.key}>
+                        <dt>{attribute.label}</dt>
+                        <dd>
+                          {typeof attribute.value === 'boolean'
+                            ? attribute.value
+                              ? 'Sí'
+                              : 'No'
+                            : String(attribute.value)}
+                          {attribute.unit && typeof attribute.value === 'number'
+                            ? ` ${attribute.unit}`
+                            : ''}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {!characteristics.length ? (
+                    <p className={styles.muted}>Sin características registradas.</p>
+                  ) : null}
+                </div>
               </div>
-              <div>
-                <h3>Características</h3>
-                <dl className={styles.kv}>
-                  {characteristics.map((attribute) => (
-                    <div key={attribute.key}>
-                      <dt>{attribute.label}</dt>
-                      <dd>
-                        {typeof attribute.value === 'boolean'
-                          ? attribute.value
-                            ? 'Sí'
-                            : 'No'
-                          : String(attribute.value)}
-                        {attribute.unit && typeof attribute.value === 'number'
-                          ? ` ${attribute.unit}`
-                          : ''}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                {!characteristics.length ? (
-                  <p className={styles.muted}>Sin características registradas.</p>
-                ) : null}
-              </div>
-            </div>
+            )}
           </section>
           {verified.length ? (
             <section className={styles.card} id="sales-vehicles">
@@ -655,7 +731,12 @@ export function SalesProductDetail({
                       <Copy className="size-4" />
                     </Button>
                   </div>
-                  <SheetActions id={member.id} sku={member.sku} product={product} />
+                  <SheetActions
+                    id={member.id}
+                    sku={member.sku}
+                    product={product}
+                    visible={visibleSheets.has(member.id)}
+                  />
                 </li>
               ))}
             </ul>
@@ -665,6 +746,7 @@ export function SalesProductDetail({
               <ul>
                 {compatible.map((reference) => (
                   <li key={reference.id}>
+                    <span className="mr-2 text-xs font-semibold">{reference.kind}</span>
                     <strong>{reference.brand}</strong> – {reference.code}
                   </li>
                 ))}

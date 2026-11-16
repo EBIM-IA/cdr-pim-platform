@@ -21,6 +21,7 @@ import {
   decideQualityReview,
   detectQualityDuplicates,
   listQualityReviews,
+  getQualityReview,
 } from '@/lib/quality-governance-api';
 const states = {
   pending: 'Pendiente',
@@ -43,6 +44,11 @@ export function QualityGovernanceWorkspace({
   const [creatingConflict, setCreatingConflict] = useState(false);
   const [items, setItems] = useState<QualityReviewDto[]>([]);
   const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Partial<Record<QualityReviewDto['status'], number>>>({});
+  const [productId, setProductId] = useState('');
+  useEffect(() => {
+    setProductId(new URLSearchParams(window.location.search).get('productId') ?? '');
+  }, []);
   const [status, setStatus] = useState<QualityReviewDto['status'] | ''>('pending');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<QualityReviewDto | null>(null);
@@ -62,14 +68,31 @@ export function QualityGovernanceWorkspace({
       setLoading(true);
       setError(null);
       try {
+        const scope = {
+          ...(mode === 'duplicates'
+            ? { kind: 'duplicate' as const }
+            : mode === 'conflict'
+              ? { kind: 'attribute' as const, conflictsOnly: true }
+              : {}),
+          ...(productId ? { productId } : {}),
+        };
+        const countsRequest = Promise.allSettled(
+          (Object.keys(states) as QualityReviewDto['status'][]).map(async (state) => ({
+            state,
+            total: (
+              await listQualityReviews({ ...scope, status: state, page: 1, pageSize: 1 }, signal)
+            ).total,
+          })),
+        );
         const result = await listQualityReviews(
           {
             ...(mode === 'duplicates'
               ? { kind: 'duplicate' }
               : mode === 'conflict'
-                ? { kind: 'attribute' }
+                ? { kind: 'attribute', conflictsOnly: true }
                 : {}),
             ...(status ? { status } : {}),
+            ...(productId ? { productId } : {}),
             page,
             pageSize: 25,
           },
@@ -79,6 +102,15 @@ export function QualityGovernanceWorkspace({
           setItems(result.items);
           setTotal(result.total);
         }
+        const summaries = await countsRequest;
+        if (!signal?.aborted)
+          setCounts(
+            Object.fromEntries(
+              summaries
+                .filter((entry) => entry.status === 'fulfilled')
+                .map((entry) => [entry.value.state, entry.value.total]),
+            ),
+          );
       } catch (cause) {
         if (!signal?.aborted)
           setError(cause instanceof Error ? cause.message : 'No se pudo cargar la bandeja.');
@@ -86,27 +118,46 @@ export function QualityGovernanceWorkspace({
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [mode, status, page],
+    [mode, status, page, productId],
   );
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
-  const open = (item: QualityReviewDto) => {
+  const open = useCallback((item: QualityReviewDto) => {
     setSelected(item);
     setReason(item.reason ?? '');
-    setChoice(item.proposedIndex === null ? '' : String(item.proposedIndex));
-    setOverride(false);
+    const selectedIndex = item.status === 'pending' ? item.proposedIndex : item.chosenIndex;
+    setChoice(selectedIndex === null ? '' : String(selectedIndex));
+    setOverride(item.override);
     setHumanValue(
       valueLabel(
-        item.kind === 'commercial'
-          ? item.candidates[item.proposedIndex ?? 0]?.value
-          : item.currentValue,
+        item.status !== 'pending'
+          ? item.chosenValue
+          : item.kind === 'commercial'
+            ? item.candidates[item.proposedIndex ?? 0]?.value
+            : item.currentValue,
       ),
     );
     setError(null);
-  };
+  }, []);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('reviewId');
+    if (!id) return;
+    const controller = new AbortController();
+    void getQualityReview(id, controller.signal)
+      .then((item) => {
+        if (!controller.signal.aborted) open(item);
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted)
+          setError(
+            cause instanceof Error ? cause.message : 'No se pudo cargar la revisión solicitada.',
+          );
+      });
+    return () => controller.abort();
+  }, [open]);
   const decide = async (action: QualityDecisionInput['action']) => {
     if (!selected || !reason.trim()) return;
     setBusy(true);
@@ -155,36 +206,105 @@ export function QualityGovernanceWorkspace({
   };
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="p-5">
-          <small className="text-muted-foreground">Solicitudes en esta vista</small>
-          <strong className="mt-2 block text-3xl text-cdr-ink">{loading ? '…' : total}</strong>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {status ? states[status] : 'Todos los estados'}
-          </p>
-        </Card>
-        <Card className="p-5">
-          <ListChecks className="size-5 text-primary" />
-          <strong className="mt-2 block text-sm">Revisión humana</strong>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Cada decisión conserva candidatos, evidencia, autor y motivo.
-          </p>
-        </Card>
-        <Card className="p-5">
-          <ShieldAlert className="size-5 text-amber-600" />
-          <strong className="mt-2 block text-sm">Identidad ERP protegida</strong>
-          <p className="mt-1 text-xs text-muted-foreground">
-            La detección nunca fusiona SKU. Los datos base ERP no se sobrescriben.
-          </p>
-        </Card>
-      </div>
-      {mode === 'duplicates' && (
-        <Card className="p-4">
-          <small className="text-muted-foreground">Fusiones automáticas</small>
-          <strong className="mt-2 block text-2xl text-emerald-700">0</strong>
-          <p className="mt-1 text-xs text-muted-foreground">El PIM nunca fusiona SKU</p>
-        </Card>
+      {mode === 'duplicates' ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            ['Alertas abiertas', counts.pending ?? '…', 'Requieren decisión humana'],
+            [
+              'Decisiones registradas',
+              counts.approved !== undefined &&
+              counts.rejected !== undefined &&
+              counts.changes_requested !== undefined
+                ? counts.approved + counts.rejected + counts.changes_requested
+                : '…',
+              'Con motivo y trazabilidad',
+            ],
+            [
+              'Alertas consultadas',
+              Object.keys(counts).length === Object.keys(states).length
+                ? Object.values(counts).reduce((sum, count) => sum + count, 0)
+                : '…',
+              'Todos los estados del filtro',
+            ],
+            ['Fusiones automáticas', 0, 'El PIM nunca fusiona SKU'],
+          ].map(([label, count, note]) => (
+            <Card key={label} className="p-3">
+              <small className="text-muted-foreground">{label}</small>
+              <strong className="mt-1 block text-2xl text-cdr-ink">{count}</strong>
+              <p className="mt-1 text-[11px] text-muted-foreground">{note}</p>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="p-3">
+            <small className="text-muted-foreground">Solicitudes en esta vista</small>
+            <strong className="mt-1 block text-2xl text-cdr-ink">{loading ? '…' : total}</strong>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {status ? states[status] : 'Todos los estados'}
+            </p>
+          </Card>
+          <Card className="p-3">
+            <ListChecks className="size-5 text-primary" />
+            <strong className="mt-1 block text-sm">Revisión humana</strong>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Cada decisión conserva candidatos, evidencia, autor y motivo.
+            </p>
+          </Card>
+          <Card className="p-3">
+            <ShieldAlert className="size-5 text-amber-600" />
+            <strong className="mt-1 block text-sm">Identidad ERP protegida</strong>
+            <p className="mt-1 text-xs text-muted-foreground">
+              La detección nunca fusiona SKU. Los datos base ERP no se sobrescriben.
+            </p>
+          </Card>
+        </div>
       )}
+      {productId && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          Solicitudes del SKU seleccionado
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setProductId('');
+              setPage(1);
+            }}
+          >
+            Ver todos los SKU
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Estados de revisión">
+        {Object.entries(states).map(([state, label]) => (
+          <Button
+            key={state}
+            size="sm"
+            variant={status === state ? 'default' : 'outline'}
+            aria-pressed={status === state}
+            onClick={() => {
+              setStatus(state as QualityReviewDto['status']);
+              setPage(1);
+            }}
+          >
+            {label} · {counts[state as QualityReviewDto['status']] ?? '—'}
+          </Button>
+        ))}
+        <Button
+          size="sm"
+          variant={status === '' ? 'default' : 'outline'}
+          aria-pressed={status === ''}
+          onClick={() => {
+            setStatus('');
+            setPage(1);
+          }}
+        >
+          Todas ·{' '}
+          {Object.keys(counts).length === Object.keys(states).length
+            ? Object.values(counts).reduce((sum, count) => sum + count, 0)
+            : '—'}
+        </Button>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {mode === 'conflict' && (
           <Button size="sm" onClick={() => setCreatingConflict(true)}>
@@ -297,7 +417,12 @@ export function QualityGovernanceWorkspace({
                     </span>
                     {item.override && <StatusBadge tone="warning">Override humano</StatusBadge>}
                   </td>
-                  <td className="p-4">{item.requestedBy}</td>
+                  <td className="p-4">
+                    {item.requestedBy}
+                    <small className="mt-1 block text-muted-foreground">
+                      {new Date(item.createdAt).toLocaleString('es-PE')}
+                    </small>
+                  </td>
                   <td className="p-4">
                     <StatusBadge
                       tone={
@@ -383,6 +508,24 @@ export function QualityGovernanceWorkspace({
                 Estado: {states[selected.status]} · versión {selected.version}
               </p>
               {selected.model && <p className="mt-1">Modelo: {selected.model}</p>}
+              <Link
+                className="mt-3 block text-primary underline"
+                href={
+                  selected.assetId
+                    ? `/quality?view=extraction&productId=${selected.productId}&assetId=${selected.assetId}`
+                    : selected.kind === 'commercial'
+                      ? `/quality?view=commercial&productId=${selected.productId}`
+                      : `/products/${selected.productId}`
+                }
+              >
+                Abrir registro de origen
+              </Link>
+              {selected.status !== 'pending' && (
+                <p className="mt-3 font-semibold">
+                  Valor elegido: {valueLabel(selected.chosenValue)}
+                  {selected.override ? ' · Override humano' : ''}
+                </p>
+              )}
             </div>
             {selected.productB ? (
               <div className="grid grid-cols-2 gap-3">

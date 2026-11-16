@@ -1,3 +1,4 @@
+import { importExecutionSchema, importExecutionResultSchema } from '@cdr/contracts';
 import {
   auditChangeListSchema,
   externalHomologSchema,
@@ -259,4 +260,19 @@ export async function downloadAuditChangesCsv(query: AuditChangeListQuery): Prom
   anchor.download = 'auditoria.csv';
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export function enqueueImportConfirmation(id: string) {
+  return request(
+    `/api/operations/imports/${encodeURIComponent(id)}/confirm-async`,
+    importExecutionSchema,
+    { method: 'POST' },
+  );
+}
+export function getImportExecution(id: string, signal?: AbortSignal) {
+  return request(
+    `/api/operations/imports/${encodeURIComponent(id)}/execution`,
+    importExecutionResultSchema,
+    { signal },
+  );
 }

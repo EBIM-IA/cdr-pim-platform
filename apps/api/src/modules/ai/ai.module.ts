@@ -1,3 +1,6 @@
+import { CodeAffixesModule } from '../code-affixes/code-affixes.module';
+import { BootstrapCodeAffixesUseCase } from './application/bootstrap-code-affixes.use-case';
+import { SearchAssistantUseCase } from './application/search-assistant.use-case';
 import { QualityModule } from '../quality/quality.module';
 import { Module } from '@nestjs/common';
 import { EcommerceDescriptionUseCases } from './application/ecommerce-description.use-cases';
@@ -35,10 +38,18 @@ import { AiController } from './presentation/ai.controller';
  * `fake` is the default so a developer with no API key, and CI, both get a working system.
  */
 @Module({
-  imports: [CatalogModule, CatalogSchemaModule, ProductAssetsModule, QualityModule],
+  imports: [
+    CatalogModule,
+    CatalogSchemaModule,
+    ProductAssetsModule,
+    QualityModule,
+    CodeAffixesModule,
+  ],
   controllers: [AiController, EcommerceDescriptionController],
   providers: [
     EcommerceDescriptionUseCases,
+    BootstrapCodeAffixesUseCase,
+    SearchAssistantUseCase,
     {
       provide: AI_DOCUMENT_POLICY,
       inject: [API_ENV],

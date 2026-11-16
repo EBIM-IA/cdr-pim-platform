@@ -32,6 +32,38 @@ export const catalogAttributeValueSchema = z.union([
 ]);
 export type CatalogAttributeValue = z.infer<typeof catalogAttributeValueSchema>;
 
+export const templateSectionSchema = z.object({
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z][a-z0-9_]*$/),
+  label: z.string().trim().min(1).max(200),
+  position: z.number().int().min(0),
+});
+export type TemplateSectionDto = z.infer<typeof templateSectionSchema>;
+export const updateTemplateSectionsSchema = z
+  .object({
+    sections: z.array(templateSectionSchema).max(100),
+    expectedUpdatedAt: z.string().datetime(),
+  })
+  .superRefine((input, context) => {
+    if (new Set(input.sections.map((section) => section.key)).size !== input.sections.length)
+      context.addIssue({
+        code: 'custom',
+        path: ['sections'],
+        message: 'Las claves de sección deben ser únicas',
+      });
+    if (new Set(input.sections.map((section) => section.position)).size !== input.sections.length)
+      context.addIssue({
+        code: 'custom',
+        path: ['sections'],
+        message: 'El orden de las secciones debe ser único',
+      });
+  });
+export type UpdateTemplateSectionsInput = z.infer<typeof updateTemplateSectionsSchema>;
+
 export const catalogGridColumnSchema = z.object({
   id: uuidSchema,
   key: z.string().min(1).max(100),
@@ -46,6 +78,7 @@ export const catalogGridColumnSchema = z.object({
   /** Template-level channel selection; independent of technical-sheet export. */
   publishable: z.boolean().optional(),
   sourceAuthority: attributeSourceAuthoritySchema,
+  sectionKey: z.string().nullable().optional(),
   position: z.number().int().min(0),
   permissions: z.object({
     edit: z.boolean(),
@@ -67,6 +100,7 @@ export const catalogGridSchemaSchema = z.object({
     name: z.string(),
     version: z.number().int().positive(),
   }),
+  sections: z.array(templateSectionSchema).optional(),
   columns: z.array(catalogGridColumnSchema),
 });
 export type CatalogGridSchemaDto = z.infer<typeof catalogGridSchemaSchema>;
@@ -83,6 +117,7 @@ export const catalogCategorySummarySchema = z.object({
   templateVariantKey: z.string().trim().min(1).max(100),
   templateName: z.string(),
   templateVersion: z.number().int().positive(),
+  skuCount: z.number().int().nonnegative().optional(),
 });
 export const catalogCategoryListSchema = z.array(catalogCategorySummarySchema);
 export type CatalogCategorySummaryDto = z.infer<typeof catalogCategorySummarySchema>;
@@ -142,6 +177,11 @@ export const catalogWorkbookCellSchema = z.discriminatedUnion('applicable', [
 export type CatalogWorkbookCellDto = z.infer<typeof catalogWorkbookCellSchema>;
 
 export const catalogWorkbookProductSchema = z.object({
+  groupMembers: z
+    .array(
+      z.object({ id: uuidSchema, sku: z.string(), name: z.string(), brand: z.string().nullable() }),
+    )
+    .optional(),
   id: uuidSchema,
   sku: z.string(),
   name: z.string(),
@@ -170,6 +210,8 @@ export const catalogWorkbookProductSchema = z.object({
 export type CatalogWorkbookProductDto = z.infer<typeof catalogWorkbookProductSchema>;
 
 export const catalogWorkbookResultSchema = z.object({
+  totalArticles: z.number().int().min(0).optional(),
+  totalBrands: z.number().int().min(0).optional(),
   columns: z.array(catalogWorkbookColumnSchema),
   facets: z.object({
     brands: z.array(z.string()),
@@ -397,6 +439,7 @@ export const adminTemplateAttributeSchema = catalogGridColumnSchema
 export type AdminTemplateAttributeDto = z.infer<typeof adminTemplateAttributeSchema>;
 
 export const adminTemplateSchema = z.object({
+  sections: z.array(templateSectionSchema).optional(),
   id: uuidSchema,
   categoryId: uuidSchema,
   categoryName: z.string(),
@@ -429,6 +472,7 @@ export const updateTemplateAttributeSchema = z
     searchable: z.boolean().optional(),
     includeInTechnicalSheet: z.boolean().optional(),
     publishable: z.boolean().optional(),
+    sectionKey: z.string().trim().min(1).max(100).nullable().optional(),
     position: z.number().int().min(0).optional(),
     roleAccess: z.array(adminAttributeRoleAccessSchema).max(3).optional(),
     expectedUpdatedAt: z.string().datetime(),
@@ -445,6 +489,7 @@ export const updateTemplateAttributeSchema = z
       value.includeInTechnicalSheet !== undefined ||
       value.publishable !== undefined ||
       value.position !== undefined ||
+      value.sectionKey !== undefined ||
       value.roleAccess !== undefined;
     if (!hasChange)
       context.addIssue({ code: 'custom', message: 'At least one field must be changed' });

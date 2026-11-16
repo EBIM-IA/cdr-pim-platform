@@ -15,6 +15,11 @@ export interface ExternalHomologSnapshot {
   readonly unifiedCode: string;
   readonly externalCode: string;
   readonly externalBrand: string;
+  readonly name?: string | null;
+  readonly referenceType?: string | null;
+  readonly referenceSource?: string | null;
+  readonly note?: string | null;
+
   readonly active: boolean;
   readonly approvalStatus: HomologApprovalStatus;
   readonly source: HomologSource;
@@ -32,6 +37,11 @@ export class ExternalHomolog {
       unifiedCode: string;
       externalCode: string;
       externalBrand: string;
+      name?: string | null;
+      referenceType?: string | null;
+      referenceSource?: string | null;
+      note?: string | null;
+
       active?: boolean;
       approvalStatus?: HomologApprovalStatus;
       source?: HomologSource;
@@ -48,6 +58,10 @@ export class ExternalHomolog {
       unifiedCode: required(input.unifiedCode, 'unifiedCode', 120).toUpperCase(),
       externalCode,
       externalBrand,
+      name: optional(input.name, 'name', 500),
+      referenceType: optional(input.referenceType, 'referenceType', 160),
+      referenceSource: optional(input.referenceSource, 'referenceSource', 300),
+      note: optional(input.note, 'note', 2000),
       active: input.active ?? true,
       approvalStatus: input.approvalStatus ?? HomologApprovalStatus.Pending,
       source: input.source ?? 'manual',
@@ -67,7 +81,17 @@ export class ExternalHomolog {
 
   update(
     input: Partial<
-      Pick<ExternalHomologSnapshot, 'externalCode' | 'externalBrand' | 'active' | 'approvalStatus'>
+      Pick<
+        ExternalHomologSnapshot,
+        | 'externalCode'
+        | 'externalBrand'
+        | 'active'
+        | 'approvalStatus'
+        | 'name'
+        | 'referenceType'
+        | 'referenceSource'
+        | 'note'
+      >
     >,
     now: Date,
   ): void {
@@ -81,6 +105,16 @@ export class ExternalHomolog {
         input.externalBrand === undefined
           ? this.state.externalBrand
           : required(input.externalBrand, 'externalBrand', 160),
+      name: input.name === undefined ? this.state.name : optional(input.name, 'name', 500),
+      referenceType:
+        input.referenceType === undefined
+          ? this.state.referenceType
+          : optional(input.referenceType, 'referenceType', 160),
+      referenceSource:
+        input.referenceSource === undefined
+          ? this.state.referenceSource
+          : optional(input.referenceSource, 'referenceSource', 300),
+      note: input.note === undefined ? this.state.note : optional(input.note, 'note', 2000),
       active: input.active ?? this.state.active,
       approvalStatus: input.approvalStatus ?? this.state.approvalStatus,
       updatedAt: now,
@@ -109,5 +143,19 @@ function required(value: string, field: string, maxLength: number): string {
       maxLength,
     });
   }
+  return normalized;
+}
+
+function optional(
+  value: string | null | undefined,
+  field: string,
+  maxLength: number,
+): string | null {
+  const normalized = value?.trim() || null;
+  if (normalized && normalized.length > maxLength)
+    throw new ValidationError(`${field} must contain at most ${maxLength} characters`, {
+      field,
+      maxLength,
+    });
   return normalized;
 }

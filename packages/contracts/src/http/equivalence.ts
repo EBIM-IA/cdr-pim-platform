@@ -11,6 +11,11 @@ export const externalHomologSchema = z.object({
   unifiedCode: z.string().min(1).max(120),
   externalCode: z.string().min(1).max(160),
   externalBrand: z.string().min(1).max(160),
+  name: z.string().max(500).nullable().optional(),
+  referenceType: z.string().max(160).nullable().optional(),
+  referenceSource: z.string().max(300).nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
+
   active: z.boolean(),
   approvalStatus: homologApprovalStatusSchema,
   source: z.enum(['manual', 'import']),
@@ -24,6 +29,11 @@ export const createExternalHomologSchema = z.object({
   unifiedCode: z.string().trim().min(1).max(120),
   externalCode: z.string().trim().min(1).max(160),
   externalBrand: z.string().trim().min(1).max(160),
+  name: z.string().trim().max(500).nullable().optional(),
+  referenceType: z.string().trim().max(160).nullable().optional(),
+  referenceSource: z.string().trim().max(300).nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
+
   active: z.boolean().default(true),
   approvalStatus: homologApprovalStatusSchema.default('pending'),
 });
@@ -34,6 +44,11 @@ export const updateExternalHomologSchema = z
     expectedUpdatedAt: z.string().datetime({ offset: true }),
     externalCode: z.string().trim().min(1).max(160).optional(),
     externalBrand: z.string().trim().min(1).max(160).optional(),
+    name: z.string().trim().max(500).nullable().optional(),
+    referenceType: z.string().trim().max(160).nullable().optional(),
+    referenceSource: z.string().trim().max(300).nullable().optional(),
+    note: z.string().trim().max(2000).nullable().optional(),
+
     active: z.boolean().optional(),
     approvalStatus: homologApprovalStatusSchema.optional(),
   })
@@ -41,6 +56,10 @@ export const updateExternalHomologSchema = z
     (value) =>
       value.externalCode !== undefined ||
       value.externalBrand !== undefined ||
+      value.name !== undefined ||
+      value.referenceType !== undefined ||
+      value.referenceSource !== undefined ||
+      value.note !== undefined ||
       value.active !== undefined ||
       value.approvalStatus !== undefined,
     'At least one mutable field is required',

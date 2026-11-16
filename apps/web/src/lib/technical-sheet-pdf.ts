@@ -15,7 +15,14 @@ export interface TechnicalSheetDocument {
   readonly template: string;
   readonly unifiedCode?: string;
   readonly unitSystem: 'metric' | 'imperial';
-  readonly attributes: readonly { key: string; label: string; value: string }[];
+  readonly attributes: readonly {
+    key: string;
+    label: string;
+    value: string;
+    sectionKey?: string | null;
+    sectionLabel?: string;
+    sectionNumber?: number;
+  }[];
   readonly brandDescription?: string;
   readonly brandLogo?: string;
   readonly cdrLogo?: Uint8Array;
@@ -120,7 +127,11 @@ export async function createTechnicalSheetPdf(input: TechnicalSheetDocument): Pr
   function section(label: string) {
     ensure(40);
     y -= 15;
-    page.drawText(label, { x: margin, y, size: 10, font: bold, color: orange });
+    for (const line of wrapPdfText(clean(label), bold, 10, usable)) {
+      ensure(15);
+      page.drawText(line, { x: margin, y, size: 10, font: bold, color: orange });
+      y -= 14;
+    }
     y -= 11;
     page.drawLine({
       start: { x: margin, y },
@@ -221,10 +232,21 @@ export async function createTechnicalSheetPdf(input: TechnicalSheetDocument): Pr
     if (input.brandDescription) paragraph(input.brandDescription, 10, false, true);
   }
   ensure(65);
-  section('Especificaciones publicables');
+  if (!input.attributes.some((attribute) => attribute.sectionLabel))
+    section('Especificaciones publicables');
   if (!input.attributes.length)
     paragraph('No hay atributos exportables con valor para esta plantilla.', 10, false, true);
+  let currentSection: string | null = null;
+  let sectionNumber = 0;
   for (const attribute of input.attributes) {
+    if (input.attributes.some((item) => item.sectionLabel)) {
+      const label = attribute.sectionLabel ?? 'Otros atributos';
+      const identity = `${attribute.sectionKey ?? ''}:${label}`;
+      if (currentSection !== identity) {
+        currentSection = identity;
+        section(`${attribute.sectionNumber ?? ++sectionNumber}. ${label}`);
+      }
+    }
     const labels = wrapPdfText(clean(attribute.label), regular, 9, usable * 0.44 - 16);
     const values = wrapPdfText(clean(attribute.value), bold, 10, usable * 0.56 - 16);
     // Each row may continue across pages. No fixed row height can truncate a long specification.

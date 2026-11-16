@@ -77,8 +77,8 @@ const indicators = [
     description: 'Alertas de similitud y decisiones humanas; nunca fusiones.',
     unit: 'alertas abiertas',
     icon: Copy,
-    href: '/quality?view=duplicates',
-    capability: 'menu:ai-quality:view',
+    href: '/reports?view=duplicates',
+    capability: 'menu:reports:view',
   },
   {
     key: 'unifiers',
@@ -92,8 +92,8 @@ const indicators = [
   {
     key: 'publication',
     title: 'Publicación por canal',
-    description: 'SKU publicables, pendientes y bloqueados para PrestaShop.',
-    unit: 'SKU publicables',
+    description: 'Obligatorios completos y condiciones del canal pendientes de evaluación.',
+    unit: 'SKU con obligatorios completos',
     icon: CheckCircle2,
     href: '/publication',
     capability: 'menu:publication:view',
@@ -101,11 +101,11 @@ const indicators = [
   {
     key: 'integrations',
     title: 'Integraciones',
-    description: 'Lotes, errores, reintentos y fechas por conector.',
-    unit: 'registros con error',
+    description: 'Lotes AX recibidos, registros y fechas de recepción.',
+    unit: 'lotes recibidos',
     icon: GitBranch,
-    href: '/integrations',
-    capability: 'menu:integrations:view',
+    href: '/reports?view=integration-batches',
+    capability: 'menu:reports:view',
   },
   {
     key: 'traceability',
@@ -304,6 +304,10 @@ export function ReportsWorkspace({
     return () => controller.abort();
   }, [definition, filterQuery, invalidDates, revision]);
   useEffect(() => () => exportController.current?.abort(), []);
+  const maxSearchFrequency = Math.max(
+    1,
+    ...(summary?.searchReport?.terms.map((term) => term.count) ?? []),
+  );
   const columns = useMemo(
     () => (definition && workspace ? reportColumns(definition, workspace) : []),
     [definition, workspace],
@@ -639,7 +643,7 @@ export function ReportsWorkspace({
         actions={[
           'Abre un formato y filtra por categoría, fechas o texto.',
           'Selecciona y ordena columnas; Excel y PDF conservan la selección y los filtros.',
-          'Carga encabezados de una plantilla para crear una configuración personal en este navegador.',
+          'Carga encabezados de una plantilla para guardar un formato personal en tu cuenta.',
         ]}
         dataSource="Catálogo, historial de cambios, documentos y publicación persistidos en el PIM."
         limitation="Los indicadores sin una fuente de datos registrada se muestran como no disponibles."
@@ -804,6 +808,7 @@ export function ReportsWorkspace({
                         <th className="p-3">Consulta</th>
                         <th className="p-3">Veces</th>
                         <th className="p-3">Última consulta</th>
+                        <th className="p-3">Acción</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -812,9 +817,40 @@ export function ReportsWorkspace({
                         : summary?.searchReport?.terms
                       )?.map((term) => (
                         <tr key={term.query} className="border-b">
-                          <td className="p-3">{term.query}</td>
+                          <td className="p-3">
+                            {term.query}
+                            {!emptyOnly ? (
+                              <span
+                                aria-hidden="true"
+                                className="mt-1.5 block h-1.5 w-36 max-w-full overflow-hidden rounded-full bg-slate-100"
+                              >
+                                <span
+                                  className="block h-full rounded-full bg-blue-600"
+                                  style={{ width: `${(term.count / maxSearchFrequency) * 100}%` }}
+                                />
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="p-3">{emptyOnly ? term.withoutResults : term.count}</td>
                           <td className="p-3">{new Date(term.lastAt).toLocaleString('es-PE')}</td>
+                          <td className="p-3">
+                            {capabilities.includes('menu:ai-quality:view') ||
+                            capabilities.includes('menu:products:view') ? (
+                              <Button asChild size="sm" variant="outline">
+                                <Link
+                                  href={
+                                    capabilities.includes('menu:ai-quality:view')
+                                      ? `/quality?view=search&q=${encodeURIComponent(term.query)}`
+                                      : `/products?q=${encodeURIComponent(term.query)}`
+                                  }
+                                >
+                                  Repetir consulta
+                                </Link>
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground">Sin permiso de búsqueda</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -835,9 +871,18 @@ export function ReportsWorkspace({
           <p className="text-xs text-muted-foreground">
             Se muestran los 50 términos más frecuentes.
           </p>
-          {capabilities.includes('menu:products:view') ? (
+          {capabilities.includes('menu:products:view') ||
+          capabilities.includes('menu:ai-quality:view') ? (
             <Button asChild variant="dark">
-              <Link href="/products?view=search">Abrir búsqueda</Link>
+              <Link
+                href={
+                  capabilities.includes('menu:ai-quality:view')
+                    ? '/quality?view=search'
+                    : '/products'
+                }
+              >
+                Abrir búsqueda
+              </Link>
             </Button>
           ) : null}
         </div>

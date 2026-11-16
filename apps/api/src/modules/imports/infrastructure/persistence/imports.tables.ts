@@ -15,6 +15,8 @@ export const importBatches = pgTable(
     id: uuid('id').primaryKey(),
     target: text('target').notNull(),
     format: text('format').notNull(),
+    originalFileName: text('original_file_name'),
+    sourceFileFormat: text('source_file_format'),
     status: text('status').notNull().default('previewed'),
     idempotencyKey: text('idempotency_key').notNull(),
     payloadHash: text('payload_hash').notNull(),

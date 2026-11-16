@@ -61,6 +61,24 @@ function file(owner: CatalogWorkbookProductDto): ProductAssetDto {
 }
 beforeEach(() => vi.resetAllMocks());
 describe('complete documents catalog', () => {
+  it('loads an embedded product using an exact server SKU filter instead of scanning the catalogue', async () => {
+    const item = product(4);
+    api.workbook.mockResolvedValue({ items: [item], total: 1 });
+    api.batch.mockResolvedValue([{ productId: item.id, assets: [] }]);
+    const result = await fetchDocumentsCatalog(undefined, { id: item.id, sku: item.sku });
+    expect(result.products).toEqual([item]);
+    expect(api.workbook).toHaveBeenCalledExactlyOnceWith(
+      {
+        page: 1,
+        pageSize: 100,
+        filter: [],
+        columnFilter: [JSON.stringify({ key: 'base:sku', values: [`value:${item.sku}`] })],
+      },
+      undefined,
+    );
+    expect(api.batch).toHaveBeenCalledExactlyOnceWith([item.id], undefined);
+  });
+
   it('loads all workbook pages and batches asset requests in at most one hundred unique IDs', async () => {
     const products = Array.from({ length: 205 }, (_, index) => product(index));
     const persisted = file(products[204]!);

@@ -1,6 +1,7 @@
 export * from './audit';
 export * from './ai';
 export * from './auth';
+export * from './module-policy';
 export * from './ax-integration';
 export * from './application';
 export * from './common';
@@ -26,3 +27,5 @@ export * from './integration-monitor';
 export * from './search-report';
 export * from './catalog-parameters';
 export * from './unified-code-request';
+
+export * from './category-governance';

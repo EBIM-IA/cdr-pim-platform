@@ -15,6 +15,7 @@ import {
   Download,
   LockKeyhole,
   Plus,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -64,7 +65,8 @@ import { downloadXlsx } from '@/lib/tabular-export';
 
 import styles from './equivalences-workspace.module.css';
 
-type View = 'groups' | 'homologs' | 'oem' | 'identifiers';
+export type EquivalencesView = 'groups' | 'homologs' | 'oem' | 'identifiers';
+type View = EquivalencesView;
 type RelationKind = 'homologs' | 'oem';
 type RelationKey =
   | 'unifiedCode'
@@ -83,10 +85,14 @@ interface Draft {
   code: string;
   brand: string;
   approvalStatus: HomologApprovalStatus;
+  name: string;
+  referenceType: string;
+  referenceSource: string;
+  note: string;
 }
 interface Editing {
   id: string;
-  key: 'code' | 'brand' | 'approvalStatus';
+  key: 'code' | 'brand' | 'approvalStatus' | 'name' | 'referenceType' | 'referenceSource' | 'note';
   value: string;
   expectedUpdatedAt: string;
 }
@@ -106,7 +112,27 @@ const statuses: Record<string, string> = {
   published: 'Publicado',
   archived: 'Archivado',
 };
-const newDraft = (): Draft => ({ unifiedCode: '', code: '', brand: '', approvalStatus: 'pending' });
+const newDraft = (): Draft => ({
+  unifiedCode: '',
+  code: '',
+  brand: '',
+  approvalStatus: 'pending',
+  name: '',
+  referenceType: '',
+  referenceSource: '',
+  note: '',
+});
+const editLabels: Record<Editing['key'], string> = {
+  code: 'Código',
+  brand: 'Marca',
+  approvalStatus: 'Estado',
+  name: 'Nombre',
+  referenceType: 'Tipo de referencia',
+  referenceSource: 'Fuente',
+  note: 'Observación',
+};
+const metadataKeys = ['name', 'referenceType', 'referenceSource', 'note'] as const;
+const metadataLimit = { name: 500, referenceType: 160, referenceSource: 300, note: 2000 };
 const baseAssignmentColumns = [
   ['unifiedCode', 'Código unificador'],
   ['sku', 'SKU'],
@@ -148,14 +174,23 @@ export function EquivalencesWorkspace({
   canManageRequests = false,
   canViewCompleteness = false,
   canViewProductStatus = true,
+  embeddedUnifiedCode,
+  embeddedView,
+  onEmbeddedViewChange,
+  onChanged,
 }: {
   canWrite: boolean;
   canManageRequests?: boolean;
   canViewCompleteness?: boolean;
   canViewProductStatus?: boolean;
+  embeddedUnifiedCode?: string;
+  embeddedView?: EquivalencesView;
+  onEmbeddedViewChange?: (view: EquivalencesView) => void;
+  onChanged?: () => void;
 }) {
   const [requestsOpen, setRequestsOpen] = useState(false);
-  const [view, setView] = useState<View>('groups');
+  const [localView, setView] = useState<View>('groups');
+  const view = embeddedUnifiedCode ? (embeddedView ?? localView) : localView;
   const [group, setGroup] = useState('');
   const [sku, setSku] = useState('');
   const [catalog, setCatalog] = useState<CatalogWorkbookProductDto[]>([]);
@@ -181,6 +216,7 @@ export function EquivalencesWorkspace({
   const [deleteRows, setDeleteRows] = useState<EquivalenceRelation[] | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   useEffect(() => {
+    if (embeddedUnifiedCode) return;
     const read = () => {
       const params = new URLSearchParams(window.location.search);
       const value = params.get('view');
@@ -199,24 +235,48 @@ export function EquivalencesWorkspace({
     read();
     window.addEventListener('popstate', read);
     return () => window.removeEventListener('popstate', read);
-  }, []);
+  }, [embeddedUnifiedCode]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError('');
     Promise.all([
-      fetchEquivalenceCatalog(controller.signal),
+      fetchEquivalenceCatalog(controller.signal, embeddedUnifiedCode),
       fetchCatalogCategories(controller.signal),
-      listHomologs({ includeInactive: true }, controller.signal),
-      listOemCodes({ includeInactive: true }, controller.signal),
+      listHomologs(
+        {
+          includeInactive: true,
+          ...(embeddedUnifiedCode ? { unifiedCode: embeddedUnifiedCode } : {}),
+        },
+        controller.signal,
+      ),
+      listOemCodes(
+        {
+          includeInactive: true,
+          ...(embeddedUnifiedCode ? { unifiedCode: embeddedUnifiedCode } : {}),
+        },
+        controller.signal,
+      ),
     ])
       .then(([data, tree, external, original]) => {
         if (controller.signal.aborted) return;
-        setCatalog(data.items);
+        setCatalog(
+          embeddedUnifiedCode
+            ? data.items.filter((item) => item.unifiedCode === embeddedUnifiedCode)
+            : data.items,
+        );
         setCatalogColumns(data.columns);
         setCategories(tree);
-        setHomologs(external.map(homologRelation));
-        setOems(original.map(oemRelation));
+        setHomologs(
+          external
+            .filter((item) => !embeddedUnifiedCode || item.unifiedCode === embeddedUnifiedCode)
+            .map(homologRelation),
+        );
+        setOems(
+          original
+            .filter((item) => !embeddedUnifiedCode || item.unifiedCode === embeddedUnifiedCode)
+            .map(oemRelation),
+        );
       })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted) setError(errorMessage(failure));
@@ -225,7 +285,7 @@ export function EquivalencesWorkspace({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, embeddedUnifiedCode]);
   const dirty =
     !!editing ||
     Object.values(drafts).some(
@@ -242,6 +302,7 @@ export function EquivalencesWorkspace({
     if (editing && !window.confirm('Hay una celda sin guardar. ¿Descartar ese cambio?')) return;
     setEditing(null);
     setView(next);
+    if (embeddedUnifiedCode) onEmbeddedViewChange?.(next);
     setGroup(code);
     setSku(selectedSku);
     setSelected(new Set());
@@ -250,7 +311,8 @@ export function EquivalencesWorkspace({
     if (next !== 'groups') params.set('view', next);
     if (code) params.set('group', code);
     if (selectedSku) params.set('sku', selectedSku);
-    window.history.pushState({}, '', `/equivalences${params.size ? `?${params}` : ''}`);
+    if (!embeddedUnifiedCode)
+      window.history.pushState({}, '', `/equivalences${params.size ? `?${params}` : ''}`);
   }
   const productGroups = useMemo(() => {
     const index = new Map<string, CatalogWorkbookProductDto[]>();
@@ -368,9 +430,11 @@ export function EquivalencesWorkspace({
                   ),
                 ),
               ].join(' · ')
-            : ['source', 'name', 'referenceType', 'note'].includes(key)
-              ? ''
-              : row[key as 'unifiedCode' | 'code' | 'brand'];
+            : key === 'source'
+              ? (row.referenceSource ?? '')
+              : ['name', 'referenceType', 'note'].includes(key)
+                ? (row[key as 'name' | 'referenceType' | 'note'] ?? '')
+                : row[key as 'unifiedCode' | 'code' | 'brand'];
   const relationColumns = (
     definitions: typeof relationDefinitions,
   ): readonly ExcelTableColumn<EquivalenceRelation, RelationKey>[] =>
@@ -422,6 +486,7 @@ export function EquivalencesWorkspace({
           : [row, ...current],
       );
     setSaved((current) => new Set([...current, row.id]));
+    onChanged?.();
   }
   async function saveNew() {
     if (!canWrite || !activeDraft || savingLock.current) return;
@@ -441,6 +506,7 @@ export function EquivalencesWorkspace({
                 unifiedCode: draft.unifiedCode.trim(),
                 externalCode: draft.code.trim(),
                 externalBrand: draft.brand.trim(),
+                ...Object.fromEntries(metadataKeys.map((key) => [key, draft[key].trim() || null])),
                 approvalStatus: draft.approvalStatus,
                 active: true,
               }),
@@ -473,7 +539,7 @@ export function EquivalencesWorkspace({
       setEditing(null);
       return;
     }
-    if (!edit.value.trim()) {
+    if (!edit.value.trim() && ['code', 'brand', 'approvalStatus'].includes(edit.key)) {
       setError('El valor no puede quedar vacío.');
       return;
     }
@@ -490,7 +556,9 @@ export function EquivalencesWorkspace({
             ? kind === 'homologs'
               ? { externalBrand: edit.value.trim() }
               : { brands: splitOemBrands(edit.value) }
-            : { approvalStatus: edit.value as HomologApprovalStatus };
+            : edit.key === 'approvalStatus'
+              ? { approvalStatus: edit.value as HomologApprovalStatus }
+              : { [edit.key]: edit.value.trim() || null };
       const updated =
         kind === 'homologs'
           ? homologRelation(
@@ -570,7 +638,17 @@ export function EquivalencesWorkspace({
     }
     const templateHeaders =
       kind === 'homologs'
-        ? ['codigo_unificador', 'codigo_homologo', 'marca_homologo', 'estado_aprobacion', 'activo']
+        ? [
+            'codigo_unificador',
+            'marca_homologo',
+            'codigo_homologo',
+            'nombre',
+            'tipo_referencia',
+            'fuente',
+            'observacion',
+            'estado_aprobacion',
+            'activo',
+          ]
         : ['codigo_unificador', 'codigo_oem', 'marcas', 'estado_aprobacion', 'activo'];
     downloadXlsx(
       template
@@ -629,8 +707,13 @@ export function EquivalencesWorkspace({
         <span className={styles.unavailable}>Sin SKU asociados</span>
       );
     }
-    if (['code', 'brand', 'approvalStatus'].includes(key) && canWrite && row.active) {
-      const editableKey = key as Editing['key'];
+    if (
+      (['code', 'brand', 'approvalStatus'].includes(key) ||
+        (kind === 'homologs' && ['source', 'name', 'referenceType', 'note'].includes(key))) &&
+      canWrite &&
+      row.active
+    ) {
+      const editableKey = (key === 'source' ? 'referenceSource' : key) as Editing['key'];
       const isEditing = editing?.id === row.id && editing.key === editableKey;
       return isEditing ? (
         editableKey === 'approvalStatus' ? (
@@ -661,8 +744,8 @@ export function EquivalencesWorkspace({
         ) : (
           <input
             autoFocus
-            aria-label={`Editar ${editableKey === 'code' ? 'Código' : 'Marca'}`}
-            maxLength={160}
+            aria-label={`Editar ${editLabels[editableKey]}`}
+            maxLength={metadataLimit[editableKey as keyof typeof metadataLimit] ?? 160}
             value={editing.value}
             disabled={saving}
             onChange={(event) => setEditing({ ...editing, value: event.target.value })}
@@ -682,18 +765,18 @@ export function EquivalencesWorkspace({
       ) : (
         <button
           type="button"
-          aria-label={`Editar ${key === 'code' ? 'Código' : key === 'brand' ? 'Marca' : 'Estado'} de ${row.code}`}
+          aria-label={`Editar ${editLabels[editableKey]} de ${row.code}`}
           disabled={saving}
           onClick={() =>
             setEditing({
               id: row.id,
               key: editableKey,
-              value: String(row[editableKey]),
+              value: String(row[editableKey] ?? ''),
               expectedUpdatedAt: row.updatedAt,
             })
           }
         >
-          {value}
+          {value || '—'}
         </button>
       );
     }
@@ -735,22 +818,29 @@ export function EquivalencesWorkspace({
           <span aria-current="page">{group}</span>
         </nav>
       ) : null}
-      <PageHeader
-        title={title}
-        description={
-          view === 'identifiers'
-            ? 'Identificadores del SKU, homólogos del código unificador y relacionados en tienda.'
-            : 'Agrupación de SKU por código unificador; homólogos de otras marcas y códigos OEM.'
-        }
-        actions={
-          isDetail || view === 'identifiers' ? (
-            <Button variant="outline" onClick={() => navigate('groups')}>
-              <ArrowLeft className="size-3.5" />
-              Volver al listado
-            </Button>
-          ) : undefined
-        }
-      />
+      {!embeddedUnifiedCode ? (
+        <PageHeader
+          title={title}
+          description={
+            view === 'identifiers'
+              ? 'Identificadores del SKU, homólogos del código unificador y relacionados en tienda.'
+              : 'Agrupación de SKU por código unificador; homólogos de otras marcas y códigos OEM.'
+          }
+          actions={
+            isDetail || view === 'identifiers' ? (
+              <Button variant="outline" onClick={() => navigate('groups')}>
+                <ArrowLeft className="size-3.5" />
+                Volver al listado
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Relaciones del código unificador <strong>{embeddedUnifiedCode}</strong>. Los cambios se
+          comparten con todos sus SKU.
+        </p>
+      )}
       {requestsOpen ? (
         <UnifiedCodeRequestsDrawer
           products={catalog}
@@ -758,20 +848,22 @@ export function EquivalencesWorkspace({
           onClose={() => setRequestsOpen(false)}
         />
       ) : null}
-      <ScreenGuide
-        objective="Consulta las asignaciones que envía AX y mantiene homólogos y OEM por código unificador."
-        actions={[
-          'Filtra y ordena cualquier columna, consulta el grupo o abre la ficha de un SKU.',
-          ...(canWrite
-            ? [
-                'Agrega homólogos y OEM como filas nuevas; las celdas permitidas se guardan al salir.',
-                'Exporta las filas filtradas o descarga la plantilla de importación.',
-              ]
-            : ['Exporta las filas filtradas a Excel.']),
-        ]}
-        dataSource="Catálogo y relaciones persistidos en el PIM."
-        limitation="AX gobierna el código unificador. No se registra sincronización con AX ni se fusionan fichas desde esta pantalla."
-      />
+      {!embeddedUnifiedCode ? (
+        <ScreenGuide
+          objective="Consulta las asignaciones que envía AX y mantiene homólogos y OEM por código unificador."
+          actions={[
+            'Filtra y ordena cualquier columna, consulta el grupo o abre la ficha de un SKU.',
+            ...(canWrite
+              ? [
+                  'Agrega homólogos y OEM como filas nuevas; las celdas permitidas se guardan al salir.',
+                  'Exporta las filas filtradas o descarga la plantilla de importación.',
+                ]
+              : ['Filtra las columnas y abre el grupo o la ficha del SKU.']),
+          ]}
+          dataSource="Catálogo y relaciones persistidos en el PIM."
+          limitation="AX gobierna el código unificador. No se registra sincronización con AX ni se fusionan fichas desde esta pantalla."
+        />
+      ) : null}
       {error ? (
         <div role="alert" className={`${styles.message} ${styles.error}`}>
           {error}
@@ -1055,7 +1147,12 @@ export function EquivalencesWorkspace({
               {view !== 'groups' && canWrite ? (
                 <Button
                   disabled={!canWrite || saving || !!activeDraft}
-                  onClick={() => setDrafts((current) => ({ ...current, [kind]: newDraft() }))}
+                  onClick={() =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [kind]: { ...newDraft(), unifiedCode: embeddedUnifiedCode ?? '' },
+                    }))
+                  }
                   aria-label={kind === 'homologs' ? 'Agregar fila' : 'Agregar código OEM'}
                 >
                   <Plus />
@@ -1282,12 +1379,30 @@ export function EquivalencesWorkspace({
                               title={String(column.getValue(row) ?? '')}
                             >
                               {column.key === 'unifiedCode' ? (
-                                <button
-                                  className={styles.code}
-                                  onClick={() => navigate('groups', row.product.unifiedCode ?? '')}
-                                >
-                                  {row.product.unifiedCode}
-                                </button>
+                                <span className="inline-flex items-center gap-2">
+                                  <button
+                                    className={styles.code}
+                                    onClick={() =>
+                                      navigate('groups', row.product.unifiedCode ?? '')
+                                    }
+                                  >
+                                    {row.product.unifiedCode}
+                                  </button>
+                                  {canManageRequests ? (
+                                    <button
+                                      type="button"
+                                      className="rounded p-1 text-muted-foreground hover:bg-orange-50 hover:text-primary"
+                                      aria-label={`Solicitar corrección del código unificador de ${row.product.sku}`}
+                                      title="Solicitar corrección a AX"
+                                      onClick={() => {
+                                        setSku(row.product.sku);
+                                        setRequestsOpen(true);
+                                      }}
+                                    >
+                                      <Pencil className="size-3" aria-hidden="true" />
+                                    </button>
+                                  ) : null}
+                                </span>
                               ) : column.key === 'sku' ? (
                                 <Link className={styles.code} href={`/products/${row.product.id}`}>
                                   {row.product.sku}
@@ -1426,7 +1541,12 @@ export function EquivalencesWorkspace({
                               column.key === 'code' ||
                               column.key === 'brand' ? (
                                 <input
-                                  autoFocus={column.key === 'unifiedCode'}
+                                  autoFocus={
+                                    embeddedUnifiedCode
+                                      ? column.key === 'code'
+                                      : column.key === 'unifiedCode'
+                                  }
+                                  readOnly={!!embeddedUnifiedCode && column.key === 'unifiedCode'}
                                   aria-label={
                                     column.key === 'unifiedCode'
                                       ? 'Nuevo código unificador'
@@ -1453,6 +1573,36 @@ export function EquivalencesWorkspace({
                                     setDrafts({
                                       ...drafts,
                                       [kind]: { ...activeDraft, [column.key]: event.target.value },
+                                    })
+                                  }
+                                />
+                              ) : kind === 'homologs' &&
+                                ['source', 'name', 'referenceType', 'note'].includes(column.key) ? (
+                                <input
+                                  aria-label={`Nuevo ${editLabels[(column.key === 'source' ? 'referenceSource' : column.key) as Editing['key']]}`}
+                                  maxLength={
+                                    metadataLimit[
+                                      (column.key === 'source'
+                                        ? 'referenceSource'
+                                        : column.key) as keyof typeof metadataLimit
+                                    ]
+                                  }
+                                  value={
+                                    activeDraft[
+                                      (column.key === 'source'
+                                        ? 'referenceSource'
+                                        : column.key) as (typeof metadataKeys)[number]
+                                    ]
+                                  }
+                                  disabled={saving}
+                                  onChange={(event) =>
+                                    setDrafts({
+                                      ...drafts,
+                                      [kind]: {
+                                        ...activeDraft,
+                                        [column.key === 'source' ? 'referenceSource' : column.key]:
+                                          event.target.value,
+                                      },
                                     })
                                   }
                                 />
@@ -1580,7 +1730,7 @@ export function EquivalencesWorkspace({
                     'Tu rol solo consulta. Las columnas grises son de solo lectura.'
                   )}{' '}
                   {kind === 'homologs'
-                    ? 'Fuente, nombre, tipo de referencia y observación no tienen datos registrados.'
+                    ? 'Fuente, nombre, tipo de referencia y observación son opcionales.'
                     : 'La fuente comercial no tiene datos registrados.'}{' '}
                   Solo las relaciones activas y aprobadas participan en la búsqueda.
                 </p>
@@ -1904,10 +2054,10 @@ function IdentifiersPane({
                     <tr key={row.id}>
                       <td>{row.brand}</td>
                       <td>{row.code}</td>
+                      <td>{row.name || <span className={styles.unavailable}>—</span>}</td>
                       <td>
-                        <span className={styles.unavailable}>—</span>
+                        {row.referenceSource || <span className={styles.unavailable}>—</span>}
                       </td>
-                      <td>{row.source === 'import' ? 'Importación' : 'Manual'}</td>
                       <td>
                         <StatusBadge
                           tone={

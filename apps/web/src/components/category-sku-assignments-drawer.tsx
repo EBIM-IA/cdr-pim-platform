@@ -12,6 +12,7 @@ import {
   previewAdminCategoryAssignments,
   confirmAdminCategoryAssignments,
 } from '@/lib/catalog-admin-api';
+import { readFirstXlsxWorksheet } from '@/lib/xlsx-import';
 import { parseImportSource } from '@/lib/import-mapping';
 
 export function CategorySkuAssignmentsDrawer({
@@ -55,8 +56,8 @@ export function CategorySkuAssignmentsDrawer({
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           Exporta las asignaciones actuales, edita el código PIM de la categoría final y vuelve a
-          cargar el CSV. Conserva el SKU y usa una variante activa de la categoría destino. Si solo
-          hay una variante puedes dejar plantilla_variante vacía.
+          cargar el Excel o CSV. Conserva el SKU y usa una variante activa de la categoría destino.
+          Si solo hay una variante puedes dejar plantilla_variante vacía.
         </p>
         <TableExportButtons
           filename="categorias-sku"
@@ -77,7 +78,7 @@ export function CategorySkuAssignmentsDrawer({
         />
         <p className="text-xs text-muted-foreground">
           El código PIM aparece en el árbol de categorías. La importación admite hasta 1.000 filas
-          por CSV y categorías ya definidas; no crea SKU ni categorías ERP.
+          por archivo Excel o CSV y categorías ya definidas; no crea SKU ni categorías ERP.
         </p>
         {error ? (
           <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">
@@ -90,10 +91,10 @@ export function CategorySkuAssignmentsDrawer({
           </p>
         ) : null}
         <label className="grid gap-2 rounded border p-4 text-sm font-semibold">
-          Importar categorías de SKU · CSV
+          Importar categorías de SKU · Excel / CSV
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx,.csv,text/csv"
             disabled={busy}
             onChange={async (event) => {
               const file = event.target.files?.[0];
@@ -103,15 +104,18 @@ export function CategorySkuAssignmentsDrawer({
               setNotice(null);
               setBusy(true);
               try {
-                if (file.size > 2_000_000) throw new Error('El CSV debe pesar como máximo 2 MB');
-                const raw = parseImportSource(await file.text(), 'csv');
+                if (file.size > 5_000_000)
+                  throw new Error('El archivo debe pesar como máximo 5 MB');
+                const raw = file.name.toLowerCase().endsWith('.xlsx')
+                  ? await readFirstXlsxWorksheet(file)
+                  : parseImportSource(await file.text(), 'csv');
                 if (!raw.length || raw.length > 1000)
                   throw new Error('Carga entre 1 y 1.000 filas por archivo');
                 if (
                   !Object.hasOwn(raw[0]!, 'codigo_articulo') ||
                   !Object.hasOwn(raw[0]!, 'categoria_codigo_pim')
                 )
-                  throw new Error('El CSV debe incluir codigo_articulo y categoria_codigo_pim');
+                  throw new Error('El archivo debe incluir codigo_articulo y categoria_codigo_pim');
                 const rows = raw.map((row) => ({
                   sku: String(row.codigo_articulo ?? '').trim(),
                   categorySlug: String(row.categoria_codigo_pim ?? '').trim(),

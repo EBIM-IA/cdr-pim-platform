@@ -1,4 +1,14 @@
 import {
+  bootstrapCodeAffixesSchema,
+  bootstrapCodeAffixesResultSchema,
+  type BootstrapCodeAffixesInput,
+} from '@cdr/contracts';
+import {
+  aiSearchAssistantRequestSchema,
+  aiSearchAssistantResponseSchema,
+  type AiSearchAssistantRequest,
+} from '@cdr/contracts';
+import {
   type AiCommercialProposalRequest,
   type AiCommercialProposalResponse,
   type AiExtractionCandidatesRequest,
@@ -26,8 +36,7 @@ export class AiApiError extends Error {
 async function request<T>(
   path: string,
   input: unknown,
-  inputSchema:
-    typeof aiCommercialProposalRequestSchema | typeof aiExtractionCandidatesRequestSchema,
+  inputSchema: z.ZodType,
   outputSchema: z.ZodType<T>,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -92,5 +101,24 @@ export async function extractAssetCandidates(
     aiExtractionCandidatesRequestSchema,
     aiExtractionCandidatesResponseSchema,
     signal,
+  );
+}
+
+export function askSearchAssistant(input: AiSearchAssistantRequest, signal?: AbortSignal) {
+  return request(
+    '/api/operations/ai/search-assistant',
+    input,
+    aiSearchAssistantRequestSchema,
+    aiSearchAssistantResponseSchema,
+    signal,
+  );
+}
+
+export function bootstrapCodeAffixes(input: BootstrapCodeAffixesInput) {
+  return request(
+    '/api/operations/ai/code-affixes/bootstrap',
+    input,
+    bootstrapCodeAffixesSchema,
+    bootstrapCodeAffixesResultSchema,
   );
 }

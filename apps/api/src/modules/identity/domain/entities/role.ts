@@ -67,9 +67,6 @@ const ALL_CAPABILITIES = Object.values(Capability);
 const VIEWING_CAPABILITIES: readonly Capability[] = [
   Capability.IdentitySelfRead,
   Capability.MenuProductsView,
-  Capability.MenuApplicationsView,
-  Capability.MenuEquivalencesView,
-  Capability.MenuDocumentsView,
   Capability.MenuCatalogsView,
   Capability.CatalogRead,
   Capability.ProductCatalogsRead,
@@ -148,6 +145,8 @@ export interface AuthenticatedActor {
   readonly id: string;
   readonly email: string;
   readonly roles: readonly Role[];
+  /** Resolved application menu policy; token role claims remain unchanged. */
+  readonly capabilities?: readonly Capability[];
 }
 
 export function actorSatisfies(actor: AuthenticatedActor, required: Role): boolean {
@@ -155,10 +154,13 @@ export function actorSatisfies(actor: AuthenticatedActor, required: Role): boole
 }
 
 export function actorHasCapability(actor: AuthenticatedActor, capability: Capability): boolean {
-  return actor.roles.some((role) => roleHasCapability(role, capability));
+  return actor.capabilities
+    ? actor.capabilities.includes(capability)
+    : actor.roles.some((role) => roleHasCapability(role, capability));
 }
 
 export function capabilitiesForActor(actor: AuthenticatedActor): Capability[] {
+  if (actor.capabilities) return [...actor.capabilities];
   const granted = new Set<Capability>();
   for (const role of actor.roles) {
     for (const capability of ROLE_CAPABILITIES[role]) granted.add(capability);

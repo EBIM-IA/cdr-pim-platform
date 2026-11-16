@@ -34,6 +34,12 @@ export const AttributeValueSource = {
 export type AttributeValueSource = (typeof AttributeValueSource)[keyof typeof AttributeValueSource];
 export type CatalogAttributeValue = string | number | boolean;
 
+export interface TemplateSection {
+  readonly key: string;
+  readonly label: string;
+  readonly position: number;
+}
+
 export interface TemplateAssetRequirement {
   readonly type: 'FT' | 'MSDS' | 'CERT' | 'PLANO' | 'FOTO';
   readonly required: boolean;
@@ -50,6 +56,7 @@ export interface DynamicAttributeDefinition {
 }
 
 export interface TemplateAttribute extends DynamicAttributeDefinition {
+  readonly sectionKey?: string | null;
   readonly required: boolean;
   readonly replicable: boolean;
   readonly searchable: boolean;
@@ -77,6 +84,7 @@ export function catalogAttributePermissionsForRoles(
 }
 
 export interface DynamicCatalogSchema {
+  readonly sections?: readonly TemplateSection[];
   readonly category: {
     readonly id: Uuid;
     readonly slug: string;
@@ -125,6 +133,12 @@ export type CatalogWorkbookCell =
     };
 
 export interface CatalogWorkbookProduct {
+  readonly groupMembers?: readonly {
+    readonly id: Uuid;
+    readonly sku: string;
+    readonly name: string;
+    readonly brand: string | null;
+  }[];
   readonly id: Uuid;
   readonly sku: string;
   readonly name: string;

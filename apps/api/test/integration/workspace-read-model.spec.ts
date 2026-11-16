@@ -1,3 +1,5 @@
+import { ModulePolicyUseCase } from '../../src/modules/identity/application/module-policy.use-case';
+import { PostgresModulePolicyAdapter } from '../../src/modules/identity/infrastructure/postgres-module-policy.adapter';
 import { loadApiEnv } from '@cdr/config';
 import { FixedClock } from '@cdr/shared';
 import { workspaceSchema, workspaceSlugSchema } from '@cdr/contracts';
@@ -59,7 +61,12 @@ describe('PostgresWorkspaceReadModel', () => {
       new DrizzleProductCatalogRepository(database.db),
       new FixedClock(new Date('2026-10-23T12:00:00.000Z')),
     );
-    readModel = new PostgresWorkspaceReadModel(database.sql, env, catalogQuery);
+    readModel = new PostgresWorkspaceReadModel(
+      database.sql,
+      env,
+      catalogQuery,
+      new ModulePolicyUseCase(new PostgresModulePolicyAdapter(database.sql)),
+    );
   });
 
   beforeEach(async () => {
@@ -121,6 +128,48 @@ describe('PostgresWorkspaceReadModel', () => {
 
   afterAll(async () => {
     await database?.close();
+  });
+
+  it('projects original file identity and global import metrics beyond the latest hundred batches', async () => {
+    const legacy = await readModel.read('imports', actor);
+    expect(legacy.rows[0]?.values).toMatchObject({
+      originalFileName: null,
+      sourceFileFormat: null,
+    });
+    await database.sql`UPDATE import_batches SET created_at='2020-01-01T00:00:00Z' WHERE id=${BATCH_ID}`;
+    await database.sql`
+      INSERT INTO import_batches (
+        id,target,format,status,idempotency_key,payload_hash,created_by,total_rows,valid_rows,invalid_rows,
+        original_file_name,source_file_format,created_at
+      ) SELECT
+        ('81000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid,'homologs','json',
+        CASE WHEN n=1 THEN 'confirmed' WHEN n=2 THEN 'processing' ELSE 'previewed' END,
+        'file-metadata-workspace-' || n,'hash','admin',5,3,2,
+        CASE WHEN n=1 THEN 'Catálogo original.csv' ELSE NULL END,
+        CASE WHEN n=1 THEN 'csv' ELSE NULL END,
+        CASE WHEN n=3 THEN '2019-01-01T00:00:00Z'::timestamptz ELSE now() END
+      FROM generate_series(1,101) AS n
+    `;
+    await database.sql`
+      INSERT INTO import_executions (batch_id,status,actor,total_rows)
+      VALUES ('81000000-0000-4000-8000-000000000003','queued',${JSON.stringify(actor)}::jsonb,5)
+    `;
+    const result = workspaceSchema.parse(await readModel.read('imports', actor));
+    expect(result.rows).toHaveLength(100);
+    expect(result.totalRows).toBe(102);
+    expect(result.rows.find((row) => row.id.endsWith('000000000003'))).toBeUndefined();
+    expect(result.rows.find((row) => row.id.endsWith('000000000001'))?.values).toMatchObject({
+      originalFileName: 'Catálogo original.csv',
+      sourceFileFormat: 'csv',
+    });
+    expect(result.columns).toContainEqual({
+      key: 'sourceFileFormat',
+      label: 'Formato',
+      type: 'text',
+    });
+    expect(result.metrics.find((metric) => metric.key === 'applied-rows')?.value).toBe(4);
+    expect(result.metrics.find((metric) => metric.key === 'processing')?.value).toBe(2);
+    expect(result.metrics.find((metric) => metric.key === 'invalid-rows')?.value).toBe(203);
   });
 
   it('reports actual missing assets, open duplicate alerts and distinct source conflicts for dashboard indicators', async () => {
@@ -311,6 +360,7 @@ describe('PostgresWorkspaceReadModel', () => {
         AI_PROVIDER: 'fake',
       }),
       catalogQuery,
+      new ModulePolicyUseCase(new PostgresModulePolicyAdapter(database.sql)),
     );
 
     const integrations = await localMock.read('integrations', actor);
@@ -644,7 +694,7 @@ describe('PostgresWorkspaceReadModel', () => {
 
   it('returns all seven report formats and eight indicators without inventing telemetry', async () => {
     const summary = await readModel.read('reports', actor);
-    expect(summary.reportFormats).toHaveLength(7);
+    expect(summary.reportFormats).toHaveLength(9);
     expect(summary.reportFormats).toContainEqual(
       expect.objectContaining({ format: 'products_by_category', totalRows: 1, columnCount: 13 }),
     );

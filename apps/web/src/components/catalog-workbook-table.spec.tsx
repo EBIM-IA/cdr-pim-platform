@@ -259,15 +259,15 @@ describe('CatalogWorkbookTable', () => {
     expect(await screen.findByLabelText('Descripción técnica: no aplica')).toHaveTextContent(
       'No aplica',
     );
-    expect(screen.getByText('Tramado: no aplica a la plantilla')).toBeVisible();
-    expect(screen.getByText('Rosado: atributo obligatorio sin valor')).toBeVisible();
+    fireEvent.click(screen.getByLabelText('Ayuda de filtros y edición'));
+    expect(screen.getByText(/Tramado: no aplica; rosado: obligatorio sin valor/)).toBeVisible();
     expect(mocks.fetchWorkbook).toHaveBeenCalledWith(
       expect.objectContaining({
         q: 'C3',
         applicationType: 'INDUSTRIAL',
         completeness: 'attention',
         page: 1,
-        pageSize: 25,
+        pageSize: 10,
       }),
       expect.any(AbortSignal),
     );
@@ -294,9 +294,11 @@ describe('CatalogWorkbookTable', () => {
         showDescriptionAndTemplate={false}
       />,
     );
-    await screen.findByRole('link', { name: 'SKU-1' });
+    await screen.findByRole('link', { name: 'UNI-1' });
 
-    expect(screen.queryByRole('columnheader', { name: 'Descripción' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Descripción/u })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Código Unificador/u })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Marca de Artículo/u })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Plantilla' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /Estado/u })).not.toBeInTheDocument();
 

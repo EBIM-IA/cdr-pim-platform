@@ -57,3 +57,7 @@ export const aiEmbeddingPayloadSchema = z.object({
   force: z.boolean().default(false),
 });
 export type AiEmbeddingPayload = z.infer<typeof aiEmbeddingPayloadSchema>;
+
+/** The durable execution row owns the actor and target; messages carry identity only. */
+export const importBatchPayloadSchema = z.object({ batchId: z.string().uuid() }).strict();
+export type ImportBatchPayload = z.infer<typeof importBatchPayloadSchema>;

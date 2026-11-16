@@ -174,7 +174,10 @@ export function CatalogSearch({
               ? 'Escribe el producto, el vehículo y el año, un código o una medida'
               : 'Código, marca, categoría, medida o aplicación…'
           }
-          className="h-9 w-full rounded-md border bg-slate-50 pl-9 pr-9 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-search-cancel-button]:appearance-none"
+          className={cn(
+            'w-full rounded-md border bg-slate-50 pl-9 pr-9 outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-search-cancel-button]:appearance-none',
+            appearance === 'home' ? 'h-12 text-sm' : 'h-9 text-xs',
+          )}
           onChange={(event) => {
             onChange(event.target.value);
             setActive(-1);

@@ -9,12 +9,21 @@ import type {
   ProductAssetDto,
   GroupApplicationDto,
 } from '@cdr/contracts';
-import { ChevronLeft, ChevronRight, Columns3, Search, SlidersHorizontal, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Columns3,
+  Search,
+  SlidersHorizontal,
+  Upload,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import { fetchUnifiedMembers } from '@/lib/unified-products';
 import { listApplications } from '@/lib/operational-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { CatalogTechnicalSheetsButton } from '@/components/catalog-technical-sheets-button';
 import { CatalogSearch } from '@/components/catalog-search';
 import { PageHeader } from '@/components/page-header';
 import { CatalogWorkbookTable } from '@/components/catalog-workbook-table';
@@ -119,7 +128,9 @@ function ProductCatalogList({
   showStatus,
   showCompleteness,
   canEdit,
+  groupMembers,
 }: {
+  groupMembers: Record<string, NonNullable<CatalogWorkbookProductDto['groupMembers']>>;
   products: Product[];
   assets: Record<string, ProductAssetDto[]>;
   relations: Record<string, CatalogRelations>;
@@ -132,7 +143,10 @@ function ProductCatalogList({
       {products.map((product) => {
         const detailHref = `/products/${encodeURIComponent(product.id)}`;
         const group = product.unifiedCode ? relations[product.unifiedCode] : undefined;
-        const equivalents = group?.members.filter((member) => member.id !== product.id) ?? [];
+        const grouped = !showCompleteness && !canEdit;
+        const equivalents = grouped
+          ? (groupMembers[product.id] ?? [product])
+          : (group?.members.filter((member) => member.id !== product.id) ?? []);
         return (
           <li key={product.id} className={styles.card}>
             <Link
@@ -144,13 +158,19 @@ function ProductCatalogList({
             </Link>
             <div className={styles.cardBody}>
               <div className={styles.identity}>
-                <span className={styles.brand}>{product.brand}</span>
+                <span className={styles.brand}>
+                  {grouped
+                    ? product.unifiedCode
+                      ? 'Código unificador'
+                      : 'Código de artículo'
+                    : product.brand}
+                </span>
                 <Link
                   href={detailHref}
                   title={`Ver ficha técnica de ${product.sku}`}
                   className={styles.code}
                 >
-                  {product.sku}
+                  {grouped ? product.unifiedCode || product.sku : product.sku}
                 </Link>
                 {product.classificationPending ? (
                   <StatusBadge tone="warning">Pendiente de clasificación</StatusBadge>
@@ -165,6 +185,9 @@ function ProductCatalogList({
                 ) : null}
                 {product.dimensions ? <p className={styles.summary}>{product.dimensions}</p> : null}
                 <p className={styles.summary}>
+                  {grouped
+                    ? `${equivalents.length} ${equivalents.length === 1 ? 'equivalencia' : 'equivalencias'} · `
+                    : ''}
                   Código unificador:{' '}
                   {product.unifiedCode ? (
                     <Link href={detailHref} className={styles.unified}>
@@ -189,7 +212,7 @@ function ProductCatalogList({
               </div>
               <div className={styles.relations}>
                 <span className={styles.label}>Aplicación</span>
-                {group?.error ? (
+                {group?.error && !grouped ? (
                   <p role="status" className={styles.summary}>
                     No fue posible cargar aplicaciones y equivalentes.
                   </p>
@@ -210,8 +233,13 @@ function ProductCatalogList({
                         ))}
                       </ul>
                     ) : null}
+                    {group?.error ? (
+                      <p role="status" className={styles.summary}>
+                        No fue posible cargar el detalle de aplicaciones.
+                      </p>
+                    ) : null}
                     <p className={styles.application}>{product.application}</p>
-                    <span className={styles.label}>Equivalentes</span>
+                    <span className={styles.label}>{grouped ? 'Marcas' : 'Equivalentes'}</span>
                     {equivalents.length ? (
                       <div className={styles.chips}>
                         {equivalents.map((member) => (
@@ -459,6 +487,7 @@ export function ProductsCatalog({
     void fetchCatalogWorkbook(
       {
         filter: [],
+        groupByUnifiedCode: !showCompleteness && !canEditAttributes,
         q: debouncedSearch || undefined,
         brand: brand || undefined,
         status: showProductStatus ? status || undefined : undefined,
@@ -500,6 +529,7 @@ export function ProductsCatalog({
     category,
     completeness,
     debouncedSearch,
+    canEditAttributes,
     page,
     pageSize,
     revision,
@@ -639,7 +669,9 @@ export function ProductsCatalog({
         title="Catálogo Maestro de Productos"
         description={
           view === 'catalog' && result
-            ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
+            ? showCompleteness
+              ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
+              : `${formatNumber(total)} ${total === 1 ? 'código unificador' : 'códigos unificadores'} · ${formatNumber(result.totalArticles ?? total)} ${(result.totalArticles ?? total) === 1 ? 'artículo' : 'artículos'} · ${formatNumber(result.totalBrands ?? result.facets.brands.length)} ${(result.totalBrands ?? result.facets.brands.length) === 1 ? 'marca' : 'marcas'}`
             : 'Productos sincronizados desde ERP (Sismetic / AX)'
         }
         actions={
@@ -682,8 +714,17 @@ export function ProductsCatalog({
               />
             ) : null}
             {canViewImports ? (
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/imports">Importaciones</Link>
+              <Button
+                asChild
+                variant="secondary"
+                size="sm"
+                title="Importaciones"
+                aria-label="Importaciones"
+              >
+                <Link href="/imports">
+                  <Upload className="size-4" aria-hidden="true" />
+                  <span className={view === 'table' ? 'sr-only' : undefined}>Importaciones</span>
+                </Link>
               </Button>
             ) : null}
             {canEditAttributes ? (
@@ -693,10 +734,35 @@ export function ProductsCatalog({
                 size="sm"
                 onClick={() => setView('sheet')}
                 aria-pressed={view === 'sheet'}
+                aria-label="Actualización masiva"
+                title="Actualización masiva"
               >
                 <Columns3 aria-hidden="true" className="size-4" />
-                Actualización masiva
+                <span className={view === 'table' ? 'sr-only' : undefined}>
+                  Actualización masiva
+                </span>
               </Button>
+            ) : null}
+            {view === 'catalog' ? (
+              <CatalogTechnicalSheetsButton
+                query={{
+                  filter: [],
+                  groupByUnifiedCode: !showCompleteness,
+                  ...(debouncedSearch ? { q: debouncedSearch } : {}),
+                  ...(brand ? { brand } : {}),
+                  ...(category ? { categoryId: category } : {}),
+                  ...(showProductStatus && status ? { status } : {}),
+                  ...(application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL'
+                    ? { applicationType: application }
+                    : {}),
+                  ...(showCompleteness &&
+                  (completeness === 'complete' ||
+                    completeness === 'attention' ||
+                    completeness === 'critical')
+                    ? { completeness }
+                    : {}),
+                }}
+              />
             ) : null}
             {view === 'catalog' ? (
               <TableExportButtons
@@ -737,8 +803,17 @@ export function ProductsCatalog({
       ) : (
         <>
           <Card className="mb-3 overflow-visible">
-            <div className="flex flex-wrap items-center gap-2 p-2.5">
+            {!showCompleteness ? (
+              <p className="px-4 pt-4 text-xl font-bold">¿Qué necesita el cliente?</p>
+            ) : null}
+            <div
+              className={cn(
+                'flex flex-wrap items-center gap-2',
+                showCompleteness ? 'p-2.5' : 'p-4',
+              )}
+            >
               <CatalogSearch
+                appearance={showCompleteness ? 'default' : 'home'}
                 value={searchInput}
                 onChange={setSearchInput}
                 showDescription={showTableDescriptionAndTemplate}
@@ -953,6 +1028,11 @@ export function ProductsCatalog({
                 />
               ) : (
                 <ProductCatalogList
+                  groupMembers={Object.fromEntries(
+                    (result?.items ?? [])
+                      .filter((row) => row.groupMembers)
+                      .map((row) => [row.id, row.groupMembers!]),
+                  )}
                   assets={productAssets}
                   relations={relations}
                   products={products}
@@ -967,7 +1047,19 @@ export function ProductsCatalog({
                   aria-label="Paginación del catálogo"
                 >
                   <p className="text-xs text-muted-foreground" aria-live="polite">
-                    {formatNumber(total)} productos · página {page} de {totalPages}
+                    {formatNumber(total)}{' '}
+                    {showCompleteness
+                      ? total === 1
+                        ? 'producto'
+                        : 'productos'
+                      : total === 1
+                        ? 'código unificador'
+                        : 'códigos unificadores'}{' '}
+                    ·{' '}
+                    {!showCompleteness
+                      ? `${formatNumber(result?.totalArticles ?? total)} ${(result?.totalArticles ?? total) === 1 ? 'artículo' : 'artículos'} · `
+                      : ''}
+                    página {page} de {totalPages}
                   </p>
                   <div className="flex items-center gap-2">
                     <Select

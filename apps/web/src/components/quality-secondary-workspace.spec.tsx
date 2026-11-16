@@ -1,5 +1,5 @@
 import type { WorkspaceDto } from '@cdr/contracts';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/quality-governance-api', () => ({
   listQualityProductChanges: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   listQualityReviews: mocks.listQualityReviews,
+  getQualityReview: vi.fn(),
   decideQualityReview: mocks.decideQualityReview,
   detectQualityDuplicates: vi.fn(),
   updateQualitySourcePriority: vi.fn(),
@@ -269,6 +270,23 @@ describe('QualitySecondaryWorkspace', () => {
     },
   );
 
+  it('preserves the exact document selected from the documents workspace', async () => {
+    const another = {
+      ...asset,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      filename: 'documento_elegido.pdf',
+    };
+    window.history.replaceState(
+      {},
+      '',
+      `/quality?view=extraction&productId=${product.id}&assetId=${another.id}`,
+    );
+    mocks.fetchProduct.mockResolvedValue(product);
+    mocks.listProductAssets.mockResolvedValue([asset, another]);
+    render(<QualitySecondaryWorkspace view="extraction" workspace={workspace} />);
+    expect(await screen.findByText('documento_elegido.pdf', { selector: 'strong' })).toBeVisible();
+    expect(screen.getByLabelText('PDF o imagen persistida')).toHaveValue(another.id);
+  });
   it('keeps automatic merges at zero as an explicit invariant', () => {
     render(<QualitySecondaryWorkspace view="duplicates" workspace={workspace} />);
     expect(screen.getByText('Fusiones automáticas')).toBeInTheDocument();
@@ -314,6 +332,55 @@ describe('QualitySecondaryWorkspace', () => {
         `/documents?productId=${product.id}`,
       ),
     );
+  });
+
+  it('highlights six visible enrichment attributes while keeping ERP facts in the full comparison', async () => {
+    const columns = [
+      ...Array.from({ length: 7 }, (_, index) => ({
+        ...numberColumn,
+        key: `erp_${index}`,
+        label: `ERP ${index}`,
+        sourceAuthority: 'erp' as const,
+      })),
+      ...Array.from({ length: 6 }, (_, index) => ({
+        ...numberColumn,
+        key: `pim_${index}`,
+        label: `Enriquecimiento ${index}`,
+      })),
+    ];
+    mocks.fetchProductAttributeSheet.mockResolvedValue({
+      ...sheet,
+      schema: { ...sheet.schema, columns },
+      product: {
+        ...sheet.product,
+        attributes: Object.fromEntries(
+          columns.map((column, index) => [
+            column.key,
+            {
+              value: index,
+              version: 1,
+              source: column.sourceAuthority === 'erp' ? 'erp' : 'manual',
+              updatedAt: '2026-11-16T10:00:00Z',
+            },
+          ]),
+        ),
+      },
+    });
+    render(<QualitySecondaryWorkspace view="commercial" workspace={workspace} />);
+    await selectCatalogProduct();
+    await screen.findByText('Enriquecimiento 0');
+    const summary = screen.getByRole('heading', {
+      name: 'Datos técnicos disponibles',
+    }).parentElement!;
+    expect(
+      within(summary)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(Array.from({ length: 6 }, (_, index) => `Enriquecimiento ${index}`));
+    fireEvent.click(screen.getByRole('button', { name: 'Generar propuesta' }));
+    await screen.findByText('Propuesta comercial verificable.');
+    fireEvent.click(screen.getByRole('button', { name: 'Comparar versiones' }));
+    expect(within(screen.getByRole('dialog')).getByText('ERP 0: 0 mm')).toBeVisible();
   });
 
   it('generates and copies an persisted commercial proposal for a real product', async () => {

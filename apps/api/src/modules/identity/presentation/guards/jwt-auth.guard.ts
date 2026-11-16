@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { UnauthorizedError } from '@cdr/shared';
 import type { Request } from 'express';
 
+import { ModulePolicyUseCase } from '../../application/module-policy.use-case';
 import { PUBLIC_ROUTE } from '../../../../shared/http/public.decorator';
 import { TOKEN_SERVICE, type TokenServicePort } from '../../domain/ports/token-service.port';
 
@@ -16,6 +17,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @Inject(TOKEN_SERVICE) private readonly tokens: TokenServicePort,
+    private readonly modulePolicies: ModulePolicyUseCase,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,7 +34,7 @@ export class JwtAuthGuard implements CanActivate {
     }
     const token = header.slice(7).trim();
     if (!token) throw new UnauthorizedError('Missing bearer token');
-    request.actor = await this.tokens.verifyAccessToken(token);
+    request.actor = await this.modulePolicies.resolve(await this.tokens.verifyAccessToken(token));
     return true;
   }
 }

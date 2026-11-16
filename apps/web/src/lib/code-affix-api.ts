@@ -1,4 +1,9 @@
 import {
+  bulkValidateCodeAffixesSchema,
+  bulkValidateCodeAffixesResultSchema,
+  type BulkValidateCodeAffixesInput,
+} from '@cdr/contracts';
+import {
   type CodeAffixDto,
   type CodeAffixListQuery,
   type CreateCodeAffixInput,
@@ -91,5 +96,12 @@ export function parseCode(input: ParseProductCodeInput): Promise<ParsedProductCo
   return request('/parse', parsedProductCodeSchema, {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function bulkValidateCodeAffixes(input: BulkValidateCodeAffixesInput) {
+  return request('/bulk-validation', bulkValidateCodeAffixesResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(bulkValidateCodeAffixesSchema.parse(input)),
   });
 }

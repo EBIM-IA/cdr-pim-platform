@@ -1,7 +1,8 @@
-import { ConflictError, type Uuid, newUuid } from '@cdr/shared';
+import { ConflictError, ValidationError, type Uuid, newUuid } from '@cdr/shared';
 
 export type ImportTarget = 'category' | 'applications' | 'homologs' | 'oem';
 export type ImportFormat = 'csv' | 'json';
+export type ImportSourceFileFormat = 'csv' | 'xlsx';
 export type ImportBatchStatus = 'previewed' | 'processing' | 'confirmed' | 'failed';
 export type ImportValue = string | number | boolean | null | string[];
 export type ImportRecord = Readonly<Record<string, ImportValue>>;
@@ -20,6 +21,8 @@ export interface ImportBatchSnapshot {
   readonly id: Uuid;
   readonly target: ImportTarget;
   readonly format: ImportFormat;
+  readonly originalFileName: string | null;
+  readonly sourceFileFormat: ImportSourceFileFormat | null;
   readonly status: ImportBatchStatus;
   readonly idempotencyKey: string;
   readonly payloadHash: string;
@@ -34,13 +37,20 @@ export class ImportBatch {
   private constructor(private state: ImportBatchSnapshot) {}
 
   static preview(
-    input: Omit<ImportBatchSnapshot, 'id' | 'status' | 'createdAt' | 'confirmedAt'> & {
+    input: Omit<
+      ImportBatchSnapshot,
+      'id' | 'status' | 'createdAt' | 'confirmedAt' | 'originalFileName' | 'sourceFileFormat'
+    > & {
       id?: Uuid;
+      originalFileName?: string | null;
+      sourceFileFormat?: ImportSourceFileFormat | null;
     },
     now: Date,
   ): ImportBatch {
     return new ImportBatch({
       ...input,
+      originalFileName: normalizeOriginalFileName(input.originalFileName),
+      sourceFileFormat: normalizeSourceFileFormat(input.sourceFileFormat),
       id: input.id ?? newUuid(),
       status: 'previewed',
       createdAt: now,
@@ -86,4 +96,33 @@ export class ImportBatch {
   toSnapshot(): ImportBatchSnapshot {
     return { ...this.state, rows: [...this.state.rows] };
   }
+}
+
+function normalizeOriginalFileName(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const name = value.trim();
+  if (
+    !name ||
+    name.length > 255 ||
+    name === '.' ||
+    name === '..' ||
+    !/^[^/\\\p{Cc}]+$/u.test(name)
+  ) {
+    throw new ValidationError('A safe original filename of at most 255 characters is required', {
+      field: 'originalFileName',
+    });
+  }
+  return name;
+}
+
+function normalizeSourceFileFormat(
+  value: ImportSourceFileFormat | null | undefined,
+): ImportSourceFileFormat | null {
+  if (value === null || value === undefined) return null;
+  if (value !== 'csv' && value !== 'xlsx') {
+    throw new ValidationError('The original file format must be CSV or XLSX', {
+      field: 'sourceFileFormat',
+    });
+  }
+  return value;
 }

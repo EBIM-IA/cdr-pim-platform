@@ -143,6 +143,35 @@ describe('durable quality governance unit of work', () => {
     expect(events.some((entry) => entry.resourceType === 'product')).toBe(true);
     expect(events.filter((entry) => entry.resourceType === 'quality_review')).toHaveLength(2);
   });
+  it('counts only distinct-value pending conflicts within the selected SKU and attribute', async () => {
+    const single = review();
+    const same = {
+      ...review(),
+      candidates: [
+        { source: 'fabricante' as const, value: 'Acero', evidence: 'A', confidence: null },
+        { source: 'archivo' as const, value: 'Acero', evidence: 'B', confidence: null },
+      ],
+    };
+    const conflict = {
+      ...same,
+      id: newUuid(),
+      candidates: [same.candidates[0]!, { ...same.candidates[1]!, value: 'Bronce' }],
+    };
+    const decided = { ...conflict, id: newUuid(), status: 'approved' as const };
+    await repository.create([single, same, conflict, decided], audit(single.id));
+    const result = await repository.list({
+      kind: 'attribute',
+      status: 'pending',
+      productId,
+      attributeKey: 'material',
+      conflictsOnly: true,
+      page: 1,
+      pageSize: 5,
+    });
+    expect(result.total).toBe(1);
+    expect(result.items.map((item) => item.id)).toEqual([conflict.id]);
+    expect((await repository.list({ conflictsOnly: false, page: 1, pageSize: 10 })).total).toBe(4);
+  });
   it('rolls back the attribute savepoint if the decision audit cannot be appended', async () => {
     const pending = review();
     const duplicateAudit = audit(pending.id);

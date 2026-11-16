@@ -1,7 +1,11 @@
 'use client';
 
+import { QualitySimulation } from './quality-simulation';
+import { QualityRulesEditor } from './quality-rules-editor';
+
 import type {
   QualityCompletenessDto,
+  QualityReviewDto,
   CatalogAttributeValue,
   CatalogWorkbookProductDto,
   ProductAssetDto,
@@ -20,7 +24,7 @@ import {
 import Link from 'next/link';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import { getQualityCompleteness } from '@/lib/quality-governance-api';
+import { getQualityCompleteness, listQualityReviews } from '@/lib/quality-governance-api';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -71,16 +75,16 @@ function Indicator({
   tone?: string;
 }) {
   return (
-    <Card className="flex min-h-28 items-start gap-3 p-4">
+    <Card className="flex min-h-24 items-start gap-2 p-3">
       <span
-        className={`grid size-9 shrink-0 place-items-center rounded-full bg-slate-100 ${tone}`}
+        className={`grid size-8 shrink-0 place-items-center rounded-full bg-slate-100 ${tone}`}
         aria-hidden="true"
       >
         {icon}
       </span>
       <div className="min-w-0">
         <small className="text-muted-foreground">{label}</small>
-        <strong className="mt-1 block text-xl text-cdr-ink">{value}</strong>
+        <strong className="mt-1 block text-lg text-cdr-ink">{value}</strong>
         <span className="mt-1 block text-xs text-muted-foreground">{note}</span>
       </div>
     </Card>
@@ -107,8 +111,13 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
   const [loading, setLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [assetError, setAssetError] = useState('');
+  const [conflicts, setConflicts] = useState<QualityReviewDto[]>([]);
+  const [conflictTotal, setConflictTotal] = useState<number | null>(null);
+  const [conflictError, setConflictError] = useState('');
   const [revision, setRevision] = useState(0);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [rulesChanged, setRulesChanged] = useState(false);
+  const [simulationOpen, setSimulationOpen] = useState(false);
   const initialSheet = useRef<QualitySheet | null>(null);
 
   useEffect(() => {
@@ -127,7 +136,7 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
           );
       });
     return () => controller.abort();
-  }, [workspace.generatedAt]);
+  }, [workspace.generatedAt, revision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -174,6 +183,37 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
 
   const selectedId = selected?.id;
   const selectedTemplateId = selected?.template?.id;
+  useEffect(() => {
+    setConflicts([]);
+    setConflictTotal(null);
+    setConflictError('');
+    if (!selectedId) return;
+    const controller = new AbortController();
+    void listQualityReviews(
+      {
+        productId: selectedId,
+        kind: 'attribute',
+        status: 'pending',
+        conflictsOnly: true,
+        page: 1,
+        pageSize: 5,
+      },
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setConflicts(result.items);
+          setConflictTotal(result.total);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted)
+          setConflictError(
+            cause instanceof Error ? cause.message : 'No se pudieron consultar los conflictos.',
+          );
+      });
+    return () => controller.abort();
+  }, [selectedId, revision]);
   useEffect(() => {
     const controller = new AbortController();
     setSheet(null);
@@ -233,6 +273,9 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="outline" disabled={!sheet} onClick={() => setSimulationOpen(true)}>
+          Simular carga
+        </Button>
         <Button variant="outline" onClick={() => setRulesOpen(true)}>
           Reglas de calidad
         </Button>
@@ -314,7 +357,7 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
       {selected ? (
         <>
           <section
-            className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+            className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5"
             aria-label="Indicadores de calidad del SKU"
             aria-busy={loading}
           >
@@ -353,8 +396,8 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
             />
             <Indicator
               label="Conflictos"
-              value="Sin evaluar"
-              note="No hay una evaluación de fuentes disponible"
+              value={conflictError ? 'Sin consultar' : conflictTotal === null ? '…' : conflictTotal}
+              note="Revisiones pendientes con valores distintos"
               icon={<GitCompareArrows className="size-4" />}
               tone="text-violet-700"
             />
@@ -586,9 +629,55 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
                 </Card>
                 <Card className="p-4">
                   <h2 className="text-base font-semibold">Conflictos de fuentes</h2>
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    La evaluación de candidatos y conflictos no está disponible para este producto.
-                  </p>
+                  {conflictError ? (
+                    <div role="alert" className="mt-3 text-sm text-red-700">
+                      {conflictError}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 block"
+                        onClick={() => setRevision((value) => value + 1)}
+                      >
+                        Reintentar conflictos
+                      </Button>
+                    </div>
+                  ) : conflictTotal === null ? (
+                    <p role="status" className="mt-3 text-sm text-muted-foreground">
+                      Consultando revisiones de fuentes…
+                    </p>
+                  ) : conflictTotal === 0 ? (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      No hay conflictos registrados pendientes de revisión. Este resultado no
+                      constituye una aprobación de publicación.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        {conflictTotal} conflictos pendientes con valores distintos entre
+                        candidatos.
+                      </p>
+                      <ul className="mt-3 space-y-2">
+                        {conflicts.map((review) => (
+                          <li key={review.id}>
+                            <Link
+                              className="text-xs text-primary underline"
+                              href={`/quality?view=conflict&productId=${selected.id}&reviewId=${review.id}`}
+                            >
+                              Resolver{' '}
+                              {sheet?.schema.columns.find(
+                                (column) => column.key === review.attributeKey,
+                              )?.label ?? review.attributeKey}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button asChild variant="outline" size="sm" className="mt-3">
+                        <Link href={`/quality?view=conflict&productId=${selected.id}`}>
+                          Ver todos los conflictos del SKU
+                        </Link>
+                      </Button>
+                    </>
+                  )}
                   <Button asChild variant="outline" size="sm" className="mt-3">
                     <Link href="/quality?view=sources">Ver prioridad de fuentes</Link>
                   </Button>
@@ -599,12 +688,20 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
         </>
       ) : null}
       {groupError && (
-        <p
+        <div
           role="alert"
           className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
         >
           {groupError}
-        </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2 block"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            Reintentar completitud global
+          </Button>
+        </div>
       )}
       {groups.length ? (
         <Card className="p-4">
@@ -644,9 +741,27 @@ export function CatalogQualityWorkspace({ workspace }: CatalogQualityWorkspacePr
           </p>
         </Card>
       ) : null}
+      {simulationOpen && sheet ? (
+        <WorkspaceDrawer title="Simular carga sin guardar" onClose={() => setSimulationOpen(false)}>
+          <QualitySimulation key={sheet.product.id} sheet={sheet} assets={assets} />
+        </WorkspaceDrawer>
+      ) : null}
       {rulesOpen ? (
-        <WorkspaceDrawer title="Reglas de calidad" onClose={() => setRulesOpen(false)}>
-          <div className="space-y-4 text-sm leading-relaxed">
+        <WorkspaceDrawer
+          title="Reglas de calidad"
+          onClose={() => {
+            setRulesOpen(false);
+            if (rulesChanged) setRevision((value) => value + 1);
+            setRulesChanged(false);
+          }}
+        >
+          {sheet ? (
+            <QualityRulesEditor
+              templateId={sheet.schema.template.id}
+              onSaved={() => setRulesChanged(true)}
+            />
+          ) : null}
+          <div className="mt-5 space-y-4 text-sm leading-relaxed">
             <p>
               La completitud oficial cuenta los atributos activos obligatorios y los tipos de
               archivo obligatorios de la plantilla activa.

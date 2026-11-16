@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SkeletonPingHandler } from '../handlers/skeleton-ping.handler';
 import { JobConsumer } from './consumer';
 import { HandlerRegistry } from './handler-registry';
-import { type JobHandler, PermanentJobError } from './job-handler';
+import { type JobHandler, PermanentJobError, RetryableJobError } from './job-handler';
 
 const options = {
   maxMessages: 10,
@@ -31,6 +31,30 @@ async function receiveOne(queue: InMemoryQueueAdapter) {
 }
 
 describe('JobConsumer failure policy', () => {
+  it('keeps a retryable job unacknowledged until its requested lease-recovery delay', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const release = vi.spyOn(queue, 'release');
+    const acknowledge = vi.spyOn(queue, 'acknowledge');
+    const handler: JobHandler<unknown> = {
+      type: JobType.SKELETON_PING,
+      parse: (value) => value,
+      handle: async () => {
+        throw new RetryableJobError('Busy import lease', 120);
+      },
+    };
+    const consumer = new JobConsumer(
+      queue,
+      new HandlerRegistry().register(handler),
+      silentLogger,
+      options,
+    );
+    await queue.publish(ping());
+    await consumer.processOne(await receiveOne(queue));
+    expect(release).toHaveBeenCalledWith(expect.anything(), 120);
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(consumer.metrics.retried).toBe(1);
+    expect(consumer.metrics.completed).toBe(0);
+  });
   it('acknowledges a message once its handler succeeds', async () => {
     const queue = new InMemoryQueueAdapter();
     const consumer = new JobConsumer(
@@ -45,6 +69,41 @@ describe('JobConsumer failure policy', () => {
 
     expect(queue.pending).toHaveLength(0);
     expect(consumer.metrics.completed).toBe(1);
+  });
+
+  it('renews broker visibility during a long job and stops renewing once it settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new InMemoryQueueAdapter(),
+        release = vi.spyOn(queue, 'release');
+      let finish: () => void = () => {};
+      const handler: JobHandler<unknown> = {
+        type: JobType.SKELETON_PING,
+        parse: (value) => value,
+        handle: () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      };
+      const consumer = new JobConsumer(
+        queue,
+        new HandlerRegistry().register(handler),
+        silentLogger,
+        options,
+      );
+      await queue.publish(ping());
+      const running = consumer.processOne(await receiveOne(queue));
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(release).toHaveBeenCalledWith(expect.anything(), 30);
+      finish();
+      await running;
+      const count = release.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(release).toHaveBeenCalledTimes(count);
+      expect(consumer.metrics.completed).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('releases the message for retry on a transient failure', async () => {

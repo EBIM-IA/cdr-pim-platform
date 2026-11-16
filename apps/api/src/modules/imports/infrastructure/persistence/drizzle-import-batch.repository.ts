@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { IMPORT_CONFIRMATION_LEASE_MS } from '../../domain/ports/import-batch-repository.port';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConflictError, type Uuid } from '@cdr/shared';
 import { and, asc, eq } from 'drizzle-orm';
 
@@ -12,6 +13,7 @@ import {
   type ImportBatchSnapshot,
   type ImportFormat,
   type ImportRecord,
+  type ImportSourceFileFormat,
   type ImportTarget,
 } from '../../domain/entities/import-batch';
 import type { ImportBatchRepositoryPort } from '../../domain/ports/import-batch-repository.port';
@@ -24,7 +26,12 @@ import {
 
 @Injectable()
 export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    @Optional()
+    @Inject(IMPORT_CONFIRMATION_LEASE_MS)
+    private readonly leaseMs = CONFIRMATION_LEASE_MS,
+  ) {}
 
   async findById(id: Uuid): Promise<ImportBatch | null> {
     const [batch] = await this.db
@@ -63,7 +70,9 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
             batchId: snapshot.id,
             rowNumber: row.rowNumber,
             valid: row.valid,
-            data: row.data,
+            // CSV dictionaries deliberately have no prototype. Give the ORM a plain
+            // JSON object: its SQL-value detection reads the value's prototype.
+            data: { ...row.data },
             metadata: metadataWithWarnings(row.metadata, row.warnings),
             errors: row.errors,
           })),
@@ -115,7 +124,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
         .orderBy(asc(importRows.rowNumber));
       const batch = this.toDomain(existing, rows);
       if (existing.status === 'confirmed') return { kind: 'confirmed', batch } as const;
-      const staleBefore = new Date(audit.occurredAt.getTime() - CONFIRMATION_LEASE_MS);
+      const staleBefore = new Date(audit.occurredAt.getTime() - this.leaseMs);
       const canClaim =
         existing.status === 'previewed' ||
         (existing.status === 'processing' &&
@@ -229,6 +238,8 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
       id: snapshot.id,
       target: snapshot.target,
       format: snapshot.format,
+      originalFileName: snapshot.originalFileName,
+      sourceFileFormat: snapshot.sourceFileFormat,
       status: snapshot.status,
       idempotencyKey: snapshot.idempotencyKey,
       payloadHash: snapshot.payloadHash,
@@ -247,6 +258,8 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
       id: batch.id as Uuid,
       target: batch.target as ImportTarget,
       format: batch.format as ImportFormat,
+      originalFileName: batch.originalFileName,
+      sourceFileFormat: batch.sourceFileFormat as ImportSourceFileFormat | null,
       status: batch.status as ImportBatchSnapshot['status'],
       idempotencyKey: batch.idempotencyKey,
       payloadHash: batch.payloadHash,

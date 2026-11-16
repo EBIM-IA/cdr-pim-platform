@@ -1,3 +1,8 @@
+import { PostgresIntegrationMonitorReadModel } from './postgres-integration-monitor-read-model';
+import {
+  MODULE_POLICY_RESOLVER,
+  type ModulePolicyResolverPort,
+} from '../../identity/domain/ports/module-policy.port';
 import { Inject, Injectable } from '@nestjs/common';
 import { resolveAiCapabilityProviders, type ApiEnv } from '@cdr/config';
 import type {
@@ -18,7 +23,6 @@ import { API_ENV, DATABASE_SQL } from '../../../shared/tokens';
 import {
   type AuthenticatedActor,
   capabilitiesForActor,
-  capabilitiesForRole,
   Role,
 } from '../../identity/domain/entities/role';
 import type { WorkspaceReadModelPort } from '../domain/ports/workspace-read-model.port';
@@ -114,6 +118,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     @Inject(DATABASE_SQL) private readonly sql: Sql,
     @Inject(API_ENV) private readonly env: ApiEnv,
     @Inject(PRODUCT_CATALOG_QUERY) private readonly productCatalogs: ProductCatalogQueryPort,
+    @Inject(MODULE_POLICY_RESOLVER) private readonly modulePolicies: ModulePolicyResolverPort,
   ) {}
 
   read(
@@ -859,7 +864,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         {
           id: string;
           target: string;
-          format: string;
+          originalFileName: string | null;
+          sourceFileFormat: string | null;
           status: string;
           totalRows: number;
           validRows: number;
@@ -869,37 +875,58 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         }[]
       >`
         SELECT
-          id, target, format, status,
-          total_rows AS "totalRows",
-          valid_rows AS "validRows",
-          invalid_rows AS "invalidRows",
-          created_by AS "createdBy",
-          created_at AS "createdAt"
-        FROM import_batches
-        ORDER BY created_at DESC
+          b.id, b.target, CASE WHEN e.status IN ('queued','processing') THEN 'processing' ELSE b.status END AS status,
+          b.original_file_name AS "originalFileName",
+          b.source_file_format AS "sourceFileFormat",
+          b.total_rows AS "totalRows",
+          b.valid_rows AS "validRows",
+          b.invalid_rows AS "invalidRows",
+          b.created_by AS "createdBy",
+          b.created_at AS "createdAt"
+        FROM import_batches b LEFT JOIN import_executions e ON e.batch_id=b.id
+        ORDER BY b.created_at DESC
         LIMIT 100
       `,
-      this.sql<{ batches: number; confirmed: number; invalidRows: number }[]>`
+      this.sql<
+        {
+          batches: number;
+          confirmed: number;
+          appliedRows: number;
+          processing: number;
+          invalidRows: number;
+        }[]
+      >`
         SELECT
           COUNT(*)::int AS batches,
-          COUNT(*) FILTER (WHERE status = 'confirmed')::int AS confirmed,
-          COALESCE(SUM(invalid_rows), 0)::int AS "invalidRows"
-        FROM import_batches
+          COUNT(*) FILTER (WHERE b.status = 'confirmed')::int AS confirmed,
+          COALESCE(SUM(b.valid_rows) FILTER (WHERE b.status = 'confirmed'), 0)::int AS "appliedRows",
+          COUNT(*) FILTER (WHERE b.status = 'processing' OR e.status IN ('queued','processing'))::int AS processing,
+          COALESCE(SUM(b.invalid_rows), 0)::int AS "invalidRows"
+        FROM import_batches b LEFT JOIN import_executions e ON e.batch_id=b.id
       `,
     ]);
-    const summary = counts[0] ?? { batches: 0, confirmed: 0, invalidRows: 0 };
+    const summary = counts[0] ?? {
+      batches: 0,
+      confirmed: 0,
+      appliedRows: 0,
+      processing: 0,
+      invalidRows: 0,
+    };
 
     return this.response('imports', {
       operationalStatus: 'operational',
       metrics: [
         integerMetric('batches', 'Lotes persistidos', summary.batches),
         integerMetric('confirmed', 'Lotes confirmados', summary.confirmed),
+        integerMetric('applied-rows', 'Registros aplicados', summary.appliedRows),
+        integerMetric('processing', 'En proceso', summary.processing),
         integerMetric('invalid-rows', 'Filas con error', summary.invalidRows),
-        textMetric('execution', 'Ejecución', 'Confirmación transaccional por fila'),
+        textMetric('execution', 'Ejecución', 'Cola durable y progreso por fila'),
       ],
       columns: [
         { key: 'target', label: 'Destino', type: 'text' },
-        { key: 'format', label: 'Formato', type: 'text' },
+        { key: 'originalFileName', label: 'Archivo', type: 'text' },
+        { key: 'sourceFileFormat', label: 'Formato', type: 'text' },
         { key: 'totalRows', label: 'Registros', type: 'number' },
         { key: 'validRows', label: 'Válidos', type: 'number' },
         { key: 'invalidRows', label: 'Con error', type: 'number' },
@@ -911,7 +938,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         id: row.id,
         values: {
           target: row.target,
-          format: row.format,
+          originalFileName: row.originalFileName,
+          sourceFileFormat: row.sourceFileFormat,
           totalRows: row.totalRows,
           validRows: row.validRows,
           invalidRows: row.invalidRows,
@@ -1253,7 +1281,10 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
   }
 
   private async readIntegrations(query: WorkspaceQuery): Promise<WorkspaceDto> {
-    const axInbox = await new PostgresAxInboxReadModel(this.sql).read(query);
+    const [axInbox, integrationMonitor] = await Promise.all([
+      new PostgresAxInboxReadModel(this.sql).read(query),
+      new PostgresIntegrationMonitorReadModel(this.sql).read(),
+    ]);
     // The query proves the configured PostgreSQL connection is live for this projection.
     await this.sql`SELECT 1`;
     const aiProviders = resolveAiCapabilityProviders(this.env);
@@ -1324,6 +1355,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
 
     return {
       axInbox,
+      integrationMonitor,
       ...this.response('integrations', {
         operationalStatus: 'partial',
         metrics: [
@@ -1584,16 +1616,28 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     });
   }
 
-  private readAdministration(actor: AuthenticatedActor): WorkspaceDto {
+  private async readAdministration(actor: AuthenticatedActor): Promise<WorkspaceDto> {
+    const policies = (await this.modulePolicies.read()).policies;
+    const localAccount =
+      this.env.AUTH_MODE === 'local' && this.env.AUTH_LOCAL_EMAIL && this.env.AUTH_LOCAL_USER_ID
+        ? {
+            email: this.env.AUTH_LOCAL_EMAIL,
+            id: this.env.AUTH_LOCAL_USER_ID,
+            roles: this.env.AUTH_LOCAL_ROLES ?? [],
+          }
+        : null;
     const roles = [...new Set(actor.roles)];
     const capabilities = capabilitiesForActor(actor);
     return this.response('administration', {
       operationalStatus: 'partial',
       roleCapabilities: [Role.Administrator, Role.Purchasing, Role.Sales].map((role) => ({
         role,
-        capabilities: capabilitiesForRole(role),
+        capabilities: this.modulePolicies.forRole(role, policies),
       })),
       metrics: [
+        integerMetric('users', 'Cuentas locales configuradas', localAccount ? 1 : 0),
+        integerMetric('active-users', 'Cuentas habilitadas en este entorno', localAccount ? 1 : 0),
+        integerMetric('inactive-users', 'Cuentas locales inactivas', 0),
         textMetric('actor', 'Usuario autenticado', actor.email),
         integerMetric('roles', 'Roles efectivos', roles.length),
         integerMetric('capabilities', 'Capacidades efectivas', capabilities.length),
@@ -1605,6 +1649,18 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
         { key: 'actor', label: 'Actor', type: 'text' },
       ],
       rows: [
+        ...(localAccount
+          ? [
+              {
+                id: `user:${localAccount.id}`,
+                values: {
+                  kind: 'Cuenta local habilitada',
+                  grant: localAccount.roles.join(' · '),
+                  actor: localAccount.email,
+                },
+              },
+            ]
+          : []),
         ...roles.map((role) => ({
           id: `role:${role}`,
           values: { kind: 'Rol', grant: role, actor: actor.email },
@@ -1635,11 +1691,13 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           'Gestionar usuarios',
           'Falta decidir Microsoft Entra/AD u otra fuente de identidad y su ciclo de altas y bajas.',
         ),
-        blockedAction(
-          'configure-role-modules',
-          'Parametrizar módulos por rol',
-          'La matriz aprobada ya se aplica en código. Su edición desde esta pantalla requiere persistir políticas, auditar cambios y refrescar sesiones con el proveedor de identidad definitivo.',
-        ),
+        {
+          id: 'configure-role-modules',
+          label: 'Configurar módulos por perfil',
+          availability: 'supported',
+          method: 'PATCH',
+          endpoint: '/api/v1/identity/module-policies',
+        },
       ],
     });
   }

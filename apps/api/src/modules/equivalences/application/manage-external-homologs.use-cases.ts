@@ -63,6 +63,11 @@ export class CreateExternalHomologUseCase {
         unifiedCode: group.code,
         externalCode: input.externalCode,
         externalBrand: input.externalBrand,
+        name: input.name,
+        referenceType: input.referenceType,
+        referenceSource: input.referenceSource,
+        note: input.note,
+
         active: input.active,
         approvalStatus: input.approvalStatus,
       },
@@ -153,8 +158,8 @@ export class SearchEligibleHomologsUseCase {
     private readonly repository: ExternalHomologRepositoryPort,
   ) {}
 
-  execute(externalCode: string): Promise<EligibleHomologMatch[]> {
-    return this.repository.searchEligible(externalCode);
+  execute(query: string): Promise<EligibleHomologMatch[]> {
+    return this.repository.searchEligible(query);
   }
 }
 

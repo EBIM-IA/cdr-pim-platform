@@ -2,6 +2,10 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type ApplicationListQuery,
+  applicationColumnSettingsSchema,
+  updateApplicationColumnSettingsSchema,
+  type UpdateApplicationColumnSettingsInput,
+  type ApplicationColumnSettingsDto,
   type CreateGroupApplicationInput,
   type DeactivateGroupApplicationQuery,
   type GroupApplicationDto,
@@ -28,6 +32,7 @@ import {
   ListGroupApplicationsUseCase,
   UpdateGroupApplicationUseCase,
 } from '../application/manage-applications.use-cases';
+import { ApplicationColumnSettingsUseCases } from '../application/application-column-settings.use-cases';
 import type { GroupApplication } from '../domain/entities/group-application';
 
 @ApiTags('applications')
@@ -39,6 +44,7 @@ export class ApplicationsController {
     private readonly createApplication: CreateGroupApplicationUseCase,
     private readonly updateApplication: UpdateGroupApplicationUseCase,
     private readonly deactivateApplication: DeactivateGroupApplicationUseCase,
+    private readonly columnSettings?: ApplicationColumnSettingsUseCases,
   ) {}
 
   @Get()
@@ -56,6 +62,29 @@ export class ApplicationsController {
     )
       .map(toDto)
       .filter((row) => canManage || (row.active && row.verificationStatus === 'verified'));
+  }
+
+  @Get('columns')
+  @ApiOkResponse({ schema: openApiSchema(applicationColumnSettingsSchema) })
+  async columns(): Promise<ApplicationColumnSettingsDto> {
+    const settings = await this.columnSettings!.get();
+    return {
+      ...settings,
+      columns: settings.columns.map((column) => ({ ...column, aliases: [...column.aliases] })),
+    };
+  }
+  @Patch('columns')
+  @RequireCapabilities(Capability.AdministrationManage)
+  async configureColumns(
+    @Body(new ZodValidationPipe(updateApplicationColumnSettingsSchema))
+    input: UpdateApplicationColumnSettingsInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<ApplicationColumnSettingsDto> {
+    const settings = await this.columnSettings!.update(input, actor);
+    return {
+      ...settings,
+      columns: settings.columns.map((column) => ({ ...column, aliases: [...column.aliases] })),
+    };
   }
 
   @Post()
@@ -95,6 +124,7 @@ function toDto(application: GroupApplication): GroupApplicationDto {
   const value = application.toSnapshot();
   return {
     ...value,
+    ...(value.additionalFields ? { additionalFields: { ...value.additionalFields } } : {}),
     createdAt: value.createdAt.toISOString(),
     updatedAt: value.updatedAt.toISOString(),
   };

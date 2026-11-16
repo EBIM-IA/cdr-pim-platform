@@ -16,7 +16,11 @@ const api = vi.hoisted(() => ({
   update: vi.fn(),
   assets: vi.fn(),
   experience: vi.fn(),
+  downloadWorkbook: vi.fn(),
+  downloadBinary: vi.fn(),
 }));
+vi.mock('@/lib/tabular-export', () => ({ downloadWorkbookXlsx: api.downloadWorkbook }));
+vi.mock('@/lib/zip-export', () => ({ downloadBinary: api.downloadBinary }));
 vi.mock('@/lib/dynamic-catalog-api', () => ({
   fetchCatalogCategories: api.categories,
   fetchCatalogGrid: api.grid,
@@ -79,8 +83,8 @@ const workspace: WorkspaceDto = {
   actions: [],
 };
 beforeEach(() => {
-  api.experience.mockResolvedValue({ nombreGeneral: 'Rodamiento', variants: [], fields: [] });
   vi.resetAllMocks();
+  api.experience.mockResolvedValue({ nombreGeneral: 'Rodamiento', variants: [], fields: [] });
   api.categories.mockResolvedValue([
     { id: 'category-1', templateId: 'template-1', name: 'Rodamientos', templateName: 'Rodamiento' },
   ]);
@@ -144,6 +148,126 @@ describe('PublicationWorkspace', () => {
       'Sin plantilla activa asignada.',
     );
     expect(api.update).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Publicar todos' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Ninguno (solo código)' })).toBeDisabled();
+  });
+
+  it('applies bulk selection with optimistic concurrency and exposes a partial failure honestly', async () => {
+    const other = { ...attribute, id: 'attribute-2', key: 'ancho', label: 'Ancho' };
+    api.template.mockResolvedValue({ attributes: [attribute, other] });
+    api.update
+      .mockResolvedValueOnce({
+        ...attribute,
+        publishable: true,
+        updatedAt: '2026-11-16T00:00:00.000Z',
+      })
+      .mockRejectedValueOnce(new Error('La plantilla cambió'));
+    render(<PublicationWorkspace workspace={workspace} view="channels" canManage />);
+    await screen.findByRole('switch', { name: 'Publicar en PrestaShop: Ancho' });
+    fireEvent.click(screen.getByRole('button', { name: 'Publicar todos' }));
+    expect(await screen.findByText(/1 de 2 cambios guardados.*La plantilla cambió/)).toBeVisible();
+    expect(
+      screen.getByRole('switch', { name: 'Publicar en PrestaShop: Diámetro' }),
+    ).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: 'Publicar en PrestaShop: Ancho' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(api.update).toHaveBeenLastCalledWith('template-1', 'attribute-2', {
+      publishable: true,
+      expectedUpdatedAt: attribute.updatedAt,
+    });
+  });
+
+  it('exports every page of the category and downloads an explicitly proposed JSON preserving zero', async () => {
+    api.template.mockResolvedValue({ attributes: [{ ...attribute, publishable: true }] });
+    api.grid.mockImplementation(async (query: { page: number; pageSize: number }) => ({
+      items: [
+        {
+          ...product,
+          ...(query.page === 2 ? { id: 'product-2', sku: 'SKU-2' } : {}),
+          attributes: { diametro: { value: query.page === 2 ? 42 : 0 } },
+        },
+      ],
+      total: 2,
+      page: query.page,
+      pageSize: query.pageSize,
+    }));
+    render(<PublicationWorkspace workspace={workspace} view="channels" canManage />);
+    await screen.findByRole('switch', { name: 'Publicar en PrestaShop: Diámetro' });
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar vista previa (Excel)' }));
+    await waitFor(() => expect(api.downloadWorkbook).toHaveBeenCalled());
+    expect(api.grid).toHaveBeenCalledWith(expect.objectContaining({ page: 2, pageSize: 100 }));
+    expect(api.downloadWorkbook).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rows: [
+            ['SKU-REAL', 0],
+            ['SKU-2', 42],
+          ],
+        }),
+      ]),
+      'prestashop-vista-previa-Rodamientos',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ejemplo JSON del SKU' }));
+    const bytes = api.downloadBinary.mock.calls[0]?.[0] as Uint8Array;
+    const json = JSON.parse(new TextDecoder().decode(bytes));
+    expect(json.atributos).toEqual([expect.objectContaining({ clave: 'diametro', valor: 0 })]);
+    expect(json.nota).toContain('No se publicó en PrestaShop');
+  });
+
+  it('shows operation-specific pending contract details without defining a remote endpoint', async () => {
+    render(<PublicationWorkspace workspace={workspace} view="prestashop" />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Detalle' })[2]!);
+    expect(await screen.findByText('URLs firmadas o públicas')).toBeVisible();
+    expect(screen.getByText('Tamaños de imagen')).toBeVisible();
+  });
+
+  it('keeps distinct category contexts when two categories share a template', async () => {
+    api.categories.mockResolvedValue([
+      {
+        id: 'category-1',
+        templateId: 'template-1',
+        name: 'Rodamientos',
+        templateName: 'Rodamiento',
+      },
+      {
+        id: 'category-2',
+        templateId: 'template-1',
+        name: 'Otra categoría',
+        templateName: 'Rodamiento',
+      },
+    ]);
+    render(<PublicationWorkspace workspace={workspace} view="channels" canManage />);
+    await screen.findByRole('switch', { name: 'Publicar en PrestaShop: Diámetro' });
+    fireEvent.change(screen.getByLabelText('Categoría y plantilla'), {
+      target: { value: 'category-2:template-1' },
+    });
+    await waitFor(() =>
+      expect(api.grid).toHaveBeenLastCalledWith(
+        expect.objectContaining({ categoryId: 'category-2', templateId: 'template-1' }),
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(screen.getByText(/Esta plantilla se comparte con Rodamientos/)).toBeVisible();
+    expect(api.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects incomplete category exports instead of downloading a partial workbook', async () => {
+    api.grid.mockImplementation(async (query: { pageSize: number }) => ({
+      items: query.pageSize === 100 ? [] : [product],
+      total: 2,
+      page: 1,
+      pageSize: query.pageSize,
+    }));
+    render(<PublicationWorkspace workspace={workspace} view="channels" canManage />);
+    await screen.findByRole('switch', { name: 'Publicar en PrestaShop: Diámetro' });
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar vista previa (Excel)' }));
+    expect(
+      await screen.findByText('La descarga quedó incompleta. Vuelve a intentar.'),
+    ).toBeVisible();
+    expect(api.downloadWorkbook).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Volver a cargar configuración' })).toBeEnabled();
   });
 
   it('fetches subsequent product pages and filters missing requirements on the server', async () => {

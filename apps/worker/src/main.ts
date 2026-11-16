@@ -1,3 +1,4 @@
+import { ImportBatchHandler } from './handlers/import-batch.handler';
 import { loadWorkerEnv } from '@cdr/config';
 import { InMemoryQueueAdapter, type QueueConsumerPort, SqsQueueAdapter } from '@cdr/messaging';
 import { createLogger, sanitizeLogText } from '@cdr/shared';
@@ -28,7 +29,9 @@ async function bootstrap(): Promise<void> {
       : // Only reachable locally: the configuration schema forbids this driver in qas/prd.
         new InMemoryQueueAdapter();
 
+  const imports = new ImportBatchHandler(env);
   const registry = new HandlerRegistry()
+    .register(imports)
     .register(new SkeletonPingHandler())
     .register(new AiEmbeddingHandler());
 
@@ -75,6 +78,7 @@ async function bootstrap(): Promise<void> {
     logger.info('Shutdown signal received; draining', { signal });
 
     await consumer.stop(env.SHUTDOWN_TIMEOUT_MS);
+    await imports.close();
     await new Promise<void>((resolve) => healthServer.close(() => resolve()));
     if (queue instanceof SqsQueueAdapter) queue.destroy();
 

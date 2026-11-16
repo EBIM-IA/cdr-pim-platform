@@ -1,3 +1,4 @@
+import { groupCatalogWorkbookProducts } from '../../domain/entities/catalog-workbook-groups';
 import { catalogParameters } from './catalog-parameters.tables';
 import { expandCatalogSynonyms } from '../../domain/services/catalog-synonyms';
 import { Inject, Injectable } from '@nestjs/common';
@@ -208,6 +209,9 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
+        sections: attributeTemplates.sections,
+        // The enclosing role-filtered template query controls which counts are projected.
+        skuCount: sql<number>`(SELECT count(*)::int FROM product_template_assignments home_assignments WHERE home_assignments.template_id = ${attributeTemplates.id})`,
       })
       .from(catalogCategories)
       .innerJoin(attributeTemplates, eq(attributeTemplates.categoryId, catalogCategories.id))
@@ -271,6 +275,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
+        sections: attributeTemplates.sections,
       })
       .from(catalogCategories)
       .innerJoin(attributeTemplates, eq(attributeTemplates.categoryId, catalogCategories.id))
@@ -302,6 +307,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
         publishable: templateAttributeAssignments.publishable,
+        sectionKey: templateAttributeAssignments.sectionKey,
         position: templateAttributeAssignments.position,
       })
       .from(templateAttributeAssignments)
@@ -353,6 +359,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     }
 
     return {
+      sections: header.sections,
       category: {
         id: header.categoryId as Uuid,
         slug: header.categorySlug,
@@ -682,7 +689,42 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
     const workbookOrder = options.sort
       ? this.workbookSortSql(options.sort, workbookSchema.columns)
       : asc(products.sku);
-    const rows = await this.db
+    const groupKey = sql<string>`COALESCE(NULLIF(BTRIM((${workbookBaseColumnSql('base:unifier', workbookSchema.columns)})::text), ''), 'sku:' || ${products.id}::text)`;
+    const grouped = options.groupByUnifiedCode === true;
+    const groupSortAttribute = options.sort?.key.startsWith('attribute:')
+      ? workbookSchema.columns.find(
+          (column) => column.key === options.sort!.key.slice('attribute:'.length),
+        )
+      : undefined;
+    const groupSortExpression = groupSortAttribute
+      ? sql`CASE WHEN ${workbookAttributeVisibleSql(groupSortAttribute)} THEN ${workbookAttributeSortSql(groupSortAttribute)} ELSE NULL END`
+      : options.sort
+        ? workbookBaseColumnSql(options.sort.key, workbookSchema.columns)
+        : groupKey;
+    const groupSort =
+      options.sort?.direction === 'desc'
+        ? sql`min((${groupSortExpression})::text) DESC NULLS LAST`
+        : sql`min((${groupSortExpression})::text) ASC NULLS LAST`;
+    const groupPage = grouped
+      ? await this.db
+          .select({ key: groupKey })
+          .from(products)
+          .leftJoin(
+            productTemplateAssignments,
+            eq(productTemplateAssignments.productId, products.id),
+          )
+          .leftJoin(
+            attributeTemplates,
+            eq(attributeTemplates.id, productTemplateAssignments.templateId),
+          )
+          .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+          .where(where)
+          .groupBy(sql`1`)
+          .orderBy(groupSort, sql`1 ASC`)
+          .limit(options.pageSize)
+          .offset((options.page - 1) * options.pageSize)
+      : [];
+    const rowsQuery = this.db
       .select({
         id: products.id,
         sku: products.sku,
@@ -697,6 +739,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         templateVariantKey: attributeTemplates.variantKey,
         templateName: attributeTemplates.name,
         templateVersion: attributeTemplates.version,
+        sections: attributeTemplates.sections,
         templateStatus: attributeTemplates.status,
         categoryActive: catalogCategories.active,
         completeness: workbookCompletenessSql(),
@@ -708,7 +751,19 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         eq(attributeTemplates.id, productTemplateAssignments.templateId),
       )
       .leftJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
-      .where(where)
+      .where(
+        grouped
+          ? and(
+              where,
+              groupPage.length
+                ? inArray(
+                    groupKey,
+                    groupPage.map((row) => row.key),
+                  )
+                : sql`FALSE`,
+            )
+          : where,
+      )
       .orderBy(
         ...(options.groupByUnifiedCode
           ? [asc(workbookBaseColumnSql('base:unifier', workbookSchema.columns))]
@@ -717,10 +772,16 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         asc(products.sku),
         asc(products.id),
       )
-      .limit(options.pageSize)
-      .offset((options.page - 1) * options.pageSize);
+      .$dynamic();
+    const rows = await (grouped
+      ? rowsQuery
+      : rowsQuery.limit(options.pageSize).offset((options.page - 1) * options.pageSize));
     const totals = await this.db
-      .select({ value: count() })
+      .select({
+        value: grouped ? sql<number>`count(DISTINCT ${groupKey})::integer` : count(),
+        articles: count(),
+        brands: sql<number>`count(DISTINCT NULLIF(BTRIM(${products.brand}), ''))::integer`,
+      })
       .from(products)
       .leftJoin(productTemplateAssignments, eq(productTemplateAssignments.productId, products.id))
       .leftJoin(
@@ -897,7 +958,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         (column) => column.key === 'codigo_unificador',
       );
       const attributeText = (column: CatalogWorkbookColumn | undefined) => {
-        if (!column) return null;
+        if (!column || !templateAttributes.has(column.key)) return null;
         const persisted = productValues.get(column.id);
         const value = persisted ? toCell(persisted, column.dataType).value : null;
         return typeof value === 'string' ? value : null;
@@ -1025,7 +1086,20 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           ),
         ].sort(),
       },
-      items,
+      items: grouped
+        ? groupCatalogWorkbookProducts(items).sort(
+            (left, right) =>
+              groupPage.findIndex(
+                (group) => group.key === (left.unifiedCode?.trim() || `sku:${left.id}`),
+              ) -
+              groupPage.findIndex(
+                (group) => group.key === (right.unifiedCode?.trim() || `sku:${right.id}`),
+              ),
+          )
+        : items,
+      ...(grouped
+        ? { totalArticles: totals[0]?.articles ?? 0, totalBrands: totals[0]?.brands ?? 0 }
+        : {}),
       total: totals[0]?.value ?? 0,
     };
   }
@@ -1049,6 +1123,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         replicable: templateAttributeAssignments.replicable,
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+        sectionKey: templateAttributeAssignments.sectionKey,
         position: templateAttributeAssignments.position,
       })
       .from(productTemplateAssignments)
@@ -1162,6 +1237,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
           replicable: templateAttributeAssignments.replicable,
           searchable: templateAttributeAssignments.searchable,
           includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+          sectionKey: templateAttributeAssignments.sectionKey,
           position: templateAttributeAssignments.position,
         })
         .from(productTemplateAssignments)
@@ -1577,6 +1653,7 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
         replicable: templateAttributeAssignments.replicable,
         searchable: templateAttributeAssignments.searchable,
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
+        sectionKey: templateAttributeAssignments.sectionKey,
         position: templateAttributeAssignments.position,
         role: templateAttributeRoleAccess.role,
         canEdit: templateAttributeRoleAccess.canEdit,
@@ -1762,6 +1839,13 @@ export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepository
   }
 }
 
+function workbookAttributeVisibleSql(attribute: CatalogWorkbookColumn): SQL<boolean> {
+  return sql<boolean>`${catalogCategories.active} = TRUE AND ${attributeTemplates.status} = 'active' AND ${attributeTemplates.id} IN (${sql.join(
+    attribute.applicableTemplateIds.map((id) => sql`${id}`),
+    sql`, `,
+  )})`;
+}
+
 function workbookAttributeDisplaySql(attribute: CatalogWorkbookColumn): SQL<string> {
   return sql<string>`(
     SELECT COALESCE(
@@ -1880,7 +1964,9 @@ function workbookBaseColumnSql(key: string, columns: readonly CatalogWorkbookCol
   }
   if (key === 'base:unifier') {
     const attribute = columns.find((column) => column.key === 'codigo_unificador');
-    return attribute ? workbookAttributeDisplaySql(attribute) : sql`NULL::text`;
+    return attribute
+      ? sql`CASE WHEN ${workbookAttributeVisibleSql(attribute)} THEN ${workbookAttributeDisplaySql(attribute)} ELSE NULL END`
+      : sql`NULL::text`;
   }
   throw new ValidationError('Unknown workbook base column', { column: key });
 }
@@ -1965,6 +2051,7 @@ export function normalizeWorkbookApplicationTypes(value: string | null): string[
 
 function toTemplateAttribute(
   row: {
+    sectionKey?: string | null;
     id: string;
     key: string;
     label: string;

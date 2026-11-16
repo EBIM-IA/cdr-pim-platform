@@ -1,4 +1,11 @@
+import {
+  catalogCategoryErpCodes,
+  categoryDynamicAttributes,
+} from '../../modules/catalog-schema/infrastructure/persistence/category-governance.tables';
+import { importExecutions } from '../../modules/imports/infrastructure/persistence/import-executions.tables';
+import { identityModulePolicies } from '../../modules/identity/infrastructure/module-policy.tables';
 import { catalogHomeSettings } from '../../modules/catalog-schema/infrastructure/persistence/catalog-home-settings.tables';
+import { productTechnicalSheetVisibility } from '../../modules/product-assets/infrastructure/persistence/technical-sheet-visibility.tables';
 import { unifiedCodeRequests } from '../../modules/equivalences/infrastructure/persistence/unified-code-requests.tables';
 import { catalogParameters } from '../../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
 import {
@@ -29,6 +36,7 @@ import {
   equivalenceGroupMembers,
   equivalenceGroups,
 } from '../../modules/equivalences/infrastructure/persistence/equivalences.tables';
+import { applicationColumnSettings } from '../../modules/applications/infrastructure/persistence/application-column-settings.tables';
 import { groupApplications } from '../../modules/applications/infrastructure/persistence/applications.tables';
 import {
   auditChangeItems,
@@ -66,6 +74,12 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  applicationColumnSettings,
+  catalogCategoryErpCodes,
+  categoryDynamicAttributes,
+  importExecutions,
+  productTechnicalSheetVisibility,
+  identityModulePolicies,
   unifiedCodeRequests,
   catalogParameters,
   reportPreferences,
@@ -110,6 +124,11 @@ export const schema = {
 };
 
 export {
+  applicationColumnSettings,
+  catalogCategoryErpCodes,
+  categoryDynamicAttributes,
+  productTechnicalSheetVisibility,
+  identityModulePolicies,
   unifiedCodeRequests,
   catalogParameters,
   reportPreferences,

@@ -106,6 +106,16 @@ describe('anchos persistentes de columnas', () => {
     );
   });
 
+  it('does not measure every header again when a body cell changes', async () => {
+    const view = render(<Harness />);
+    const measure = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+    measure.mockClear();
+    view.container.querySelector('tbody td')!.textContent = 'SKU actualizado';
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(measure).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('separator')).toHaveLength(2);
+  });
+
   it('limita anchos corruptos y aísla las preferencias entre usuarios', () => {
     window.localStorage.setItem(
       columnWidthStorageKey('actor-1', 'products:catalog'),

@@ -123,6 +123,10 @@ export function TableColumnResizeController({
     if (!root) return;
     const tables = new Map<HTMLTableElement, () => void>();
     const activeDrags = new Set<() => void>();
+    const configuredHeaders = new WeakMap<
+      HTMLTableElement,
+      { headers: HTMLTableCellElement[]; keys: string[] }
+    >();
     let frame = 0;
     const scan = () => {
       tables.forEach((clean, table) => {
@@ -147,6 +151,27 @@ export function TableColumnResizeController({
         const storageKey = columnWidthStorageKey(userId, `${scopeKey}:${name}`);
         const widths = readWidths(storageKey);
         const keys = headers.map(columnIdentity);
+        const configured = configuredHeaders.get(table);
+        if (
+          configured &&
+          configured.headers.length === headers.length &&
+          headers.every(
+            (header, index) =>
+              header === configured.headers[index] &&
+              keys[index] === configured.keys[index] &&
+              (header.colSpan !== 1 ||
+                header.querySelector('input[type="checkbox"]') ||
+                header.querySelector(':scope > .cdr-column-resize')),
+          )
+        )
+          return;
+        // Read layout once before adding grips or classes. Interleaving a read with each
+        // header write forces a full layout for every column on the all-template workbook.
+        const measuredWidths = headers.map((header) => header.getBoundingClientRect().width);
+        const positionedHeaders = headers.map((header) =>
+          ['relative', 'sticky', 'absolute', 'fixed'].includes(getComputedStyle(header).position),
+        );
+        configuredHeaders.set(table, { headers, keys });
         const originalStyle =
           table.dataset.columnResizeOriginalStyle ?? table.getAttribute('style');
         if (!tables.has(table)) {
@@ -174,6 +199,7 @@ export function TableColumnResizeController({
             if (originalStyle) table.setAttribute('style', originalStyle);
             else table.removeAttribute('style');
             delete table.dataset.columnResizeOriginalStyle;
+            configuredHeaders.delete(table);
           });
         }
         const apply = () => {
@@ -222,10 +248,7 @@ export function TableColumnResizeController({
         };
         headers.forEach((header, index) => {
           if (header.colSpan !== 1 || header.querySelector('input[type="checkbox"]')) return;
-          header.classList.remove('cdr-column-resize-relative');
-          if (
-            !['relative', 'sticky', 'absolute', 'fixed'].includes(getComputedStyle(header).position)
-          ) {
+          if (!positionedHeaders[index]) {
             header.classList.add('cdr-column-resize-relative');
           }
           let grip = header.querySelector<HTMLSpanElement>(':scope > .cdr-column-resize');
@@ -246,11 +269,7 @@ export function TableColumnResizeController({
           grip.setAttribute('aria-valuemax', String(MAX_WIDTH));
           grip.setAttribute(
             'aria-valuenow',
-            String(
-              Math.round(
-                widths[keys[index]!] ?? (header.getBoundingClientRect().width || MIN_WIDTH),
-              ),
-            ),
+            String(Math.round(widths[keys[index]!] ?? (measuredWidths[index] || MIN_WIDTH))),
           );
           grip.onpointerdown = (event) => {
             if (event.button !== 0) return;
@@ -297,6 +316,7 @@ export function TableColumnResizeController({
     const reset = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== userId) return;
       tables.forEach((clean) => clean());
+      tables.forEach((_, table) => configuredHeaders.delete(table));
       tables.clear();
       schedule();
     };

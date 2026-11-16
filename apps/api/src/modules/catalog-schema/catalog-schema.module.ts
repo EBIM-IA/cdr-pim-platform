@@ -1,3 +1,7 @@
+import { CategoryGovernanceUseCase } from './application/category-governance.use-case';
+import { CategoryGovernanceController } from './presentation/category-governance.controller';
+import { CATEGORY_GOVERNANCE } from './domain/ports/category-governance.port';
+import { PostgresCategoryGovernanceAdapter } from './infrastructure/persistence/postgres-category-governance.adapter';
 import { CatalogHomeUseCases } from './application/catalog-home.use-cases';
 import { CatalogHomeController } from './presentation/catalog-home.controller';
 import { CATALOG_HOME_SETTINGS } from './domain/ports/catalog-home-settings.port';
@@ -23,6 +27,7 @@ import { DrizzleQualityGovernanceRepository } from './infrastructure/persistence
 import { ECOMMERCE_DESCRIPTION } from './domain/ports/ecommerce-description.port';
 import { DrizzleEcommerceDescription } from './infrastructure/persistence/drizzle-ecommerce-description';
 import { Module } from '@nestjs/common';
+import { ProductAssetsModule } from '../product-assets/product-assets.module';
 import { PRODUCT_EXPERIENCE } from './domain/ports/product-experience.port';
 import { ApplicationsModule } from '../applications/applications.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -37,6 +42,7 @@ import {
   ListAdminTemplatesUseCase,
   UpdateCatalogCategoryUseCase,
   UpdateTemplateAttributeUseCase,
+  UpdateTemplateSectionsUseCase,
 } from './application/catalog-administration.use-cases';
 import { GetCatalogGridSchemaUseCase } from './application/get-catalog-grid-schema.use-case';
 import { GetProductAttributeSheetUseCase } from './application/get-product-attribute-sheet.use-case';
@@ -58,8 +64,9 @@ import { DynamicCatalogController } from './presentation/dynamic-catalog.control
 import { CatalogAdministrationController } from './presentation/catalog-administration.controller';
 
 @Module({
-  imports: [ApplicationsModule, CatalogModule],
+  imports: [ApplicationsModule, CatalogModule, ProductAssetsModule],
   controllers: [
+    CategoryGovernanceController,
     CatalogHomeController,
     CatalogParametersController,
     ProductDraftController,
@@ -69,6 +76,8 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     ProductNamingController,
   ],
   providers: [
+    CategoryGovernanceUseCase,
+    { provide: CATEGORY_GOVERNANCE, useClass: PostgresCategoryGovernanceAdapter },
     CatalogHomeUseCases,
     { provide: CATALOG_HOME_SETTINGS, useClass: DrizzleCatalogHomeSettings },
     CatalogParametersUseCase,
@@ -107,6 +116,7 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     UpdateProductAttributesUseCase,
     UpdateCatalogCategoryUseCase,
     UpdateTemplateAttributeUseCase,
+    UpdateTemplateSectionsUseCase,
   ],
   exports: [
     CATALOG_ADMINISTRATION_REPOSITORY,

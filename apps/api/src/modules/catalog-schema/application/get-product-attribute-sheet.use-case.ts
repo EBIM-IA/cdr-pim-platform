@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundError, assertUuid } from '@cdr/shared';
+import { actorHasCapability, Capability } from '../../identity/domain/entities/role';
+import {
+  TECHNICAL_SHEET_VISIBILITY,
+  type TechnicalSheetVisibilityPort,
+} from '../../product-assets/domain/ports/technical-sheet-visibility.port';
 
 import type { AuthenticatedActor } from '../../identity/domain/entities/role';
 import {
@@ -13,6 +18,8 @@ export class GetProductAttributeSheetUseCase {
   constructor(
     @Inject(DYNAMIC_CATALOG_REPOSITORY)
     private readonly catalog: DynamicCatalogRepositoryPort,
+    @Inject(TECHNICAL_SHEET_VISIBILITY)
+    private readonly visibility: TechnicalSheetVisibilityPort,
   ) {}
 
   async execute(rawProductId: string, actor: AuthenticatedActor) {
@@ -27,8 +34,13 @@ export class GetProductAttributeSheetUseCase {
    * screen export. The backend applies the explicit export permission and returns only
    * attributes configured for that document.
    */
-  async executeTechnicalSheet(rawProductId: string) {
+  async executeTechnicalSheet(rawProductId: string, actor: AuthenticatedActor) {
     const productId = assertUuid(rawProductId, 'productId');
+    if (
+      !actorHasCapability(actor, Capability.AdministrationManage) &&
+      !(await this.visibility.get(productId)).visible
+    )
+      throw new NotFoundError('Product technical sheet', rawProductId);
     const sheet = await this.catalog.getProductSheet(productId, [
       'ADMINISTRADOR',
       'COMPRAS',

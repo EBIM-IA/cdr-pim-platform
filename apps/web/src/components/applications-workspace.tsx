@@ -1,6 +1,10 @@
 'use client';
 
-import type { GroupApplicationDto, UpdateGroupApplicationInput } from '@cdr/contracts';
+import type {
+  GroupApplicationDto,
+  UpdateGroupApplicationInput,
+  ApplicationColumnSettingsDto,
+} from '@cdr/contracts';
 import {
   Check,
   Columns3,
@@ -16,6 +20,8 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { ApplicationColumnsEditor } from '@/components/application-columns-editor';
+import { getApplicationColumns } from '@/lib/application-columns-api';
 import {
   ExcelTableFilterBar,
   ExcelTableHeader,
@@ -41,6 +47,7 @@ import {
 } from '@/lib/operational-api';
 
 interface ApplicationForm {
+  additionalFields: Record<string, string>;
   unifiedCode: string;
   vehicleType: '' | 'AUTOMOTRIZ' | 'INDUSTRIAL';
   make: string;
@@ -58,6 +65,7 @@ interface ApplicationForm {
 }
 
 const emptyForm: ApplicationForm = {
+  additionalFields: {},
   unifiedCode: '',
   vehicleType: '',
   make: '',
@@ -90,7 +98,8 @@ type ApplicationTableColumnKey =
   | 'engine'
   | 'notes'
   | 'source'
-  | 'active';
+  | 'active'
+  | `extra:${string}`;
 
 type EditableApplicationColumn = Exclude<
   ApplicationTableColumnKey,
@@ -153,8 +162,6 @@ const applicationTableColumns: readonly ExcelTableColumn<
   },
 ];
 
-const applicationTableColumnKeys = applicationTableColumns.map((column) => column.key);
-
 function year(value: string): number | undefined {
   return value.trim() ? Number(value) : undefined;
 }
@@ -163,8 +170,10 @@ function applicationCellValue(
   application: GroupApplicationDto,
   column: EditableApplicationColumn,
 ): string {
-  const value = application[column];
-  return value === null ? '' : String(value);
+  const value = column.startsWith('extra:')
+    ? application.additionalFields?.[column.slice(6)]
+    : application[column as Exclude<EditableApplicationColumn, `extra:${string}`>];
+  return value === null || value === undefined ? '' : String(value);
 }
 
 function applicationCellUpdate(
@@ -173,6 +182,11 @@ function applicationCellUpdate(
   expectedUpdatedAt: string,
 ): UpdateGroupApplicationInput {
   const value = draft.trim();
+  if (column.startsWith('extra:'))
+    return {
+      expectedUpdatedAt,
+      additionalFields: { [column.slice(6)]: value === '-' ? null : value },
+    };
   if (column === 'make' || column === 'model') {
     if (!value || value === '-') {
       throw new Error(`${column === 'make' ? 'Marca' : 'Modelo'} es obligatorio.`);
@@ -190,8 +204,51 @@ function applicationCellUpdate(
   return { expectedUpdatedAt, [column]: value === '-' ? '' : value };
 }
 
-export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
+export function ApplicationsWorkspace({
+  canWrite,
+  embeddedUnifiedCode,
+  onChanged,
+}: {
+  canWrite: boolean;
+  embeddedUnifiedCode?: string;
+  onChanged?: () => void;
+}) {
   const [items, setItems] = useState<GroupApplicationDto[]>([]);
+  const [columnSettings, setColumnSettings] = useState<ApplicationColumnSettingsDto>({
+    columns: [],
+    version: 0,
+  });
+  const [columnsEditorOpen, setColumnsEditorOpen] = useState(false);
+  const [columnSettingsError, setColumnSettingsError] = useState<string | null>(null);
+  const [columnSettingsRevision, setColumnSettingsRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setColumnSettingsError(null);
+    void getApplicationColumns(controller.signal)
+      .then((settings) => {
+        if (!controller.signal.aborted) setColumnSettings(settings);
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          setColumnSettingsError(
+            failure instanceof Error
+              ? failure.message
+              : 'No fue posible consultar las columnas adicionales',
+          );
+      });
+    return () => controller.abort();
+  }, [columnSettingsRevision]);
+  const configuredTableColumns = useMemo(
+    () => [
+      ...applicationTableColumns,
+      ...columnSettings.columns.map((column) => ({
+        key: `extra:${column.key}` as ApplicationTableColumnKey,
+        label: column.label,
+        getValue: (item: GroupApplicationDto) => item.additionalFields?.[column.key] ?? null,
+      })),
+    ],
+    [columnSettings],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -214,21 +271,30 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [unifiedCodeFilter, setUnifiedCodeFilter] = useState('');
+  const [unifiedCodeFilter, setUnifiedCodeFilter] = useState(embeddedUnifiedCode ?? '');
   const [returnProductId, setReturnProductId] = useState('');
 
   useEffect(() => {
+    if (embeddedUnifiedCode) {
+      setUnifiedCodeFilter(embeddedUnifiedCode);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const code = params.get('unifiedCode');
     if (code) setUnifiedCodeFilter(code);
     setReturnProductId(params.get('productId') ?? '');
-  }, []);
+  }, [embeddedUnifiedCode]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setItems(await listApplications({ includeInactive }));
+      setItems(
+        await listApplications({
+          includeInactive,
+          ...(embeddedUnifiedCode ? { unifiedCode: embeddedUnifiedCode } : {}),
+        }),
+      );
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -238,7 +304,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [includeInactive]);
+  }, [includeInactive, embeddedUnifiedCode]);
 
   useEffect(() => void load(), [load]);
 
@@ -303,15 +369,15 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
   };
   const applicationTable = useExcelTableRows({
     rows: tableRows,
-    columns: applicationTableColumns,
+    columns: configuredTableColumns,
     initialSort: { key: 'unifiedCode', direction: 'asc' },
   });
   const applicationColumnOrder = usePersistentColumnOrder({
     screenKey: 'applications',
-    columnKeys: applicationTableColumnKeys,
+    columnKeys: configuredTableColumns.map((column) => column.key),
   });
   const orderedApplicationColumns = applicationColumnOrder.orderedColumnKeys.map((key) =>
-    applicationTableColumns.find((column) => column.key === key)!,
+    configuredTableColumns.find((column) => column.key === key)!,
   );
   const exportRows = applicationTable.visibleRows.map((item) =>
     orderedApplicationColumns.map((column) => column.getValue(item)),
@@ -336,6 +402,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             'subarea',
             'motor',
             'notas',
+            ...columnSettings.columns.map((column) => column.header),
           ],
           rows: applicationTable.visibleRows.map((item) => [
             item.unifiedCode,
@@ -352,6 +419,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             item.subarea,
             item.engine,
             item.notes,
+            ...columnSettings.columns.map((column) => item.additionalFields?.[column.key] ?? null),
           ]),
         },
         {
@@ -419,9 +487,11 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         subarea: form.subarea,
         engine: form.engine,
         notes: form.notes,
+        additionalFields: form.additionalFields,
       };
       const created = await createApplication({ unifiedCode: form.unifiedCode.trim(), ...fields });
       setItems((current) => [created, ...current]);
+      onChanged?.();
       setNotice('Aplicación creada para todo el código unificador.');
       closeForm();
     } catch (requestError) {
@@ -447,6 +517,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
       setNotice('Celda actualizada y registrada en Auditoría.');
       setItems((rows) => rows.map((row) => (row.id === item.id ? updated : row)));
       setEditedCells((cells) => new Set([...cells, `${item.id}:${current.column}`]));
+      onChanged?.();
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : 'No fue posible guardar la celda.',
@@ -483,6 +554,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     );
     setSelectedIds(new Set());
     setNotice(`${succeeded.length} de ${selected.length} aplicaciones fueron desactivadas.`);
+    if (succeeded.length) onChanged?.();
     if (succeeded.length !== selected.length) {
       setError(
         'Algunas filas cambiaron en el servidor y no se desactivaron. Actualiza y vuelve a seleccionarlas.',
@@ -507,6 +579,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
     setItems((rows) => rows.map((row) => succeeded.find((item) => item.id === row.id) ?? row));
     setSelectedIds(new Set());
     setNotice(`${succeeded.length} de ${selected.length} aplicaciones fueron reactivadas.`);
+    if (succeeded.length) onChanged?.();
     if (succeeded.length !== selected.length) {
       setError('Algunas filas cambiaron en el servidor y no se reactivaron. Actualiza la vista.');
     }
@@ -515,25 +588,56 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Compatibilidad"
-        title="Aplicaciones"
-        description="Aplicaciones automotrices e industriales compartidas por los SKU de un mismo código unificador."
+      {columnSettingsError ? (
+        <div role="alert" className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+          {columnSettingsError}
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-3"
+            onClick={() => setColumnSettingsRevision((value) => value + 1)}
+          >
+            Reintentar columnas
+          </Button>
+        </div>
+      ) : null}
+      <ApplicationColumnsEditor
+        open={columnsEditorOpen}
+        settings={columnSettings}
+        onClose={() => setColumnsEditorOpen(false)}
+        onSaved={(settings) => {
+          setColumnSettings(settings);
+          setNotice('Columnas de aplicaciones guardadas y auditadas.');
+        }}
       />
-      <ScreenGuide
-        objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
-        actions={[
-          'Combina vehículo, modelo y año; también puedes buscar por SKU, marca de producto o referencias registradas del catálogo.',
-          ...(canWrite
-            ? [
-                'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
-                'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
-              ]
-            : ['Filtra las columnas y exporta las aplicaciones visibles a Excel.']),
-        ]}
-        dataSource="Los registros se leen y escriben en el API de aplicaciones. Cada cambio genera auditoría en el backend."
-        limitation="El código unificador debe existir previamente; una aplicación no puede asociarse a un código desconocido."
-      />
+      {embeddedUnifiedCode ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Aplicaciones del código unificador <strong>{embeddedUnifiedCode}</strong>. Las celdas se
+          guardan al salir y se comparten con todos sus SKU.
+        </p>
+      ) : (
+        <>
+          <PageHeader
+            eyebrow="Compatibilidad"
+            title="Aplicaciones"
+            description="Aplicaciones automotrices e industriales compartidas por los SKU de un mismo código unificador."
+          />
+          <ScreenGuide
+            objective="Consulta y mantiene aplicaciones técnicas asociadas al código unificador. Al compartir un código, todos sus SKU heredan las mismas aplicaciones."
+            actions={[
+              'Combina vehículo, modelo y año; también puedes buscar por SKU, marca de producto o referencias registradas del catálogo.',
+              ...(canWrite
+                ? [
+                    'Agrega una fila directamente en la tabla y edita celdas con autoguardado.',
+                    'Selecciona una o varias filas para desactivarlas sin perder su trazabilidad.',
+                  ]
+                : ['Filtra las columnas y consulta las aplicaciones verificadas.']),
+            ]}
+            dataSource="Los registros se leen y escriben en el API de aplicaciones. Cada cambio genera auditoría en el backend."
+            limitation="El código unificador debe existir previamente; una aplicación no puede asociarse a un código desconocido."
+          />
+        </>
+      )}
 
       <Card className="mb-3 p-3">
         <form
@@ -564,10 +668,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
             Buscar
           </Button>
         </form>
-        {query || unifiedCodeFilter ? (
+        {query || (unifiedCodeFilter && !embeddedUnifiedCode) ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>Filtros activos</span>
-            {unifiedCodeFilter ? (
+            {unifiedCodeFilter && !embeddedUnifiedCode ? (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full border bg-slate-50 px-2 py-1"
@@ -604,8 +708,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
         aria-label="Acciones generales de aplicaciones"
       >
         <h2 className="mr-2 text-xs font-semibold text-cdr-ink">
-          Todas las aplicaciones · tabla{' '}
-          <span className="rounded-md bg-orange-50 px-2 py-0.5">{items.length}</span>
+          {embeddedUnifiedCode
+            ? 'Aplicaciones del grupo · tabla'
+            : 'Todas las aplicaciones · tabla'}{' '}
+          <span className="rounded-md bg-orange-50 px-2 py-0.5">{scopedItems.length}</span>
         </h2>
         {returnProductId ? (
           <Button asChild size="sm" variant="outline">
@@ -640,6 +746,11 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               {selectedIds.size ? ` (${selectedIds.size})` : ''}
             </Button>
           </>
+        ) : null}
+        {canWrite ? (
+          <Button size="sm" variant="outline" onClick={() => setColumnsEditorOpen(true)}>
+            Configurar columnas
+          </Button>
         ) : null}
         {canWrite ? (
           <Button size="sm" variant="outline" asChild>
@@ -741,7 +852,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
               </h2>
               <p className="inline text-xs text-muted-foreground">
                 Una fila por vehículo y código unificador; se comparte con todos los SKU del grupo.{' '}
-                {unifiedCodes.length} códigos unificadores con aplicaciones.
+                {unifiedCodes.length}{' '}
+                {unifiedCodes.length === 1
+                  ? 'código unificador con aplicaciones.'
+                  : 'códigos unificadores con aplicaciones.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
@@ -757,13 +871,15 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
           </div>
           <ExcelTableFilterBar
             filteredColumns={applicationTable.filteredColumnKeys.map(
-              (key) => applicationTableColumns.find((column) => column.key === key)?.label ?? key,
+              (key) => configuredTableColumns.find((column) => column.key === key)?.label ?? key,
             )}
             sort={
-              applicationTable.sort
+              applicationTable.sort &&
+              (applicationTable.sort.key !== 'unifiedCode' ||
+                applicationTable.sort.direction !== 'asc')
                 ? {
                     label:
-                      applicationTableColumns.find(
+                      configuredTableColumns.find(
                         (column) => column.key === applicationTable.sort?.key,
                       )?.label ?? applicationTable.sort.key,
                     direction: applicationTable.sort.direction,
@@ -824,6 +940,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                     columns={applicationColumnOrder.orderedColumnKeys}
                     form={form}
                     saving={saving}
+                    fixedUnifiedCode={!!embeddedUnifiedCode}
                     onField={updateField}
                     onSave={() => void submit()}
                     onCancel={closeForm}
@@ -848,6 +965,10 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                         key={column}
                         item={item}
                         column={column}
+                        columnLabel={
+                          configuredTableColumns.find((candidate) => candidate.key === column)
+                            ?.label
+                        }
                         canWrite={canWrite}
                         edited={editedCells.has(`${item.id}:${column}`)}
                         editingCell={editingCell}
@@ -918,7 +1039,7 @@ export function ApplicationsWorkspace({ canWrite }: { canWrite: boolean }) {
                 {applicationTable.visibleRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={applicationTableColumns.length + 2}
+                      colSpan={configuredTableColumns.length + 2}
                       className="px-4 py-10 text-center text-sm text-muted-foreground"
                     >
                       Ninguna fila cumple los filtros de columna combinados.
@@ -986,12 +1107,14 @@ function NewApplicationRow({
   form,
   saving,
   onField,
+  fixedUnifiedCode = false,
   onSave,
   onCancel,
 }: {
   columns: readonly ApplicationTableColumnKey[];
   form: ApplicationForm;
   saving: boolean;
+  fixedUnifiedCode?: boolean;
   onField: <Key extends keyof ApplicationForm>(field: Key, value: ApplicationForm[Key]) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -1005,6 +1128,7 @@ function NewApplicationRow({
           column={column}
           form={form}
           autoFocus={index === 0}
+          fixedUnifiedCode={fixedUnifiedCode}
           onField={onField}
         />
       ))}
@@ -1039,13 +1163,33 @@ function NewApplicationCell({
   column,
   form,
   autoFocus,
+  fixedUnifiedCode,
   onField,
 }: {
   column: ApplicationTableColumnKey;
   form: ApplicationForm;
   autoFocus: boolean;
+  fixedUnifiedCode: boolean;
   onField: <Key extends keyof ApplicationForm>(field: Key, value: ApplicationForm[Key]) => void;
 }) {
+  if (column === 'unifiedCode' && fixedUnifiedCode)
+    return <td className="px-4 py-2 font-mono">{form.unifiedCode}</td>;
+  if (column.startsWith('extra:'))
+    return (
+      <td className="px-2 py-2">
+        <Input
+          aria-label={`Nuevo ${column.slice(6)}`}
+          value={form.additionalFields[column.slice(6)] ?? ''}
+          maxLength={500}
+          onChange={(event) =>
+            onField('additionalFields', {
+              ...form.additionalFields,
+              [column.slice(6)]: event.target.value,
+            })
+          }
+        />
+      </td>
+    );
   if (column === 'source') return <td className="px-4 py-2">Manual</td>;
   if (column === 'active') return <td className="px-4 py-2">Activo</td>;
   if (column === 'vehicleType') {
@@ -1111,6 +1255,7 @@ function NewApplicationCell({
 function ApplicationDataCell({
   item,
   column,
+  columnLabel,
   canWrite,
   edited,
   editingCell,
@@ -1122,6 +1267,7 @@ function ApplicationDataCell({
 }: {
   item: GroupApplicationDto;
   column: ApplicationTableColumnKey;
+  columnLabel?: string;
   canWrite: boolean;
   edited: boolean;
   editingCell: EditingApplicationCell | null;
@@ -1151,6 +1297,7 @@ function ApplicationDataCell({
     <InlineApplicationCell
       item={item}
       column={column}
+      columnLabel={columnLabel}
       canWrite={canWrite && item.active}
       edited={edited}
       editing={
@@ -1168,6 +1315,7 @@ function ApplicationDataCell({
 function InlineApplicationCell({
   item,
   column,
+  columnLabel,
   canWrite,
   edited,
   editing,
@@ -1179,6 +1327,7 @@ function InlineApplicationCell({
 }: {
   item: GroupApplicationDto;
   column: EditableApplicationColumn;
+  columnLabel?: string;
   canWrite: boolean;
   edited: boolean;
   editing: EditingApplicationCell | null;
@@ -1189,7 +1338,9 @@ function InlineApplicationCell({
   onCancel: () => void;
 }) {
   const label =
-    applicationTableColumns.find((candidate) => candidate.key === column)?.label ?? column;
+    columnLabel ??
+    applicationTableColumns.find((candidate) => candidate.key === column)?.label ??
+    column;
   const displayed = applicationCellValue(item, column) || '—';
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter') {
@@ -1238,7 +1389,7 @@ function InlineApplicationCell({
           onBlur={onSave}
           onKeyDown={onKeyDown}
           aria-label={`Editar ${label}`}
-          maxLength={column === 'notes' ? 2_000 : 200}
+          maxLength={column === 'notes' ? 2_000 : column.startsWith('extra:') ? 500 : 200}
           className="h-9 min-w-36 rounded-md border bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-cdr-ink"
         />
         {saving ? <span className="text-xs text-muted-foreground">Guardando…</span> : null}

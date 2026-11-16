@@ -18,6 +18,34 @@ describe('parseImportPayload', () => {
     ]);
   });
 
+  it('recognizes the designer optional homolog columns and validates their lengths per row', () => {
+    const rows = parseImportPayload({
+      target: 'homologs',
+      format: 'csv',
+      idempotencyKey: 'designer-metadata-columns',
+      csv:
+        'codigo_unificador;marca;codigo_homologo;nombre;tipo_referencia;fuente;observacion\nD1672;EXTERNAL;EXT-42;Referencia;Marca alterna;Fabricante;Documento\nD1672;EXTERNAL;EXT-43;' +
+        'x'.repeat(501) +
+        ';;;',
+    });
+    expect(rows[0]).toMatchObject({
+      valid: true,
+      data: {
+        unifiedCode: 'D1672',
+        externalBrand: 'EXTERNAL',
+        externalCode: 'EXT-42',
+        name: 'Referencia',
+        referenceType: 'Marca alterna',
+        referenceSource: 'Fabricante',
+        note: 'Documento',
+      },
+    });
+    expect(rows[1]).toMatchObject({
+      valid: false,
+      errors: ['name must contain at most 500 characters'],
+    });
+  });
+
   it('detects semicolon CSV and preserves delimiters and escaped quotes inside quoted cells', () => {
     const rows = parseImportPayload({
       target: 'homologs',

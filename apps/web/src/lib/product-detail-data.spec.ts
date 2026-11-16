@@ -1,7 +1,11 @@
 import type { ProductAttributeSheetDto } from '@cdr/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { technicalAttributesFromSheet, unifiedCodeFromSheet } from './product-detail-data';
+import {
+  groupAttributesByTemplateSections,
+  technicalAttributesFromSheet,
+  unifiedCodeFromSheet,
+} from './product-detail-data';
 
 const sheet: ProductAttributeSheetDto = {
   schema: {
@@ -85,6 +89,31 @@ describe('product detail operational data', () => {
       source: 'manual',
       authority: 'pim',
     });
+  });
+
+  it('uses template ordering for every authorized attribute and retains unassigned attributes once', () => {
+    const configured = {
+      ...sheet,
+      schema: {
+        ...sheet.schema,
+        sections: [
+          { key: 'technical', label: 'Dimensiones', position: 1 },
+          { key: 'identity', label: 'Identificación', position: 0 },
+        ],
+        columns: sheet.schema.columns.map((column) => ({
+          ...column,
+          sectionKey: column.key === 'descripcion_interna' ? 'technical' : 'identity',
+        })),
+      },
+    };
+    const attributes = technicalAttributesFromSheet(configured);
+    expect(attributes.map((attribute) => attribute.key)).toEqual([
+      'codigo_unificador',
+      'descripcion_interna',
+    ]);
+    const groups = groupAttributesByTemplateSections(configured, attributes);
+    expect(groups.map((group) => group.title)).toEqual(['1. Identificación', '2. Dimensiones']);
+    expect(groups.flatMap((group) => group.attributes)).toHaveLength(2);
   });
 
   it('resolves the unifier code from the role-filtered sheet', () => {

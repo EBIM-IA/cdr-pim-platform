@@ -118,6 +118,7 @@ describe('persisted ecommerce descriptions', () => {
       actor,
     );
     expect(generated).toMatchObject({ status: 'pending', version: 1 });
+    expect(generated.generationPrompt).toEqual(f.generation.generate.mock.calls[0]?.[0]);
     expect(await f.useCases.get(productId, input, sales)).toBeNull();
     const approved = await f.useCases.mutate(
       productId,
@@ -128,7 +129,10 @@ describe('persisted ecommerce descriptions', () => {
     expect(await f.useCases.get(productId, input, sales)).toMatchObject({
       titulo: 'Rodamiento SKF 6205',
     });
-    await f.useCases.get(productId, input, sales);
+    expect(await f.useCases.get(productId, input, sales)).not.toHaveProperty('generationPrompt');
+    expect((await f.useCases.get(productId, input, actor))?.generationPrompt).toEqual(
+      f.generation.generate.mock.calls[0]?.[0],
+    );
     expect(f.generation.generate).toHaveBeenCalledTimes(1);
     expect(f.generation.generate.mock.calls[0]?.[0]).not.toBeUndefined();
     expect(JSON.stringify(f.generation.generate.mock.calls)).not.toContain('secret-cost');

@@ -1,5 +1,5 @@
 import type { WorkspaceDto, WorkspaceSlug } from '@cdr/contracts';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const codeAffixApi = vi.hoisted(() => ({
@@ -422,6 +422,41 @@ describe('OperationsSecondaryWorkspace', () => {
     expect(screen.queryByText(/57 sugerencias/i)).not.toBeInTheDocument();
   });
 
+  it('opens a contextual rule drawer from an unknown parsed segment', async () => {
+    codeAffixApi.parseCode.mockResolvedValue({
+      code: '6205-X9',
+      normalizedCode: '6205-X9',
+      segments: [
+        {
+          kind: 'suffix',
+          text: 'X9',
+          ruleId: null,
+          meaning: null,
+          attribute: null,
+          impliedValue: null,
+          source: null,
+          confidence: null,
+          evidence: null,
+          boreMillimeters: null,
+        },
+      ],
+    });
+    renderView('administration', 'settings');
+    await screen.findByText('No hay reglas persistidas');
+    fireEvent.change(screen.getByLabelText('Código de producto a interpretar'), {
+      target: { value: '6205-X9' },
+    });
+    fireEvent.change(screen.getByLabelText('Marca para interpretar el código'), {
+      target: { value: 'FAG' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Interpretar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Agregar X9' }));
+    expect(screen.getByRole('dialog', { name: 'Nueva regla' })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Código o patrón' })).toHaveValue('X9');
+    expect(within(screen.getByRole('dialog')).getByRole('textbox', { name: 'Marca' })).toHaveValue(
+      'FAG',
+    );
+  });
   it('presenta reportes de búsqueda sin cifras ilustrativas', () => {
     renderView('reports', 'searches');
 

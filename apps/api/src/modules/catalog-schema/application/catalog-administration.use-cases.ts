@@ -7,6 +7,7 @@ import {
   assertUuid,
   getCorrelationId,
   newUuid,
+  ValidationError,
 } from '@cdr/shared';
 
 import { CLOCK } from '../../../shared/tokens';
@@ -115,6 +116,7 @@ export class UpdateTemplateAttributeUseCase {
     templateId: string,
     attributeDefinitionId: string,
     input: {
+      sectionKey?: string | null;
       label?: string;
       dataType?: AdminTemplateAttribute['dataType'];
       unit?: string | null;
@@ -153,6 +155,7 @@ export class UpdateTemplateAttributeUseCase {
         ? { includeInTechnicalSheet: input.includeInTechnicalSheet }
         : {}),
       ...(input.publishable !== undefined ? { publishable: input.publishable } : {}),
+      ...(input.sectionKey !== undefined ? { sectionKey: input.sectionKey } : {}),
       ...(input.position !== undefined ? { position: input.position } : {}),
       ...(input.roleAccess !== undefined ? { roleAccess: input.roleAccess } : {}),
       expectedUpdatedAt: new Date(input.expectedUpdatedAt),
@@ -168,6 +171,50 @@ export class UpdateTemplateAttributeUseCase {
         actualUpdatedAt: result.actualUpdatedAt.toISOString(),
       });
     }
+    return result.after;
+  }
+}
+
+@Injectable()
+export class UpdateTemplateSectionsUseCase {
+  constructor(
+    @Inject(CATALOG_ADMINISTRATION_REPOSITORY)
+    private readonly catalog: CatalogAdministrationRepositoryPort,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
+  async execute(
+    templateId: string,
+    input: { sections: NonNullable<AdminAttributeTemplate['sections']>; expectedUpdatedAt: string },
+    actor: AuthenticatedActor,
+  ): Promise<AdminAttributeTemplate> {
+    if (!actorHasCapability(actor, Capability.AdministrationManage))
+      throw new ForbiddenError('Insufficient capability to modify template sections');
+    if (
+      new Set(input.sections.map((section) => section.key)).size !== input.sections.length ||
+      new Set(input.sections.map((section) => section.position)).size !== input.sections.length ||
+      input.sections.some(
+        (section) =>
+          !/^[a-z][a-z0-9_]*$/u.test(section.key) ||
+          !section.label.trim() ||
+          section.label.length > 200 ||
+          !Number.isInteger(section.position) ||
+          section.position < 0,
+      )
+    )
+      throw new ValidationError(
+        'Las secciones requieren claves, nombres y posiciones únicas y válidas',
+      );
+    const result = await this.catalog.updateTemplateSections({
+      templateId: assertUuid(templateId, 'templateId'),
+      sections: [...input.sections].sort((a, b) => a.position - b.position),
+      expectedUpdatedAt: new Date(input.expectedUpdatedAt),
+      audit: auditMetadata(actor, this.clock.now()),
+    });
+    if (result.kind === 'not_found') throw new NotFoundError('Attribute template', templateId);
+    if (result.kind === 'version_conflict')
+      throw new ConflictError('The template was modified by another request', {
+        actualUpdatedAt: result.actualUpdatedAt.toISOString(),
+      });
     return result.after;
   }
 }

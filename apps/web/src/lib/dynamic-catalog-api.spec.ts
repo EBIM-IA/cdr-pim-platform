@@ -86,6 +86,7 @@ describe('dynamic catalog browser client', () => {
       applicationType: 'INDUSTRIAL',
       completeness: 'attention',
       filter: ['diametro:gte:20'],
+      groupByUnifiedCode: true,
     });
 
     const [rawUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -99,6 +100,7 @@ describe('dynamic catalog browser client', () => {
       status: 'in_review',
       applicationType: 'INDUSTRIAL',
       completeness: 'attention',
+      groupByUnifiedCode: 'true',
     });
     expect(url.searchParams.getAll('filter')).toEqual(['diametro:gte:20']);
     expect(init.credentials).toBe('same-origin');

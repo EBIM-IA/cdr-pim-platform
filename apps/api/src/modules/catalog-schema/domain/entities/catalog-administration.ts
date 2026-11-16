@@ -4,6 +4,7 @@ import type {
   AttributeSourceAuthority,
   CatalogAttributeDataType,
   TemplateAssetRequirement,
+  TemplateSection,
 } from './catalog-schema';
 
 export type BusinessRole = 'ADMINISTRADOR' | 'COMPRAS' | 'VENTAS';
@@ -46,6 +47,7 @@ export interface AdminCatalogCategory {
 }
 
 export interface AdminTemplateAttribute {
+  readonly sectionKey?: string | null;
   readonly id: Uuid;
   readonly key: string;
   readonly label: string;
@@ -65,6 +67,7 @@ export interface AdminTemplateAttribute {
 }
 
 export interface AdminAttributeTemplate {
+  readonly sections?: readonly TemplateSection[];
   readonly id: Uuid;
   readonly categoryId: Uuid;
   readonly categoryName: string;

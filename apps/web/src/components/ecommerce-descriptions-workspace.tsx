@@ -22,8 +22,12 @@ export function EcommerceDescriptionsWorkspace() {
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(false),
     [revision, setRevision] = useState(0);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
+    setCatalogLoading(true);
+    setError('');
     const timer = window.setTimeout(() => {
       void fetchCatalogWorkbook(
         { page: 1, pageSize: 20, q: query || undefined, filter: [] },
@@ -39,13 +43,16 @@ export function EcommerceDescriptionsWorkspace() {
         .catch((cause: unknown) => {
           if (!controller.signal.aborted)
             setError(cause instanceof Error ? cause.message : 'No se pudo consultar el catálogo.');
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setCatalogLoading(false);
         });
     }, 200);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, catalogRevision]);
   useEffect(() => {
     const controller = new AbortController();
     setExperience(null);
@@ -147,6 +154,16 @@ export function EcommerceDescriptionsWorkspace() {
           </select>
         </label>
       </div>
+      {catalogLoading && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Buscando productos…
+        </p>
+      )}
+      {!catalogLoading && products?.items.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          Sin productos para esta búsqueda. Prueba otro código o descripción.
+        </p>
+      )}
       {products && products.total > products.items.length ? (
         <p className="text-[11px] text-muted-foreground">
           Se muestran {products.items.length} de {products.total} SKU. Usa la búsqueda para elegir
@@ -202,9 +219,22 @@ export function EcommerceDescriptionsWorkspace() {
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-xs text-red-700">
+        <div role="alert" className="text-xs text-red-700">
           {error}
-        </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 block"
+            disabled={busy || loading || catalogLoading}
+            onClick={() => {
+              setError('');
+              setRevision((value) => value + 1);
+              setCatalogRevision((value) => value + 1);
+            }}
+          >
+            Reintentar consulta
+          </Button>
+        </div>
       ) : null}
       {notice ? (
         <p role="status" className="text-xs text-emerald-800">

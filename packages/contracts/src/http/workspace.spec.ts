@@ -46,7 +46,7 @@ describe('workspace contract', () => {
     expect(parsed.rows[0]?.values.products).toBe(3);
   });
 
-  it('validates the seven report layouts and summary', () => {
+  it('validates the nine report layouts and summary', () => {
     expect(reportFormatSchema.options).toEqual([
       'summary',
       'attribute_changes',
@@ -56,6 +56,8 @@ describe('workspace contract', () => {
       'edited_information',
       'documents_by_sku',
       'publication_by_sku',
+      'duplicates',
+      'integration_batches',
     ]);
     expect(workspaceQuerySchema.parse({ report: 'general_results' })).toEqual({
       report: 'general_results',

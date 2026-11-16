@@ -22,27 +22,48 @@ export class GetWorkspaceUseCase {
     query: WorkspaceQuery = {},
   ): Promise<WorkspaceDto> {
     const required = WORKSPACE_CAPABILITIES[slug];
-    if (!actorHasCapability(actor, required)) {
+    if (!required.every((capability) => actorHasCapability(actor, capability))) {
       throw new ForbiddenError('Insufficient capability to access workspace', {
         workspace: slug,
-        required: [required],
+        required: [...required],
       });
     }
     return this.readModel.read(slug, actor, query);
   }
 }
 
-const WORKSPACE_CAPABILITIES: Readonly<Record<WorkspaceSlug, Capability>> = {
-  categories: Capability.MenuCategoriesView,
-  templates: Capability.MenuTemplatesView,
-  applications: Capability.MenuApplicationsView,
-  equivalences: Capability.MenuEquivalencesView,
-  documents: Capability.MenuDocumentsView,
-  catalogs: Capability.MenuCatalogsView,
-  imports: Capability.MenuImportsView,
-  quality: Capability.MenuAiQualityView,
-  publication: Capability.MenuPublicationView,
-  integrations: Capability.MenuIntegrationsView,
-  reports: Capability.MenuReportsView,
-  administration: Capability.MenuAdministrationView,
+/** Menu visibility never replaces the data/operation authorization of a module. */
+const WORKSPACE_CAPABILITIES: Readonly<Record<WorkspaceSlug, readonly Capability[]>> = {
+  categories: [Capability.CatalogRead, Capability.MenuCategoriesView, Capability.AttributesRead],
+  templates: [Capability.CatalogRead, Capability.MenuTemplatesView, Capability.AttributesRead],
+  applications: [
+    Capability.CatalogRead,
+    Capability.MenuApplicationsView,
+    Capability.ApplicationsRead,
+  ],
+  equivalences: [
+    Capability.CatalogRead,
+    Capability.MenuEquivalencesView,
+    Capability.EquivalencesRead,
+  ],
+  documents: [Capability.CatalogRead, Capability.MenuDocumentsView],
+  catalogs: [Capability.CatalogRead, Capability.MenuCatalogsView, Capability.ProductCatalogsRead],
+  imports: [Capability.CatalogRead, Capability.MenuImportsView, Capability.ImportsExecute],
+  quality: [Capability.CatalogRead, Capability.MenuAiQualityView, Capability.AiQualityExecute],
+  publication: [
+    Capability.CatalogRead,
+    Capability.MenuPublicationView,
+    Capability.PublicationExecute,
+  ],
+  integrations: [
+    Capability.CatalogRead,
+    Capability.MenuIntegrationsView,
+    Capability.IntegrationsManage,
+  ],
+  reports: [Capability.CatalogRead, Capability.MenuReportsView, Capability.ReportsRead],
+  administration: [
+    Capability.CatalogRead,
+    Capability.MenuAdministrationView,
+    Capability.AdministrationManage,
+  ],
 };

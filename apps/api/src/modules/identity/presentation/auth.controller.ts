@@ -13,6 +13,7 @@ import {
 import { openApiSchema } from '../../../shared/http/openapi';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
 import { RateLimit } from '../../../shared/http/rate-limit';
+import { ModulePolicyUseCase } from '../application/module-policy.use-case';
 import { AuthenticateUseCase } from '../application/authenticate.use-case';
 import { type AuthenticatedActor, Capability, capabilitiesForActor } from '../domain/entities/role';
 import { CurrentActor, Public, RequireCapabilities } from './decorators/auth.decorators';
@@ -21,7 +22,10 @@ import { CurrentActor, Public, RequireCapabilities } from './decorators/auth.dec
 @Controller('auth')
 @RequireCapabilities(Capability.IdentitySelfRead)
 export class AuthController {
-  constructor(private readonly authenticate: AuthenticateUseCase) {}
+  constructor(
+    private readonly authenticate: AuthenticateUseCase,
+    private readonly policies: ModulePolicyUseCase,
+  ) {}
 
   @Public()
   @RateLimit('login')
@@ -33,7 +37,7 @@ export class AuthController {
     @Body(new ZodValidationPipe(loginRequestSchema)) body: LoginRequest,
   ): Promise<LoginResponse> {
     const result = await this.authenticate.execute(body);
-    return { ...result, actor: toActorDto(result.actor) };
+    return { ...result, actor: toActorDto(await this.policies.resolve(result.actor)) };
   }
 
   @Get('me')

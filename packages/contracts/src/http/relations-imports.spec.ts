@@ -3,6 +3,43 @@ import { describe, expect, it } from 'vitest';
 import { applicationListQuerySchema, previewImportSchema } from './index';
 
 describe('relation and import contracts', () => {
+  it('preserves uploaded CSV/XLSX metadata separately from JSON record transport', () => {
+    const input = {
+      target: 'homologs',
+      format: 'json',
+      idempotencyKey: 'file-metadata-1',
+      records: [{ codigo_unificador: 'D1672', codigo_homologo: 'EXT', marca: 'EXTERNA' }],
+      originalFileName: 'Homólogos catálogo.csv',
+      sourceFileFormat: 'csv',
+    };
+    expect(previewImportSchema.parse(input)).toMatchObject({
+      format: 'json',
+      originalFileName: 'Homólogos catálogo.csv',
+      sourceFileFormat: 'csv',
+    });
+    expect(
+      previewImportSchema.safeParse({
+        ...input,
+        originalFileName: 'Listado.xlsx',
+        sourceFileFormat: 'xlsx',
+      }).success,
+    ).toBe(true);
+    for (const originalFileName of [
+      '../catalogo.csv',
+      'C:\\catalogo.csv',
+      'a\nb.csv',
+      '.',
+      '..',
+      '',
+      'a'.repeat(256),
+    ]) {
+      expect(previewImportSchema.safeParse({ ...input, originalFileName }).success).toBe(false);
+    }
+    expect(previewImportSchema.safeParse({ ...input, sourceFileFormat: 'json' }).success).toBe(
+      false,
+    );
+  });
+
   it('parses false query parameters without JavaScript truthiness surprises', () => {
     expect(applicationListQuerySchema.parse({ includeInactive: 'false' }).includeInactive).toBe(
       false,

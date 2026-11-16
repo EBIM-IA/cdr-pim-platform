@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { authCapabilitySchema } from './auth';
 import { searchReportSchema } from './search-report';
-import { axInboxMonitorSchema } from './integration-monitor';
+import { integrationExecutionMonitorSchema, axInboxMonitorSchema } from './integration-monitor';
 
 /**
  * Stable identifiers for the operational workspaces rendered by the web application.
@@ -37,6 +37,8 @@ export const reportFormatSchema = z.enum([
   'edited_information',
   'documents_by_sku',
   'publication_by_sku',
+  'duplicates',
+  'integration_batches',
 ]);
 export type ReportFormat = z.infer<typeof reportFormatSchema>;
 
@@ -156,6 +158,7 @@ export const workspaceSchema = z
     notices: z.array(workspaceNoticeSchema),
     actions: z.array(workspaceActionSchema),
     axInbox: axInboxMonitorSchema.optional(),
+    integrationMonitor: integrationExecutionMonitorSchema.optional(),
     searchReport: searchReportSchema.optional(),
     roleCapabilities: z
       .array(

@@ -130,3 +130,31 @@ export const parsedProductCodeSchema = z.object({
   segments: z.array(parsedCodeSegmentSchema),
 });
 export type ParsedProductCodeDto = z.infer<typeof parsedProductCodeSchema>;
+
+export const bootstrapCodeAffixesSchema = z
+  .object({
+    evidence: z.string().trim().min(30).max(30000),
+    brand: z.string().trim().min(1).max(120).optional(),
+    family: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+export type BootstrapCodeAffixesInput = z.infer<typeof bootstrapCodeAffixesSchema>;
+export const bootstrapCodeAffixesResultSchema = z.object({
+  model: z.string(),
+  simulated: z.boolean(),
+  items: z.array(codeAffixSchema).max(100),
+  skipped: z.number().int().nonnegative(),
+});
+export const bulkValidateCodeAffixesSchema = z
+  .object({
+    items: z
+      .array(z.object({ id: uuidSchema, expectedUpdatedAt: z.string().datetime() }))
+      .min(1)
+      .max(100),
+  })
+  .strict();
+export type BulkValidateCodeAffixesInput = z.infer<typeof bulkValidateCodeAffixesSchema>;
+export const bulkValidateCodeAffixesResultSchema = z.object({
+  items: z.array(codeAffixSchema),
+  errors: z.array(z.object({ id: uuidSchema, message: z.string() })),
+});

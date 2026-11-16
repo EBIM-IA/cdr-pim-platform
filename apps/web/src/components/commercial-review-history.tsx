@@ -26,6 +26,7 @@ export function CommercialReviewHistory({
   const load = useCallback(
     async (signal?: AbortSignal) => {
       setLoading(true);
+      setError(null);
       try {
         const result = await listQualityReviews(
           { productId, kind: 'commercial', page: 1, pageSize: 100 },
@@ -99,9 +100,18 @@ export function CommercialReviewHistory({
           </p>
         )}
         {error && !selected && (
-          <p role="alert" className="m-4 text-sm text-red-700">
+          <div role="alert" className="m-4 text-sm text-red-700">
             {error}
-          </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 block"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              Reintentar historial
+            </Button>
+          </div>
         )}
         <div className="overflow-auto">
           <table className="w-full min-w-[650px] text-left text-xs">

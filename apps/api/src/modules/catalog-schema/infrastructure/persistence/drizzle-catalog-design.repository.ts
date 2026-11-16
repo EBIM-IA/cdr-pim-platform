@@ -1,3 +1,4 @@
+import { defaultTemplateSections } from '../../domain/entities/template-sheet-sections';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ConflictError,
@@ -345,6 +346,7 @@ export class DrizzleCatalogDesignRepository implements CatalogDesignRepositoryPo
         await tx.insert(attributeTemplates).values({
           id: targetId,
           categoryId: input.categoryId,
+          sections: source?.sections ?? defaultTemplateSections(),
           name: input.name,
           variantKey: `pim-${targetId}`,
           version: 1,

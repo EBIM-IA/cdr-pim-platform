@@ -31,7 +31,8 @@ import {
 } from '@/lib/dynamic-catalog-api';
 import { fetchProductExperience } from '@/lib/product-experience-api';
 import { listProductAssets } from '@/lib/product-assets-api';
-import { downloadXlsx } from '@/lib/tabular-export';
+import { downloadWorkbookXlsx } from '@/lib/tabular-export';
+import { downloadBinary } from '@/lib/zip-export';
 
 type PublicationAttribute = Omit<CatalogGridColumnDto, 'permissions'> & {
   active?: boolean;
@@ -98,29 +99,39 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 function TemplatePublication({ canManage }: { canManage: boolean }) {
   const [categories, setCategories] = useState<CatalogCategorySummaryDto[]>([]);
-  const [templateId, setTemplateId] = useState('');
+  const [categoryKey, setCategoryKey] = useState('');
   const [attributes, setAttributes] = useState<PublicationAttribute[]>([]);
   const [products, setProducts] = useState<CatalogGridProductDto[]>([]);
+  const [productPage, setProductPage] = useState(1);
+  const [productTotal, setProductTotal] = useState(0);
   const [selectedId, setSelectedId] = useState('');
   const [sheet, setSheet] = useState<ProductAttributeSheetDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const category = categories.find((item) => item.templateId === templateId);
+  const [revision, setRevision] = useState(0);
+  const category = categories.find((item) => `${item.id}:${item.templateId}` === categoryKey);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchCatalogCategories(controller.signal)
       .then((items) => {
+        if (controller.signal.aborted) return;
         setCategories(items);
-        setTemplateId(items[0]?.templateId ?? '');
+        setCategoryKey((current) =>
+          items.some((item) => `${item.id}:${item.templateId}` === current)
+            ? current
+            : items[0]
+              ? `${items[0].id}:${items[0].templateId}`
+              : '',
+        );
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
           setError(cause instanceof Error ? cause.message : 'No pudimos cargar las categorías.');
       });
     return () => controller.abort();
-  }, []);
+  }, [revision]);
 
   useEffect(() => {
     if (!category) return;
@@ -144,7 +155,7 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
         {
           categoryId: category.id,
           templateId: category.templateId,
-          page: 1,
+          page: productPage,
           pageSize: 25,
           filter: [],
         },
@@ -155,6 +166,7 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
         if (!current) return;
         setAttributes(attrs);
         setProducts(result.items);
+        setProductTotal(result.total);
         setSelectedId(result.items[0]?.id ?? '');
       })
       .catch((cause: unknown) => {
@@ -168,7 +180,7 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
       current = false;
       controller.abort();
     };
-  }, [category, canManage]);
+  }, [category, canManage, productPage]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -178,7 +190,9 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
     const controller = new AbortController();
     setSheet(null);
     void fetchProductAttributeSheet(selectedId, controller.signal)
-      .then(setSheet)
+      .then((result) => {
+        if (!controller.signal.aborted) setSheet(result);
+      })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
           setError(cause instanceof Error ? cause.message : 'No pudimos cargar el SKU.');
@@ -225,12 +239,148 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
       setBusy(false);
     }
   };
+  const toggleAll = async (publishable: boolean) => {
+    if (!canManage || busy || !category) return;
+    const changes = active.filter(
+      (attribute) =>
+        !isIdentity(attribute) &&
+        attribute.updatedAt &&
+        (attribute.publishable !== false) !== publishable,
+    );
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    let saved = 0;
+    try {
+      for (const attribute of changes) {
+        const updated = await updateAdminTemplateAttribute(category.templateId, attribute.id, {
+          publishable,
+          expectedUpdatedAt: attribute.updatedAt!,
+        });
+        setAttributes((items) =>
+          items.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+        );
+        saved += 1;
+      }
+      setNotice(
+        saved
+          ? `${saved} atributos ${publishable ? 'seleccionados' : 'desmarcados'} para todos los SKU de la plantilla. No se envió información a PrestaShop.`
+          : 'Sin cambios en la selección.',
+      );
+    } catch (cause) {
+      setError(
+        `${saved} de ${changes.length} cambios guardados. ${cause instanceof Error ? cause.message : 'No pudimos completar la selección.'} Los cambios confirmados se conservan; actualiza la categoría antes de continuar.`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const exportCategory = async () => {
+    if (!category || busy) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const items: CatalogGridProductDto[] = [];
+      const ids = new Set<string>();
+      let total: number | undefined;
+      for (let page = 1; total === undefined || items.length < total; page += 1) {
+        const result = await fetchCatalogGrid({
+          categoryId: category.id,
+          templateId: category.templateId,
+          page,
+          pageSize: 100,
+          filter: [],
+        });
+        if (total !== undefined && result.total !== total)
+          throw new Error('El catálogo cambió durante la descarga. Vuelve a intentar.');
+        total = result.total;
+        if (!result.items.length && items.length < total)
+          throw new Error('La descarga quedó incompleta. Vuelve a intentar.');
+        for (const item of result.items) {
+          if (ids.has(item.id))
+            throw new Error('El catálogo cambió durante la descarga. Vuelve a intentar.');
+          ids.add(item.id);
+          items.push(item);
+        }
+      }
+      downloadWorkbookXlsx(
+        [
+          {
+            sheetName: 'Vista previa PrestaShop',
+            headers: [
+              'Código del artículo',
+              ...published
+                .filter((attribute) => !isIdentity(attribute))
+                .map(
+                  (attribute) =>
+                    `${attribute.label}${attribute.unit ? ` (${attribute.unit})` : ''}`,
+                ),
+            ],
+            rows: items.map((item) => [
+              item.sku,
+              ...published
+                .filter((attribute) => !isIdentity(attribute))
+                .map((attribute) => item.attributes[attribute.key]?.value ?? ''),
+            ]),
+          },
+          {
+            sheetName: 'Alcance',
+            headers: ['Parámetro', 'Valor'],
+            rows: [
+              ['Categoría', category.name],
+              ['Plantilla', category.templateName],
+              ['SKU', items.length],
+              ['Generado', new Date().toISOString()],
+              [
+                'Estado',
+                'Vista previa interna. No se publicó en PrestaShop; el contrato técnico está pendiente.',
+              ],
+            ],
+          },
+        ],
+        `prestashop-vista-previa-${category.name}`,
+      );
+      setNotice(
+        `Vista previa exportada: ${items.length} SKU de la categoría. No se publicó en PrestaShop.`,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No pudimos exportar la categoría.');
+    } finally {
+      setBusy(false);
+    }
+  };
   const preview = sheet
     ? published.map((attribute) => ({
         attribute,
-        value: sheet.product.attributes[attribute.key]?.value ?? null,
+        value: isIdentity(attribute)
+          ? sheet.product.sku
+          : (sheet.product.attributes[attribute.key]?.value ?? null),
       }))
     : [];
+  const previewPayload = sheet
+    ? {
+        codigoArticulo: sheet.product.sku,
+        categoria: category?.name,
+        plantilla: category?.templateName,
+        atributos: preview
+          .filter(({ value }) => value !== null && value !== '')
+          .map(({ attribute, value }) => ({
+            clave: attribute.key,
+            etiqueta: attribute.label,
+            valor: value,
+            unidad: attribute.unit,
+          })),
+        sin_valor: preview
+          .filter(({ value }) => value === null || value === '')
+          .map(({ attribute }) => attribute.key),
+        no_publicados: active
+          .filter((attribute) => !published.includes(attribute))
+          .map((attribute) => attribute.key),
+        nota: 'Vista previa interna. No se publicó en PrestaShop. Estructura propuesta sujeta al contrato técnico.',
+        generado: new Date().toISOString(),
+      }
+    : null;
 
   return (
     <Panel id="publication-attributes" title="Atributos publicados en PrestaShop por categoría">
@@ -240,7 +390,18 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
       </p>
       {error ? (
         <p role="alert" className="mb-3 text-xs text-red-700">
-          {error}
+          {error}{' '}
+          <button
+            type="button"
+            className="underline"
+            disabled={busy}
+            onClick={() => {
+              setNotice(null);
+              setRevision((value) => value + 1);
+            }}
+          >
+            Volver a cargar configuración
+          </button>
         </p>
       ) : null}
       {notice ? (
@@ -259,16 +420,21 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
             <tbody>
               {categories.map((item) => (
                 <tr
-                  key={item.templateId}
-                  className={templateId === item.templateId ? 'bg-orange-50' : 'border-t'}
+                  key={`${item.id}:${item.templateId}`}
+                  className={
+                    categoryKey === `${item.id}:${item.templateId}` ? 'bg-orange-50' : 'border-t'
+                  }
                 >
                   <td>
                     <button
                       type="button"
                       className="w-full p-2.5 text-left hover:text-primary"
                       disabled={busy}
-                      onClick={() => setTemplateId(item.templateId)}
-                      aria-pressed={item.templateId === templateId}
+                      onClick={() => {
+                        setProductPage(1);
+                        setCategoryKey(`${item.id}:${item.templateId}`);
+                      }}
+                      aria-pressed={`${item.id}:${item.templateId}` === categoryKey}
                     >
                       <strong>{item.name}</strong>
                       <small className="mt-1 block text-muted-foreground">
@@ -285,11 +451,14 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
           <Select
             label="Categoría y plantilla"
             disabled={busy}
-            value={templateId}
-            onChange={(event) => setTemplateId(event.target.value)}
+            value={categoryKey}
+            onChange={(event) => {
+              setProductPage(1);
+              setCategoryKey(event.target.value);
+            }}
           >
             {categories.map((item) => (
-              <option key={item.templateId} value={item.templateId}>
+              <option key={`${item.id}:${item.templateId}`} value={`${item.id}:${item.templateId}`}>
                 {item.name} · {item.templateName}
               </option>
             ))}
@@ -298,6 +467,38 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
             <strong className="text-foreground">{published.length}</strong> de {active.length}{' '}
             atributos activos seleccionados{canManage ? '' : ' · Solo consulta'}
           </p>
+          {category &&
+          categories.filter((item) => item.templateId === category.templateId).length > 1 ? (
+            <p className="text-xs text-muted-foreground">
+              Esta plantilla se comparte con{' '}
+              {categories
+                .filter(
+                  (item) => item.templateId === category.templateId && item.id !== category.id,
+                )
+                .map((item) => item.name)
+                .join(' · ')}
+              . La selección de atributos aplica a toda la plantilla; el Excel incluye la categoría
+              elegida.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canManage || busy || !active.length}
+              onClick={() => void toggleAll(true)}
+            >
+              Publicar todos
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canManage || busy || !active.length}
+              onClick={() => void toggleAll(false)}
+            >
+              Ninguno (solo código)
+            </Button>
+          </div>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[500px] text-left text-xs">
               <thead className="bg-slate-50">
@@ -372,7 +573,8 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-56 flex-1">
                 <Select
-                  label="Vista previa por SKU · primeros 25 de la categoría"
+                  label="Vista previa por SKU de la categoría"
+                  disabled={busy}
                   value={selectedId}
                   onChange={(event) => setSelectedId(event.target.value)}
                 >
@@ -387,26 +589,51 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!sheet}
-                onClick={() => {
-                  if (sheet)
-                    downloadXlsx(
-                      {
-                        headers: ['SKU', 'Atributo', 'Valor', 'Unidad'],
-                        rows: preview.map(({ attribute, value }) => [
-                          sheet.product.sku,
-                          attribute.label,
-                          value,
-                          attribute.unit,
-                        ]),
-                      },
-                      `vista-previa-${sheet.product.sku}.xlsx`,
-                    );
-                }}
+                disabled={busy || !productTotal}
+                onClick={() => void exportCategory()}
               >
                 <Download className="size-3.5" />
                 Exportar vista previa (Excel)
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!previewPayload || busy}
+                onClick={() => {
+                  if (previewPayload)
+                    downloadBinary(
+                      new TextEncoder().encode(JSON.stringify(previewPayload, null, 2)),
+                      `prestashop-vista-previa-${previewPayload.codigoArticulo.replace(/[^\p{L}\p{N}_.-]/gu, '_')}.json`,
+                      'application/json',
+                    );
+                }}
+              >
+                Ejemplo JSON del SKU
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                {productTotal} SKU de la categoría · página {productPage} de{' '}
+                {Math.max(1, Math.ceil(productTotal / 25))}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || productPage <= 1}
+                  onClick={() => setProductPage((value) => value - 1)}
+                >
+                  SKU anteriores
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || productPage * 25 >= productTotal}
+                  onClick={() => setProductPage((value) => value + 1)}
+                >
+                  Más SKU
+                </Button>
+              </div>
             </div>
             {sheet ? (
               <div className="mt-3 max-h-56 overflow-auto">
@@ -423,18 +650,7 @@ function TemplatePublication({ canManage }: { canManage: boolean }) {
                     Ejemplo JSON de los datos seleccionados
                   </summary>
                   <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px]">
-                    {JSON.stringify(
-                      {
-                        codigoArticulo: sheet.product.sku,
-                        atributos: preview.map(({ attribute, value }) => ({
-                          clave: attribute.key,
-                          valor: value,
-                          unidad: attribute.unit,
-                        })),
-                      },
-                      null,
-                      2,
-                    )}
+                    {JSON.stringify(previewPayload, null, 2)}
                   </pre>
                 </details>
               </div>
@@ -460,6 +676,7 @@ const operations = [
     use: 'Sincronización de catálogo',
     state: 'Pendiente de conexión',
     fields: 'Identidad, marca, categoría y estado de publicación.',
+    pending: ['Ruta y método', 'Autenticación', 'Tamaño máximo de página'],
   },
   {
     name: 'Detalle de producto por SKU',
@@ -467,6 +684,7 @@ const operations = [
     use: 'Ficha técnica y comercial',
     state: 'Pendiente de conexión',
     fields: 'Datos base, atributos seleccionados con unidad, descripción y aplicaciones.',
+    pending: ['Formato del payload', 'Versionado'],
   },
   {
     name: 'Medios por SKU',
@@ -474,6 +692,7 @@ const operations = [
     use: 'Imágenes y documentos',
     state: 'Pendiente de conexión',
     fields: 'Imagen principal, fotografías, ficha técnica, plano y certificados registrados.',
+    pending: ['URLs firmadas o públicas', 'Tamaños de imagen'],
   },
   {
     name: 'Cambios incrementales',
@@ -481,6 +700,7 @@ const operations = [
     use: 'Sincronización eficiente',
     state: 'Por confirmar',
     fields: 'Frecuencia, mecanismo de sincronización y reintentos por definir.',
+    pending: ['Mecanismo: consulta por fecha, eventos o webhook', 'Frecuencia', 'Reintentos'],
   },
 ];
 
@@ -489,6 +709,7 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
   const [mediaCount, setMediaCount] = useState<number | null>(null);
   const [error, setError] = useState(false);
   const [experience, setExperience] = useState<ProductExperienceDto | null>(null);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     setSheet(null);
     setMediaCount(null);
@@ -502,8 +723,8 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
       fetchProductExperience(product.id, controller.signal),
     ])
       .then(([detail, assets, names]) => {
-        setSheet(detail);
         if (controller.signal.aborted) return;
+        setSheet(detail);
         setMediaCount(assets.length);
         setExperience(names);
       })
@@ -511,7 +732,7 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
         if (!controller.signal.aborted) setError(true);
       });
     return () => controller.abort();
-  }, [product]);
+  }, [product, revision]);
   if (!product)
     return (
       <p className="text-xs text-muted-foreground">
@@ -538,13 +759,23 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
       <Row label="Atributos seleccionados">
         {sheet
           ? `${published.filter((column) => sheet.product.attributes[column.key]?.value !== null && sheet.product.attributes[column.key]?.value !== undefined && sheet.product.attributes[column.key]?.value !== '').length} de ${published.length} con valor`
-          : 'Cargando…'}
+          : error
+            ? 'No disponible'
+            : 'Cargando…'}
       </Row>
-      <Row label="Medios">{mediaCount === null ? 'Cargando…' : `${mediaCount} registrados`}</Row>
+      <Row label="Medios">
+        {mediaCount === null
+          ? error
+            ? 'No disponible'
+            : 'Cargando…'
+          : `${mediaCount} registrados`}
+      </Row>
       <Row label="Descripción comercial">
         {experience
           ? `${experience.variants.filter((variant) => variant.descripcionEcommerce).length} de ${experience.variants.length} variantes con contenido disponible`
-          : 'Cargando…'}
+          : error
+            ? 'No disponible'
+            : 'Cargando…'}
       </Row>
       {experience ? (
         <details className="mt-3 rounded border p-3">
@@ -563,7 +794,10 @@ function ConsumptionPreview({ product }: { product: CatalogWorkbookProductDto | 
       <Row label="Precio y stock">Gestionados en ERP</Row>
       {error ? (
         <p role="alert" className="mt-2 text-xs text-red-700">
-          No pudimos completar la vista previa. Vuelve a seleccionar el SKU.
+          No pudimos completar la vista previa.{' '}
+          <button className="underline" onClick={() => setRevision((value) => value + 1)}>
+            Reintentar vista previa
+          </button>
         </p>
       ) : null}
       <div className="mt-4 flex gap-2">
@@ -597,6 +831,8 @@ export function PublicationWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [operation, setOperation] = useState<(typeof operations)[number] | null>(null);
+  const [contractOpen, setContractOpen] = useState(false);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -630,7 +866,7 @@ export function PublicationWorkspace({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, page, filter]);
+  }, [query, page, filter, revision]);
   const selected = data?.items.find((item) => item.id === selectedId);
   const total = workspace.totalRows;
   const metric = (key: string) => workspace.metrics.find((item) => item.key === key)?.value ?? '—';
@@ -638,6 +874,7 @@ export function PublicationWorkspace({
     <Select
       label="SKU en contexto"
       value={selectedId}
+      disabled={busy}
       onChange={(event) => setSelectedId(event.target.value)}
     >
       <option value="">Selecciona un SKU</option>
@@ -664,6 +901,39 @@ export function PublicationWorkspace({
       />
     </label>
   );
+  const productPagination = (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>
+        {data?.total ?? '—'} SKU · página {page}
+      </span>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={page <= 1 || busy}
+          onClick={() => setPage((value) => value - 1)}
+        >
+          SKU anteriores
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!data || page * data.pageSize >= data.total || busy}
+          onClick={() => setPage((value) => value + 1)}
+        >
+          Más SKU
+        </Button>
+      </div>
+      {!busy && data?.total === 0 ? (
+        <p className="w-full">No hay SKU que coincidan con la búsqueda.</p>
+      ) : null}
+      {busy ? (
+        <p role="status" className="w-full">
+          Consultando SKU…
+        </p>
+      ) : null}
+    </div>
+  );
 
   if (view === 'images')
     return (
@@ -686,6 +956,7 @@ export function PublicationWorkspace({
           <div className="space-y-3">
             {search}
             {productPicker}
+            {productPagination}
             <div className="flex items-start gap-3 rounded-lg border border-dashed p-4">
               <ImageIcon className="size-5 shrink-0 text-primary" />
               <div>
@@ -696,6 +967,14 @@ export function PublicationWorkspace({
                   Cuando el servicio esté configurado podrás recuperar las imágenes del SKU
                   seleccionado.
                 </p>
+                <Button
+                  className="mt-3 mr-2"
+                  size="sm"
+                  disabled
+                  title="Requiere contrato y conexión al servicio del proveedor"
+                >
+                  Consultar imágenes en PrestaShop
+                </Button>
                 <Button asChild size="sm" variant="outline" className="mt-3">
                   <a
                     href={
@@ -737,7 +1016,10 @@ export function PublicationWorkspace({
         </Panel>
         {error ? (
           <p role="alert" className="text-sm text-red-700">
-            {error}
+            {error}{' '}
+            <button className="underline" onClick={() => setRevision((value) => value + 1)}>
+              Reintentar
+            </button>
           </p>
         ) : null}
       </div>
@@ -746,6 +1028,14 @@ export function PublicationWorkspace({
   if (view === 'prestashop')
     return (
       <div className="space-y-4">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild size="sm" variant="outline">
+            <a href="/publication?view=channels#publication-attributes">Atributos por categoría</a>
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setContractOpen(true)}>
+            Ver contrato de consumo
+          </Button>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
             ['Canal', 'Pendiente de conexión'],
@@ -798,6 +1088,16 @@ export function PublicationWorkspace({
             <div className="space-y-3">
               {search}
               {productPicker}
+              {productPagination}
+              {error ? (
+                <StatePanel
+                  variant="error"
+                  title="No pudimos consultar los SKU"
+                  description={error}
+                  actionLabel="Reintentar"
+                  onAction={() => setRevision((value) => value + 1)}
+                />
+              ) : null}
               <ConsumptionPreview product={selected} />
             </div>
           </Panel>
@@ -808,6 +1108,36 @@ export function PublicationWorkspace({
             <p className="mt-4 text-sm text-muted-foreground">
               Estado: {operation.state}. La conexión necesita configuración y validación del formato
               de intercambio.
+            </p>
+            <h3 className="mb-2 mt-5 text-sm font-semibold">Pendiente de contrato técnico</h3>
+            <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+              {operation.pending.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </WorkspaceDrawer>
+        ) : null}
+        {contractOpen ? (
+          <WorkspaceDrawer
+            title="Contrato funcional de consumo PIM"
+            onClose={() => setContractOpen(false)}
+          >
+            <p className="text-sm">
+              PrestaShop consume información técnica y comercial desde PIM. Precio y stock
+              permanecen en ERP.
+            </p>
+            {operations.map((item) => (
+              <section key={item.name} className="mt-4 rounded-lg border p-3">
+                <h3 className="text-sm font-semibold">{item.name}</h3>
+                <p className="mt-1 text-xs">{item.fields}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Por definir: {item.pending.join(' · ')}.
+                </p>
+              </section>
+            ))}
+            <p className="mt-4 text-sm text-amber-900">
+              Esta vista describe el alcance funcional. No define endpoints ni acredita una conexión
+              operativa.
             </p>
           </WorkspaceDrawer>
         ) : null}
@@ -884,7 +1214,13 @@ export function PublicationWorkspace({
           </div>
           {search}
           {error ? (
-            <StatePanel variant="error" title="No pudimos cargar los SKU" description={error} />
+            <StatePanel
+              variant="error"
+              title="No pudimos cargar los SKU"
+              description={error}
+              actionLabel="Reintentar"
+              onAction={() => setRevision((value) => value + 1)}
+            />
           ) : null}
           <div className="mt-3 overflow-auto" aria-busy={busy}>
             <table className="w-full min-w-[700px] text-left text-xs">

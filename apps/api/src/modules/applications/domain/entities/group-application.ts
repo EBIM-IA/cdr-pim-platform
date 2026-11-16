@@ -20,6 +20,7 @@ export interface GroupApplicationSnapshot {
   readonly subarea: string | null;
   readonly engine: string | null;
   readonly notes: string | null;
+  readonly additionalFields?: Readonly<Record<string, string | null>>;
   readonly active: boolean;
   readonly verificationStatus?: 'pending' | 'verified';
   readonly source: ApplicationSource;
@@ -42,6 +43,7 @@ export interface EditableApplicationFields {
   readonly subarea: string | null;
   readonly engine: string | null;
   readonly notes: string | null;
+  readonly additionalFields?: Readonly<Record<string, string | null>>;
 }
 
 type NormalizedApplicationFields = Omit<EditableApplicationFields, 'vehicleType'> & {
@@ -74,6 +76,7 @@ export class GroupApplication {
       groupId: input.groupId,
       unifiedCode: requiredText(input.unifiedCode, 'unifiedCode', 120).toUpperCase(),
       ...fields,
+      additionalFields: { ...(input.additionalFields ?? {}) },
       active: true,
       verificationStatus: input.verificationStatus ?? 'pending',
       source: input.source ?? 'manual',
@@ -113,6 +116,10 @@ export class GroupApplication {
     this.state = {
       ...this.state,
       ...merged,
+      additionalFields: {
+        ...(this.state.additionalFields ?? {}),
+        ...(input.additionalFields ?? {}),
+      },
       active: input.active ?? this.state.active,
       verificationStatus:
         input.verificationStatus ??
@@ -143,7 +150,7 @@ export class GroupApplication {
   }
 
   toSnapshot(): GroupApplicationSnapshot {
-    return { ...this.state };
+    return { ...this.state, additionalFields: { ...(this.state.additionalFields ?? {}) } };
   }
 }
 

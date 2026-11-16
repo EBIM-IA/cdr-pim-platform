@@ -8,6 +8,8 @@ import {
   type AdminTemplateListQuery,
   type UpdateCatalogCategoryInput,
   type UpdateTemplateAttributeInput,
+  type UpdateTemplateSectionsInput,
+  updateTemplateSectionsSchema,
   adminCatalogCategorySchema,
   adminCategoryListQuerySchema,
   adminTemplateAttributeSchema,
@@ -28,6 +30,7 @@ import {
   ListAdminTemplatesUseCase,
   UpdateCatalogCategoryUseCase,
   UpdateTemplateAttributeUseCase,
+  UpdateTemplateSectionsUseCase,
 } from '../application/catalog-administration.use-cases';
 import {
   toAdminCategoryDto,
@@ -45,6 +48,7 @@ export class CatalogAdministrationController {
     private readonly listTemplates: ListAdminTemplatesUseCase,
     private readonly getTemplate: GetAdminTemplateUseCase,
     private readonly updateTemplateAttribute: UpdateTemplateAttributeUseCase,
+    private readonly updateTemplateSections?: UpdateTemplateSectionsUseCase,
   ) {}
 
   @Get('categories')
@@ -81,6 +85,18 @@ export class CatalogAdministrationController {
   @ApiOkResponse({ schema: openApiSchema(adminTemplateSchema) })
   async template(@Param('templateId') templateId: string): Promise<AdminTemplateDto> {
     return toAdminTemplateDto(await this.getTemplate.execute(templateId));
+  }
+
+  @Patch('templates/:templateId/sections')
+  @RequireCapabilities(Capability.AdministrationManage)
+  @ApiOperation({ summary: 'Configure ordered product-sheet sections for a template' })
+  @ApiOkResponse({ schema: openApiSchema(adminTemplateSchema) })
+  async patchTemplateSections(
+    @Param('templateId') templateId: string,
+    @Body(new ZodValidationPipe(updateTemplateSectionsSchema)) body: UpdateTemplateSectionsInput,
+    @CurrentActor() actor: AuthenticatedActor,
+  ): Promise<AdminTemplateDto> {
+    return toAdminTemplateDto(await this.updateTemplateSections!.execute(templateId, body, actor));
   }
 
   @Patch('templates/:templateId/attributes/:attributeDefinitionId')

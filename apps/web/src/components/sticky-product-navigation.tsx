@@ -7,12 +7,16 @@ export function StickyProductNavigation({
   title,
   subtitle,
   thumbnail,
+  sku,
+  unifiedCode,
   children,
 }: {
   anchorId: string;
   title: string;
   subtitle: string;
   thumbnail?: ReactNode;
+  sku?: string;
+  unifiedCode?: string | null;
   children: ReactNode;
 }) {
   const [visible, setVisible] = useState(false);
@@ -37,7 +41,10 @@ export function StickyProductNavigation({
       <a href={`#${anchorId}`} className="min-w-0 shrink">
         {thumbnail ? <span className="cdr-sticky-thumbnail">{thumbnail}</span> : null}
         <span className="cdr-sticky-identity">
-          <strong className="block truncate">{title}</strong>
+          <strong className="block truncate">{sku ? `Cód. SKU: ${sku}` : title}</strong>
+          {sku ? (
+            <small className="block truncate">Cód. unificador: {unifiedCode || 'Sin código'}</small>
+          ) : null}
           <small className="block truncate text-muted-foreground">{subtitle}</small>
         </span>
       </a>

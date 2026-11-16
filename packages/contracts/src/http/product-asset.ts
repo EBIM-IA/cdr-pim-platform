@@ -2,6 +2,25 @@ import { z } from 'zod';
 
 import { uuidSchema } from './common';
 
+export const technicalSheetVisibilitySchema = z.object({
+  productId: uuidSchema,
+  visible: z.boolean(),
+  /** Effective access for this actor; the saved visibility remains separate. */
+  canView: z.boolean().optional(),
+  version: z.number().int().nonnegative(),
+});
+export type TechnicalSheetVisibilityDto = z.infer<typeof technicalSheetVisibilitySchema>;
+export const technicalSheetVisibilityListSchema = z.array(technicalSheetVisibilitySchema).max(100);
+export const updateTechnicalSheetVisibilitySchema = z
+  .object({
+    visible: z.boolean(),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+export type UpdateTechnicalSheetVisibilityInput = z.infer<
+  typeof updateTechnicalSheetVisibilitySchema
+>;
+
 /** Limits enforced by both the HTTP boundary and the asset application service. */
 export const PRODUCT_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 export const PRODUCT_ASSET_ZIP_MAX_BYTES = 100 * 1024 * 1024;

@@ -17,6 +17,62 @@ describe('Durable reporting and AX reception monitor', () => {
   });
   beforeEach(() => database.truncateAll());
   afterAll(() => database.close());
+  it('reports every AX reception with pagination and UTC dates without calling it a processing error', async () => {
+    for (let index = 1; index <= 3; index++) {
+      await database.sql`INSERT INTO ax_inbound_batches(id,external_batch_id,sent_at,request_hash,status,record_count,correlation_id,received_at) VALUES (${newUuid()}, ${`REP-${index}`}, '2026-11-16T00:00:00Z', ${'sha256:' + String(index).repeat(64)}, 'received', ${index}, ${`corr-${index}`}, ${index === 3 ? '2026-11-17T00:00:00Z' : '2026-11-16T23:59:59Z'})`;
+    }
+    const first = await reports.read('integration_batches', {
+      from: '2026-11-16',
+      to: '2026-11-16',
+      page: 1,
+      pageSize: 1,
+    });
+    const second = await reports.read('integration_batches', {
+      from: '2026-11-16',
+      to: '2026-11-16',
+      page: 2,
+      pageSize: 1,
+    });
+    expect(first.totalRows).toBe(2);
+    expect(first.rows).toHaveLength(1);
+    expect(second.rows).toHaveLength(1);
+    expect(first.rows[0]?.id).not.toBe(second.rows[0]?.id);
+    expect(first.rows[0]?.values.status).toBe('Recibido');
+    expect(first.columns.some((column) => column.key === 'errors')).toBe(false);
+    expect((await reports.read('integration_batches', { q: 'REP-3' })).totalRows).toBe(1);
+    expect(
+      (await reports.metadata({ q: 'REP-3' })).reportFormats?.find(
+        (item) => item.format === 'integration_batches',
+      )?.totalRows,
+    ).toBe(1);
+    expect((await reports.read('integration_batches', { page: 20, pageSize: 1 })).totalRows).toBe(
+      3,
+    );
+  });
+
+  it('reports duplicate decisions with their actor and reason, including reviewed pairs', async () => {
+    await database.sql`INSERT INTO products(id,sku,name,status) VALUES (${productId}::uuid,'DUPE-A','Rodamiento','published')`;
+    const reviewId = newUuid();
+    await database.sql`INSERT INTO quality_review_items(id,kind,status,product_id,version,data,created_at,updated_at) VALUES (${reviewId}, 'duplicate', 'approved', ${productId}, 1, ${JSON.stringify({ productB: { sku: 'DUPE-B' }, duplicateDecision: 'distinct', reason: 'Diferente material', requestedBy: 'detector', decidedBy: 'revisor' })}::jsonb, '2026-11-16T10:00:00Z', '2026-11-16T11:00:00Z')`;
+    expect((await reports.read('duplicates', { q: 'DUPE-B' })).totalRows).toBe(1);
+    expect((await reports.read('duplicates', { q: 'Diferente material' })).totalRows).toBe(1);
+    const report = await reports.read('duplicates', { q: 'DUPE-A' });
+    expect(report.totalRows).toBe(1);
+    expect(report.rows[0]?.values).toMatchObject({
+      sku: 'DUPE-A',
+      otherSku: 'DUPE-B',
+      status: 'approved',
+      decision: 'distinct',
+      reason: 'Diferente material',
+      decidedBy: 'revisor',
+    });
+    expect((await reports.read('duplicates', { from: '2026-11-17' })).totalRows).toBe(0);
+    expect(
+      (await reports.metadata()).reportFormats?.find((item) => item.format === 'duplicates')
+        ?.totalRows,
+    ).toBe(1);
+  });
+
   it('shares client formats, isolates personal layouts, and preserves intentional unmapped columns', async () => {
     await settings.update('admin', {
       operation: 'save-format',

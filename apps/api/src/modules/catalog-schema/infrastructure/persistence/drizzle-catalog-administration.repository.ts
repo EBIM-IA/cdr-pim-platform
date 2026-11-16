@@ -121,6 +121,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         categoryName: catalogCategories.name,
         variantKey: attributeTemplates.variantKey,
         name: attributeTemplates.name,
+        sections: attributeTemplates.sections,
         version: attributeTemplates.version,
         status: attributeTemplates.status,
         createdAt: attributeTemplates.createdAt,
@@ -145,6 +146,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         categoryName: catalogCategories.name,
         variantKey: attributeTemplates.variantKey,
         name: attributeTemplates.name,
+        sections: attributeTemplates.sections,
         version: attributeTemplates.version,
         status: attributeTemplates.status,
         createdAt: attributeTemplates.createdAt,
@@ -184,6 +186,19 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
     input: Parameters<CatalogAdministrationRepositoryPort['updateTemplateAttribute']>[0],
   ): Promise<AdminMutationResult<AdminTemplateAttribute>> {
     return this.db.transaction(async (transaction) => {
+      if (input.sectionKey !== undefined) {
+        const [template] = await transaction
+          .select({ sections: attributeTemplates.sections })
+          .from(attributeTemplates)
+          .where(eq(attributeTemplates.id, input.templateId))
+          .for('update');
+        if (!template) return { kind: 'not_found' } as const;
+        if (
+          input.sectionKey !== null &&
+          !template.sections.some((section) => section.key === input.sectionKey)
+        )
+          throw new ValidationError('La sección no pertenece a esta plantilla');
+      }
       const [assignment] = await transaction
         .select({
           id: attributeDefinitions.id,
@@ -199,6 +214,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
           publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
+          sectionKey: templateAttributeAssignments.sectionKey,
           position: templateAttributeAssignments.position,
           updatedAt:
             sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
@@ -277,6 +293,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
             ? { includeInTechnicalSheet: input.includeInTechnicalSheet }
             : {}),
           ...(input.publishable !== undefined ? { publishable: input.publishable } : {}),
+          ...(input.sectionKey !== undefined ? { sectionKey: input.sectionKey } : {}),
           ...(input.position !== undefined ? { position: input.position } : {}),
         })
         .where(
@@ -324,6 +341,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
           includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
           publishable: templateAttributeAssignments.publishable,
           active: templateAttributeAssignments.active,
+          sectionKey: templateAttributeAssignments.sectionKey,
           position: templateAttributeAssignments.position,
           updatedAt:
             sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
@@ -372,6 +390,57 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
     });
   }
 
+  async updateTemplateSections(
+    input: Parameters<
+      NonNullable<CatalogAdministrationRepositoryPort['updateTemplateSections']>
+    >[0],
+  ): Promise<AdminMutationResult<AdminAttributeTemplate>> {
+    return this.db.transaction(async (transaction) => {
+      const [header] = await transaction
+        .select()
+        .from(attributeTemplates)
+        .where(eq(attributeTemplates.id, input.templateId))
+        .for('update')
+        .limit(1);
+      if (!header) return { kind: 'not_found' } as const;
+      if (header.updatedAt.getTime() !== input.expectedUpdatedAt.getTime())
+        return { kind: 'version_conflict', actualUpdatedAt: header.updatedAt } as const;
+      const [category] = await transaction
+        .select({ name: catalogCategories.name })
+        .from(catalogCategories)
+        .where(eq(catalogCategories.id, header.categoryId));
+      const before = toTemplate({ ...header, categoryName: category?.name ?? '' });
+      const keys = new Set(input.sections.map((section) => section.key));
+      const assignments = await transaction
+        .select({ key: templateAttributeAssignments.sectionKey })
+        .from(templateAttributeAssignments)
+        .where(eq(templateAttributeAssignments.templateId, input.templateId));
+      if (assignments.some((assignment) => assignment.key && !keys.has(assignment.key)))
+        throw new ValidationError('Reasigna los atributos antes de quitar una sección utilizada');
+      const [updated] = await transaction
+        .update(attributeTemplates)
+        .set({ sections: [...input.sections], updatedAt: input.audit.occurredAt })
+        .where(eq(attributeTemplates.id, input.templateId))
+        .returning();
+      if (!updated) return { kind: 'not_found' } as const;
+      const after = toTemplate({ ...updated, categoryName: category?.name ?? '' });
+      await recordAuditWithin(
+        transaction,
+        createAuditEntry({
+          resourceType: 'attribute_template',
+          resourceId: input.templateId,
+          action: AuditAction.Updated,
+          actorId: input.audit.actorId,
+          source: 'api',
+          correlationId: input.audit.correlationId,
+          occurredAt: input.audit.occurredAt,
+          changes: { sections: { before: header.sections, after: input.sections } },
+        }),
+      );
+      return { kind: 'updated', before, after } as const;
+    });
+  }
+
   private async loadTemplateAttributes(templateId: Uuid): Promise<AdminTemplateAttribute[]> {
     const rows = await this.db
       .select({
@@ -388,6 +457,7 @@ export class DrizzleCatalogAdministrationRepository implements CatalogAdministra
         includeInTechnicalSheet: templateAttributeAssignments.includeInTechnicalSheet,
         publishable: templateAttributeAssignments.publishable,
         active: templateAttributeAssignments.active,
+        sectionKey: templateAttributeAssignments.sectionKey,
         position: templateAttributeAssignments.position,
         updatedAt:
           sql<Date>`greatest(${templateAttributeAssignments.updatedAt}, ${attributeDefinitions.updatedAt})`.mapWith(
@@ -448,6 +518,7 @@ function toTemplate(row: {
   categoryName: string;
   variantKey: string;
   name: string;
+  sections?: Array<{ key: string; label: string; position: number }>;
   version: number;
   status: string;
   createdAt: Date;
@@ -496,6 +567,7 @@ function assignmentConfiguration(attribute: AdminTemplateAttribute) {
     searchable: attribute.searchable,
     includeInTechnicalSheet: attribute.includeInTechnicalSheet,
     publishable: attribute.publishable,
+    sectionKey: attribute.sectionKey,
     position: attribute.position,
   };
 }

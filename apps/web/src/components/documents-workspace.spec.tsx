@@ -114,8 +114,8 @@ const allCatalog = () => ({
 });
 
 beforeEach(() => {
-  mocks.downloadTechnicalSheetsZip.mockResolvedValue(undefined);
   vi.resetAllMocks();
+  mocks.downloadTechnicalSheetsZip.mockResolvedValue(1);
   window.history.replaceState({}, '', '/documents');
   mocks.fetchDocumentsCatalog.mockResolvedValue(allCatalog());
   mocks.fetchCatalogCategories.mockResolvedValue([]);
@@ -160,6 +160,15 @@ describe('DocumentsWorkspace', () => {
       ),
     );
     await screen.findByText(/1 fichas técnicas descargadas/u);
+  });
+  it('reports the generated total and the sheets omitted by SKU visibility', async () => {
+    mocks.downloadTechnicalSheetsZip.mockResolvedValue(1);
+    render(<DocumentsWorkspace canWrite={false} />);
+    await screen.findByText(asset.filename);
+    fireEvent.click(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }));
+    expect(
+      await screen.findByText(/1 fichas técnicas descargadas.*2 SKU omitidos por visibilidad/u),
+    ).toBeVisible();
   });
   it('reports a ZIP generation failure without claiming that sheets were downloaded', async () => {
     mocks.downloadTechnicalSheetsZip.mockRejectedValue(

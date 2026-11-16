@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QualityReviewDto } from '@cdr/contracts';
 import { QualityGovernanceWorkspace } from './quality-governance-workspace';
 import { CommercialReviewHistory } from './commercial-review-history';
-const mocks = vi.hoisted(() => ({ list: vi.fn(), decide: vi.fn(), detect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), decide: vi.fn(), detect: vi.fn() }));
 vi.mock('@/lib/quality-governance-api', () => ({
   listQualityProductChanges: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   listQualityReviews: mocks.list,
+  getQualityReview: mocks.get,
   decideQualityReview: mocks.decide,
   detectQualityDuplicates: mocks.detect,
   createQualityConflict: vi.fn(),
@@ -42,6 +43,7 @@ const item: QualityReviewDto = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState({}, '', '/quality');
   mocks.list.mockResolvedValue({ items: [item], total: 1 });
   mocks.decide.mockResolvedValue({ ...item, status: 'approved', version: 2 });
 });
@@ -67,6 +69,34 @@ describe('live review workspace', () => {
       }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('Decisión guardada');
+  });
+  it('opens the exact linked review and preserves the chosen candidate in read-only history', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      `/quality?view=conflict&productId=${item.productId}&reviewId=${item.id}`,
+    );
+    mocks.get.mockResolvedValue({
+      ...item,
+      status: 'approved',
+      chosenIndex: 1,
+      chosenValue: 'Acero B',
+      override: true,
+      reason: 'Fuente validada',
+      decidedBy: 'revisor',
+    });
+    render(<QualityGovernanceWorkspace mode="conflict" />);
+    await screen.findByRole('dialog');
+    expect(mocks.get).toHaveBeenCalledWith(item.id, expect.any(AbortSignal));
+    expect(screen.getAllByRole('radio')[1]).toBeChecked();
+    expect(screen.getByText('Valor elegido: Acero B · Override humano')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Aprobar' })).toBeNull();
+    await waitFor(() =>
+      expect(mocks.list).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: item.productId, conflictsOnly: true }),
+        expect.any(AbortSignal),
+      ),
+    );
   });
   it('keeps the review open and exposes concurrency errors without reporting success', async () => {
     mocks.decide.mockRejectedValue(new Error('La solicitud cambió. Recarga la bandeja.'));

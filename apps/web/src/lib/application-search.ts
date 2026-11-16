@@ -19,6 +19,7 @@ export function applicationMatches(query: string, application: GroupApplicationD
     application.subarea,
     application.engine,
     application.notes,
+    ...Object.values(application.additionalFields ?? {}),
   ]);
 }
 

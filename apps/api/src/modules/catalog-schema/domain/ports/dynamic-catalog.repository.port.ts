@@ -59,6 +59,8 @@ export interface CatalogWorkbookSort {
 }
 
 export interface CatalogWorkbookResult {
+  readonly totalArticles?: number;
+  readonly totalBrands?: number;
   readonly columns: readonly CatalogWorkbookColumn[];
   readonly facets: {
     readonly brands: readonly string[];
@@ -122,6 +124,7 @@ export interface DynamicCatalogRepositoryPort {
       templateVariantKey: string;
       templateName: string;
       templateVersion: number;
+      skuCount?: number;
     }[]
   >;
   getActiveSchema(

@@ -107,4 +107,27 @@ describe('AuditWorkspace', () => {
       expect(metric(label).getByText('—')).toBeVisible();
     expect(screen.getAllByRole('columnheader')).toHaveLength(9);
   });
+  it('retries a failed embedded history and opens change context including its previous date and product', async () => {
+    api.listAuditChanges
+      .mockRejectedValueOnce(new Error('Servicio temporalmente no disponible'))
+      .mockResolvedValue(
+        list([
+          change({
+            previousValueValidFrom: '2026-10-25T10:00:00.000Z',
+            reason: 'Corrección verificada',
+          }),
+        ]),
+      );
+    render(<AuditWorkspace embedded />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reintentar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle' }));
+    const drawer = within(screen.getByRole('dialog', { name: 'Detalle de cambio' }));
+    expect(drawer.getByText('Fec. modificación anterior')).toBeVisible();
+    expect(drawer.getByText('Corrección verificada')).toBeVisible();
+    expect(drawer.getByRole('link', { name: 'Abrir SKU' })).toHaveAttribute(
+      'href',
+      `/products/${change().resourceId}`,
+    );
+    expect(api.listAuditChanges).toHaveBeenCalledTimes(2);
+  });
 });

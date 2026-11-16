@@ -45,6 +45,10 @@ export const qualityReviewQuerySchema = z.object({
   kind: z.enum(['attribute', 'commercial', 'duplicate']).optional(),
   status: z.enum(['pending', 'approved', 'rejected', 'changes_requested']).optional(),
   productId: uuidSchema.optional(),
+  attributeKey: z.string().min(1).max(120).optional(),
+  conflictsOnly: z
+    .union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')])
+    .optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -122,3 +126,32 @@ export const qualityProductChangesSchema = z.object({
   total: z.number().int().nonnegative(),
 });
 export type QualityProductChangesDto = z.infer<typeof qualityProductChangesSchema>;
+
+export const qualitySimulationSchema = z
+  .object({
+    productId: uuidSchema,
+    values: z
+      .record(
+        z.string().min(1),
+        z.union([z.string().max(4000), z.number().finite(), z.boolean(), z.null()]),
+      )
+      .default({}),
+    assets: z
+      .array(z.enum(['FT', 'MSDS', 'CERT', 'PLANO', 'FOTO']))
+      .max(5)
+      .optional(),
+  })
+  .strict();
+export type QualitySimulationInput = z.infer<typeof qualitySimulationSchema>;
+const simulationScoreSchema = z.object({
+  required: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+  percentage: z.number().min(0).max(100),
+  missing: z.array(z.string()),
+});
+export const qualitySimulationResultSchema = z.object({
+  productId: uuidSchema,
+  persisted: z.literal(false),
+  before: simulationScoreSchema,
+  after: simulationScoreSchema,
+});

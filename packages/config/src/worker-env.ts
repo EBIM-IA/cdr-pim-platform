@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
 import { aiEnvSchema, resolveAiCapabilityProviders } from './ai';
-import { awsEnvSchema, baseEnvSchema, queueDriverSchema, storageDriverSchema } from './common';
+import {
+  awsEnvSchema,
+  baseEnvSchema,
+  booleanEnv,
+  queueDriverSchema,
+  storageDriverSchema,
+} from './common';
 import { parseEnv } from './env-error';
 
 const workerOnlySchema = z.object({
@@ -13,6 +19,8 @@ const workerOnlySchema = z.object({
   WORKER_PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
 
   DATABASE_URL: z.string().url().optional(),
+  DATABASE_SSL: booleanEnv(false),
+  DATABASE_SSL_CA_FILE: z.string().min(1).optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(5),
 
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
@@ -81,6 +89,18 @@ export const workerEnvSchema = baseEnvSchema
       });
     }
     if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
+      if (!env.DATABASE_URL)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['DATABASE_URL'],
+          message: 'is required for IMPORT_BATCH in qas/prd',
+        });
+      if (env.DATABASE_URL && (!env.DATABASE_SSL || !env.DATABASE_SSL_CA_FILE))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['DATABASE_SSL'],
+          message: 'worker database connections require verified TLS and a CA bundle in qas/prd',
+        });
       if (env.NODE_ENV !== 'production') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

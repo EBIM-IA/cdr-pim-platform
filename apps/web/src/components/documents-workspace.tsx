@@ -24,6 +24,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ReorderableColumnLabel, usePersistentColumnOrder } from '@/components/column-order';
 import { matchesAxFilterExpression } from '@/components/excel-table-filter';
+import { ProductArtwork } from '@/components/product-artwork';
 import { PageHeader } from '@/components/page-header';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -96,7 +97,17 @@ const BASE_COLUMNS = [
 const PHOTO_GUIDANCE =
   'Recomendamos fotografías JPG o PNG cuadradas de 800 × 800 o 1000 × 1000 px. También se admite WebP, hasta 20 MB. Un SKU admite varias fotos; se cargan una a la vez y se muestran en la galería del producto.';
 
-export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
+export function DocumentsWorkspace({
+  canWrite,
+  embeddedProductId,
+  embeddedSku,
+  onChanged,
+}: {
+  canWrite: boolean;
+  embeddedProductId?: string;
+  embeddedSku?: string;
+  onChanged?: () => void;
+}) {
   const allColumns = [
     { key: 'sku', label: 'Código artículo', width: 145 },
     { key: 'image', label: 'Imagen', width: 70 },
@@ -141,6 +152,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   const bulkInFlight = useRef(false);
   async function exportTechnicalSheets() {
     const selected = [...filteredProducts];
+    let exportedTotal = 0;
     setSheetExportTotal(selected.length);
     const controller = new AbortController();
     sheetExportController.current = controller;
@@ -148,13 +160,17 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
     setSheetProgress(0);
     setNotice(null);
     try {
-      await downloadTechnicalSheetsZip(selected, assetsByProduct, {
+      exportedTotal = await downloadTechnicalSheetsZip(selected, assetsByProduct, {
         signal: controller.signal,
-        onProgress: (complete) => setSheetProgress(complete),
+        onProgress: (complete, total) => {
+          exportedTotal = total;
+          setSheetExportTotal(total);
+          setSheetProgress(complete);
+        },
       });
       setNotice({
         tone: 'success',
-        message: `${selected.length} fichas técnicas descargadas, una por SKU. Se exportaron únicamente atributos autorizados.`,
+        message: `${exportedTotal} fichas técnicas descargadas, una por SKU. ${selected.length - exportedTotal} SKU omitidos por visibilidad. Se exportaron únicamente atributos autorizados.`,
       });
     } catch (failure) {
       if (!controller.signal.aborted)
@@ -170,23 +186,30 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
   }
 
   useEffect(() => {
+    if (embeddedProductId) return;
     const requested = new URLSearchParams(window.location.search).get('productId');
     if (requested) {
       setSelectedId(requested);
       setView('context');
     }
-  }, []);
+  }, [embeddedProductId]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
     void Promise.all([
-      fetchDocumentsCatalog(controller.signal),
+      embeddedProductId && embeddedSku
+        ? fetchDocumentsCatalog(controller.signal, { id: embeddedProductId, sku: embeddedSku })
+        : fetchDocumentsCatalog(controller.signal),
       fetchCatalogCategories(controller.signal).catch(() => []),
     ])
       .then(([catalog, categoryRows]) => {
         if (controller.signal.aborted) return;
-        setProducts(catalog.products);
+        setProducts(
+          embeddedProductId
+            ? catalog.products.filter((item) => item.id === embeddedProductId)
+            : catalog.products,
+        );
         setAssetsByProduct(catalog.assets);
         setCategories(categoryRows);
       })
@@ -200,7 +223,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, embeddedProductId, embeddedSku]);
 
   const selectedProduct =
     products.find((product) => product.id === selectedId) ??
@@ -296,6 +319,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
         message: `${uploaded.filename} quedó asociado a ${uploaded.sku}.`,
       });
       reload();
+      onChanged?.();
     } catch (cause) {
       setNotice({
         tone: 'error',
@@ -314,6 +338,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
       await deleteProductAsset(asset.id);
       setNotice({ tone: 'success', message: `${asset.filename} fue eliminado.` });
       reload();
+      onChanged?.();
     } catch (cause) {
       setNotice({
         tone: 'error',
@@ -389,41 +414,47 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <PageHeader
-        title="Imágenes y Documentos"
-        description="Activos técnicos y comerciales asociados al SKU."
-      />
-      <ScreenGuide
-        objective="Consulta los archivos y requisitos documentales de la plantilla de cada SKU."
-        actions={[
-          'Alterna entre la tabla de todos los SKU y los archivos del SKU en contexto.',
-          'Filtra cualquier columna con sintaxis AX; usa comillas dobles para encontrar celdas sin archivo.',
-          ...(canWrite
-            ? ['Carga desde la celda o valida un ZIP antes de confirmar su carga.']
-            : ['Descarga los archivos disponibles con acceso de solo lectura.']),
-        ]}
-        dataSource="Catálogo completo autorizado, requisitos activos de las plantillas y archivos persistidos en el servidor."
-        limitation="Los enlaces o textos importados no equivalen a un archivo cargado. La publicación en PrestaShop requiere un conector habilitado."
-      />
+      {!embeddedProductId ? (
+        <>
+          <PageHeader
+            title="Imágenes y Documentos"
+            description="Activos técnicos y comerciales asociados al SKU."
+          />
+          <ScreenGuide
+            objective="Consulta los archivos y requisitos documentales de la plantilla de cada SKU."
+            actions={[
+              'Alterna entre la tabla de todos los SKU y los archivos del SKU en contexto.',
+              'Filtra cualquier columna con sintaxis AX; usa comillas dobles para encontrar celdas sin archivo.',
+              ...(canWrite
+                ? ['Carga desde la celda o valida un ZIP antes de confirmar su carga.']
+                : ['Descarga los archivos disponibles con acceso de solo lectura.']),
+            ]}
+            dataSource="Catálogo completo autorizado, requisitos activos de las plantillas y archivos persistidos en el servidor."
+            limitation="Los enlaces o textos importados no equivalen a un archivo cargado. La publicación en PrestaShop requiere un conector habilitado."
+          />
+        </>
+      ) : null}
       <div className={styles.toolbar}>
-        <div className={styles.tabs} role="tablist" aria-label="Vista de imágenes y documentos">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'table'}
-            onClick={() => setView('table')}
-          >
-            Todos los SKU · tabla <span>{products.length}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'context'}
-            onClick={() => setView('context')}
-          >
-            SKU en contexto{selectedProduct ? ` · ${selectedProduct.sku}` : ''}
-          </button>
-        </div>
+        {!embeddedProductId ? (
+          <div className={styles.tabs} role="tablist" aria-label="Vista de imágenes y documentos">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'table'}
+              onClick={() => setView('table')}
+            >
+              Todos los SKU · tabla <span>{products.length}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'context'}
+              onClick={() => setView('context')}
+            >
+              SKU en contexto{selectedProduct ? ` · ${selectedProduct.sku}` : ''}
+            </button>
+          </div>
+        ) : null}
         <div
           className={styles.actions}
           role="toolbar"
@@ -461,7 +492,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
               Filtra hasta {MAX_TECHNICAL_SHEETS_PER_ZIP} SKU para descargar sus fichas.
             </span>
           ) : null}
-          {canWrite ? (
+          {canWrite && !embeddedProductId ? (
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               <FileArchive className="size-3.5" aria-hidden="true" /> Carga masiva (ZIP)
             </Button>
@@ -476,7 +507,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
               <FileSpreadsheet className="size-3.5" aria-hidden="true" /> Exportar Excel
             </Button>
           ) : null}
-          {canWrite ? (
+          {canWrite && !embeddedProductId ? (
             <a
               className={styles.example}
               href="/templates/documentos_ejemplo.zip"
@@ -547,23 +578,33 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
               {totals.requested} documentos que piden las plantillas · {totals.files} archivos en el
               servidor
             </p>
-            <div className={styles.legend}>
-              <span>Arrastra las columnas o usa sus flechas para moverlas.</span>
-              {!order.isDefaultOrder ? (
-                <button type="button" onClick={order.resetOrder}>
-                  Restablecer orden
-                </button>
-              ) : null}
-              <span>
-                <i className={styles.loadedSwatch} /> Cargado
-              </span>
-              <span>
-                <i className={styles.requiredSwatch} /> Obligatorio sin archivo o valor no válido
-              </span>
-              <span>
-                <i className={styles.naSwatch} /> No aplica a la plantilla
-              </span>
-            </div>
+            <details className="relative ml-auto text-xs text-muted-foreground">
+              <summary
+                className="grid size-5 cursor-pointer list-none place-items-center rounded border bg-white"
+                aria-label="Ayuda de documentos"
+              >
+                ?
+              </summary>
+              <div
+                className={`${styles.legend} absolute right-0 top-6 z-40 w-72 rounded-lg border bg-white p-3 shadow-lg`}
+              >
+                <span>Arrastra las columnas o usa sus flechas para moverlas.</span>
+                {!order.isDefaultOrder ? (
+                  <button type="button" onClick={order.resetOrder}>
+                    Restablecer orden
+                  </button>
+                ) : null}
+                <span>
+                  <i className={styles.loadedSwatch} /> Cargado
+                </span>
+                <span>
+                  <i className={styles.requiredSwatch} /> Obligatorio sin archivo o valor no válido
+                </span>
+                <span>
+                  <i className={styles.naSwatch} /> No aplica a la plantilla
+                </span>
+              </div>
+            </details>
           </div>
           {Object.values(filters).some(Boolean) ? (
             <div className={styles.filterHelp}>
@@ -874,6 +915,7 @@ export function DocumentsWorkspace({ canWrite }: { canWrite: boolean }) {
           title="Carga masiva de documentos e imágenes"
           onClose={() => setBulkOpen(false)}
           busy={bulkBusy}
+          wide
         >
           <BulkUploadPanel
             zipFile={zipFile}
@@ -916,7 +958,11 @@ function ProductPhoto({
           className="object-contain"
         />
       ) : (
-        <ImageIcon aria-hidden="true" className="size-5" />
+        <ProductArtwork
+          category={product.category?.name ?? ''}
+          name={product.name}
+          className="!aspect-square !h-full !w-full !rounded-none !border-0"
+        />
       )}
     </div>
   );
@@ -1053,14 +1099,13 @@ const BulkUploadPanel = forwardRef<
     <Card ref={ref} className="min-w-0 max-w-full p-[22px]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-[17px] font-semibold">Carga masiva de documentos e imágenes</h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             Valida el ZIP completo y confirma únicamente los archivos válidos.
           </p>
         </div>
         <StatusBadge tone="info">Por SKU · carga parcial</StatusBadge>
       </div>
-      <div className="mt-5 grid gap-5 ">
+      <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(300px,.9fr)_minmax(0,1.1fr)]">
         <div className="space-y-4">
           <div className="rounded-lg border border-dashed bg-slate-50 p-4 text-xs leading-5 text-slate-700">
             <strong className="block text-sm">Convención</strong>
@@ -1068,6 +1113,37 @@ const BulkUploadPanel = forwardRef<
             PLANO y FOTO-1, FOTO-2… Para nombres libres incluye <code>manifiesto.csv</code> con{' '}
             <code>archivo;codigo_articulo;tipo</code>.
           </div>
+          <div className="overflow-x-auto rounded border">
+            <table className="w-full text-left text-[11px]">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="p-2">Tipo</th>
+                  <th className="p-2">Formatos</th>
+                  <th className="p-2">Ejemplo de nombre</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ASSET_TYPES.map((type) => (
+                  <tr key={type.value} className="border-t">
+                    <td className="p-2">{type.label}</td>
+                    <td className="p-2">{type.formats}</td>
+                    <td className="p-2 font-mono">{`SKU__${type.value === 'FOTO' ? 'FOTO-1' : type.value}${type.value === 'FOTO' ? '.jpg' : type.value === 'PLANO' ? '.png' : '.pdf'}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <a
+            className="inline-flex text-xs font-semibold text-primary underline"
+            href="/templates/manifiesto_documentos.csv"
+            download
+          >
+            Descargar manifiesto CSV (opcional)
+          </a>
+          <p className="text-[11px] text-muted-foreground">
+            Usa el código real de un SKU existente. Las fotografías admiten varias posiciones; los
+            otros documentos reemplazan el archivo del mismo tipo.
+          </p>
           <label className="block text-xs font-semibold">
             Archivo ZIP
             <input
@@ -1079,8 +1155,7 @@ const BulkUploadPanel = forwardRef<
             />
           </label>
           <p className="text-[11px] text-muted-foreground">
-            Máximo 100 MB, 250 entradas y 20 MB por archivo. Se bloquean ZIP64, cifrado, rutas
-            inseguras y expansión anómala.
+            ZIP estándar sin contraseña. Máximo 100 MB, 250 archivos y 20 MB por archivo.
           </p>
           <Button
             variant="outline"

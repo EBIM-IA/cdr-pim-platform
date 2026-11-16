@@ -1,14 +1,23 @@
 import type { ImportBatchDto, WorkspaceDto } from '@cdr/contracts';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkspaceData } from '@/components/use-workspace-data';
 import { fetchCatalogCategories, fetchCatalogSchema } from '@/lib/dynamic-catalog-api';
-import { confirmImport, getImport, previewImport } from '@/lib/operational-api';
+import {
+  confirmImport,
+  enqueueImportConfirmation,
+  getImportExecution,
+  getImport,
+  previewImport,
+} from '@/lib/operational-api';
 import { downloadCsv } from '@/lib/tabular-export';
 
 import { ImportsWorkspace } from './imports-workspace';
 
+vi.mock('@/lib/application-columns-api', () => ({
+  getApplicationColumns: vi.fn(async () => ({ columns: [], version: 0 })),
+}));
 vi.mock('@/lib/tabular-export', () => ({ downloadCsv: vi.fn() }));
 
 vi.mock('@/components/use-workspace-data', () => ({ useWorkspaceData: vi.fn() }));
@@ -18,6 +27,8 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
 }));
 vi.mock('@/lib/operational-api', () => ({
   confirmImport: vi.fn(),
+  enqueueImportConfirmation: vi.fn(),
+  getImportExecution: vi.fn(),
   getImport: vi.fn(),
   previewImport: vi.fn(),
 }));
@@ -27,6 +38,7 @@ const batch: ImportBatchDto = {
   target: 'applications',
   format: 'csv',
   status: 'previewed',
+  executionMode: 'asynchronous',
   idempotencyKey: 'applications-test-key',
   categoryCode: null,
   totalRows: 1,
@@ -62,13 +74,14 @@ const historyWorkspace: WorkspaceDto = {
   generatedAt: '2026-10-05T10:00:00.000Z',
   metrics: [
     { key: 'batches', label: 'Lotes persistidos', value: 1, format: 'integer' },
-    { key: 'confirmed', label: 'Lotes confirmados', value: 0, format: 'integer' },
+    { key: 'applied-rows', label: 'Registros aplicados', value: 7, format: 'integer' },
     { key: 'invalid-rows', label: 'Filas con error', value: 0, format: 'integer' },
-    { key: 'queue', label: 'Ejecución', value: 'Memoria local no durable', format: 'text' },
+    { key: 'processing', label: 'En proceso', value: 2, format: 'integer' },
   ],
   columns: [
     { key: 'target', label: 'Destino', type: 'text' },
-    { key: 'format', label: 'Formato', type: 'text' },
+    { key: 'originalFileName', label: 'Archivo', type: 'text' },
+    { key: 'sourceFileFormat', label: 'Formato', type: 'text' },
     { key: 'totalRows', label: 'Registros', type: 'number' },
     { key: 'validRows', label: 'Válidos', type: 'number' },
     { key: 'invalidRows', label: 'Con error', type: 'number' },
@@ -81,7 +94,9 @@ const historyWorkspace: WorkspaceDto = {
       id: batch.id,
       values: {
         target: 'applications',
-        format: 'csv',
+        format: 'json',
+        sourceFileFormat: 'csv',
+        originalFileName: 'aplicaciones.csv',
         totalRows: 1,
         validRows: 1,
         invalidRows: 0,
@@ -108,7 +123,24 @@ beforeEach(() => {
     reload,
   });
   vi.mocked(previewImport).mockResolvedValue(batch);
-  vi.mocked(confirmImport).mockResolvedValue(confirmedBatch);
+  const execution = {
+    batchId: batch.id,
+    status: 'completed' as const,
+    processedRows: 1,
+    totalRows: 1,
+    queuedAt: batch.createdAt,
+    startedAt: batch.createdAt,
+    updatedAt: batch.createdAt,
+    completedAt: batch.createdAt,
+    error: null,
+  };
+  vi.mocked(enqueueImportConfirmation).mockImplementation(async () => {
+    vi.mocked(getImport).mockResolvedValue(confirmedBatch);
+    vi.mocked(getImportExecution).mockResolvedValue(execution);
+    return execution;
+  });
+  vi.mocked(getImportExecution).mockResolvedValue(null);
+  vi.mocked(confirmImport).mockResolvedValue({ ...confirmedBatch, executionMode: 'synchronous' });
   vi.mocked(getImport).mockResolvedValue(batch);
   vi.mocked(fetchCatalogSchema).mockResolvedValue({
     category: {
@@ -184,7 +216,104 @@ describe('ImportsWorkspace', () => {
     expect(screen.getByText('Arrastra un archivo XLSX o CSV')).toBeInTheDocument();
   });
 
+  it('exports only the rows matching file search and translated status filters', () => {
+    const homologId = '22222222-2222-4222-8222-222222222222';
+    vi.mocked(useWorkspaceData).mockReturnValue({
+      workspace: {
+        ...historyWorkspace,
+        totalRows: 2,
+        rows: [
+          ...historyWorkspace.rows,
+          {
+            id: homologId,
+            values: {
+              ...historyWorkspace.rows[0]!.values,
+              target: 'homologs',
+              status: 'confirmed',
+              originalFileName: 'referencias.csv',
+              sourceFileFormat: 'csv',
+              totalRows: 3,
+              validRows: 3,
+            },
+          },
+        ],
+      },
+      loading: false,
+      error: null,
+      reload,
+    });
+    render(<ImportsWorkspace canExecute />);
+    expect(screen.getByText('Homólogos externos')).toBeVisible();
+    expect(screen.getByText('Confirmado')).toBeVisible();
+    const metrics = screen.getByRole('region', { name: 'Indicadores' });
+    expect(within(metrics).getByText('Registros aplicados').parentElement).toHaveTextContent('7');
+    expect(within(metrics).getByText('En proceso').parentElement).toHaveTextContent('2');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar importaciones' }), {
+      target: { value: 'referencias.csv' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filtrar importaciones: Estado' }), {
+      target: { value: 'confirmado' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar historial CSV' }));
+    expect(downloadCsv).toHaveBeenCalledWith(
+      {
+        headers: ['Lote', ...historyWorkspace.columns.map((column) => column.label)],
+        rows: [
+          [
+            homologId,
+            'Homólogos externos',
+            'referencias.csv',
+            'CSV',
+            3,
+            3,
+            0,
+            'Confirmado',
+            'admin',
+            expect.any(String),
+          ],
+        ],
+      },
+      'Historial de importaciones',
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar importaciones' }), {
+      target: { value: 'no-existe' },
+    });
+    expect(screen.getByRole('button', { name: 'Exportar historial CSV' })).toBeDisabled();
+  });
+
+  it('labels missing original file metadata explicitly without guessing from the transport format', () => {
+    vi.mocked(useWorkspaceData).mockReturnValue({
+      workspace: {
+        ...historyWorkspace,
+        rows: [
+          {
+            ...historyWorkspace.rows[0]!,
+            values: {
+              ...historyWorkspace.rows[0]!.values,
+              originalFileName: null,
+              sourceFileFormat: null,
+              format: 'json',
+            },
+          },
+        ],
+      },
+      loading: false,
+      error: null,
+      reload,
+    });
+    render(<ImportsWorkspace canExecute />);
+    expect(screen.getByText('Sin archivo registrado')).toBeVisible();
+    expect(screen.getByText('No registrado')).toBeVisible();
+    expect(screen.queryByText('JSON')).toBeNull();
+  });
+
   it('opens a persisted result from the history and keeps it addressable by URL', async () => {
+    vi.mocked(getImport).mockResolvedValue({
+      ...batch,
+      format: 'json',
+      originalFileName: 'repuestos-original.xlsx',
+      sourceFileFormat: 'xlsx',
+    });
     render(<ImportsWorkspace canExecute />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Ver resultado' }));
@@ -196,6 +325,54 @@ describe('ImportsWorkspace', () => {
     expect(window.location.search).toContain('view=result');
     expect(window.location.search).toContain(`batch=${batch.id}`);
     expect(screen.getByText('D1672')).toBeInTheDocument();
+    expect(screen.getByText('repuestos-original.xlsx')).toBeVisible();
+    expect(screen.getByText('XLSX')).toBeVisible();
+    expect(screen.queryByText('aplicaciones.csv')).toBeNull();
+    expect(screen.queryByText('JSON')).toBeNull();
+  });
+
+  it('does not reconstruct an original file for a legacy result', async () => {
+    window.history.replaceState({}, '', `/imports?view=result&batch=${batch.id}`);
+    vi.mocked(getImport).mockResolvedValue({
+      ...batch,
+      format: 'json',
+      originalFileName: null,
+      sourceFileFormat: null,
+    });
+    render(<ImportsWorkspace canExecute />);
+    expect(await screen.findByText('Sin archivo registrado')).toBeVisible();
+    expect(screen.getByText('No registrado')).toBeVisible();
+    expect(screen.queryByText('aplicaciones.csv')).toBeNull();
+    expect(screen.queryByText('JSON')).toBeNull();
+  });
+
+  it('uses synchronous confirmation in local memory mode without leaving an execution queued', async () => {
+    window.history.replaceState({}, '', `/imports?view=result&batch=${batch.id}`);
+    vi.mocked(getImport).mockResolvedValue({ ...batch, executionMode: 'synchronous' });
+    render(<ImportsWorkspace canExecute />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirmar lote' }));
+    await waitFor(() => expect(confirmImport).toHaveBeenCalledWith(batch.id));
+    expect(enqueueImportConfirmation).not.toHaveBeenCalled();
+    expect(await screen.findByText('Confirmado')).toBeInTheDocument();
+    expect(
+      screen.getByText(/El resultado y sus validaciones están guardados en el historial/),
+    ).toBeInTheDocument();
+  });
+
+  it('reopens a corrected upload from a rejected result without reapplying the old lot', async () => {
+    window.history.replaceState({}, '', `/imports?view=result&batch=${batch.id}`);
+    vi.mocked(getImport).mockResolvedValue({
+      ...confirmedBatch,
+      invalidRows: 1,
+      rows: [{ ...batch.rows[0]!, valid: false, errors: ['model is required'] }],
+    });
+    render(<ImportsWorkspace canExecute />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reprocesar corregidos' }));
+    expect(screen.getByLabelText('Destino')).toHaveValue('applications');
+    expect(screen.getByRole('button', { name: /Continuar/ })).toBeDisabled();
+    expect(screen.getByText(/Carga el archivo con las filas corregidas/)).toBeVisible();
+    expect(confirmImport).not.toHaveBeenCalled();
+    expect(enqueueImportConfirmation).not.toHaveBeenCalled();
   });
 
   it('runs the five approved steps and confirms only the real preview', async () => {
@@ -208,6 +385,7 @@ describe('ImportsWorkspace', () => {
     expect(screen.getByText('SKU e identidad del lote')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
     expect(screen.getByText(/Mapeo de columnas/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Continuar/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Continuar/ }));
 
     await waitFor(() => expect(previewImport).toHaveBeenCalledTimes(1));
@@ -220,11 +398,11 @@ describe('ImportsWorkspace', () => {
     expect(screen.getByText('Confirmar procesamiento')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Confirmar lote/ }));
 
-    await waitFor(() => expect(confirmImport).toHaveBeenCalledWith(batch.id));
+    await waitFor(() => expect(enqueueImportConfirmation).toHaveBeenCalledWith(batch.id));
     expect(
       await screen.findByRole('heading', { name: 'Resultado de importación' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Confirmado')).toBeInTheDocument();
+    expect(await screen.findByText('Confirmado')).toBeInTheDocument();
     expect(window.location.search).toContain('view=result');
   });
 
@@ -320,11 +498,14 @@ it('maps customer headers before previewing the actual records and leaves unmapp
   fireEvent.change(screen.getByLabelText('Destino de Modelo cliente'), {
     target: { value: 'model' },
   });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Continuar/u })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: /Continuar/u }));
   await waitFor(() =>
     expect(previewImport).toHaveBeenCalledWith(
       expect.objectContaining({
         format: 'json',
+        originalFileName: 'applications.csv',
+        sourceFileFormat: 'csv',
         records: [{ unifiedCode: 'D1672', make: 'Toyota', model: 'Hilux' }],
       }),
     ),

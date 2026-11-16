@@ -1,3 +1,7 @@
+import { ModulePolicyUseCase } from './application/module-policy.use-case';
+import { MODULE_POLICY_RESOLVER, MODULE_POLICY } from './domain/ports/module-policy.port';
+import { PostgresModulePolicyAdapter } from './infrastructure/postgres-module-policy.adapter';
+import { ModulePolicyController } from './presentation/module-policy.controller';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 
@@ -19,14 +23,24 @@ import { RolesGuard } from './presentation/guards/roles.guard';
  */
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [AuthController],
+  controllers: [AuthController, ModulePolicyController],
   providers: [
+    ModulePolicyUseCase,
+    { provide: MODULE_POLICY_RESOLVER, useExisting: ModulePolicyUseCase },
+    { provide: MODULE_POLICY, useClass: PostgresModulePolicyAdapter },
     { provide: CREDENTIAL_VERIFIER, useClass: EnvironmentCredentialVerifier },
     { provide: TOKEN_SERVICE, useClass: JwtTokenService },
     AuthenticateUseCase,
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [CREDENTIAL_VERIFIER, TOKEN_SERVICE, JwtAuthGuard, RolesGuard],
+  exports: [
+    MODULE_POLICY_RESOLVER,
+    ModulePolicyUseCase,
+    CREDENTIAL_VERIFIER,
+    TOKEN_SERVICE,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
 })
 export class IdentityModule {}

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { FixedClock, ValidationError, assertUuid } from '@cdr/shared';
+import { DependencyUnavailableError, FixedClock, ValidationError, assertUuid } from '@cdr/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GroupApplicationRepositoryPort } from '../../applications/domain/ports/group-application-repository.port';
@@ -30,6 +30,48 @@ const actor: AuthenticatedActor = {
 };
 
 describe('OEM imports', () => {
+  it('preserves valid rows and the recoverable confirmation lease when a target dependency is unavailable', async () => {
+    const batch = ImportBatch.preview(
+      {
+        target: 'oem',
+        format: 'json',
+        idempotencyKey: 'oem-transient',
+        payloadHash: 'test',
+        categoryCode: null,
+        createdBy: actor.id,
+        rows: [
+          {
+            rowNumber: 1,
+            valid: true,
+            data: { unifiedCode: 'D1672', oemCode: 'OEM-1', brands: ['TOYOTA'] },
+            errors: [],
+            warnings: [],
+          },
+        ],
+      },
+      now,
+    );
+    const imports = new MemoryImportBatchRepository(batch);
+    const oem = createOemRepository(true);
+    oem.findGroupByCode.mockRejectedValueOnce(new DependencyUnavailableError('database'));
+    const finish = vi.spyOn(imports, 'saveConfirmation');
+    const rejectRow = vi.spyOn(imports, 'updateRowResult');
+    await expect(
+      new ConfirmImportBatchUseCase(
+        imports,
+        new FixedClock(now),
+        emptyApplications(),
+        emptyHomologs(),
+        oem,
+        emptyCategoryImports(),
+        externalHomologPolicy(),
+      ).execute(batch.toSnapshot().id, actor),
+    ).rejects.toThrow('database');
+    expect(batch.toSnapshot().status).toBe('processing');
+    expect(batch.toSnapshot().rows[0]?.valid).toBe(true);
+    expect(finish).not.toHaveBeenCalled();
+    expect(rejectRow).not.toHaveBeenCalled();
+  });
   it('keeps legacy idempotency hashes valid when no template variant is supplied', async () => {
     const payloadHash = createHash('sha256')
       .update(
@@ -69,11 +111,14 @@ describe('OEM imports', () => {
         format: 'json',
         idempotencyKey: 'legacy-idempotency-1',
         records: [{ codigo_unificador: 'D1672', codigo_oem: 'OEM-1', marcas: ['TOYOTA'] }],
+        originalFileName: 'legacy.csv',
+        sourceFileFormat: 'csv',
       },
       actor,
     );
 
     expect(repeated.toSnapshot().id).toBe(legacy.toSnapshot().id);
+    expect(repeated.toSnapshot()).toMatchObject({ originalFileName: null, sourceFileFormat: null });
   });
 
   it('validates a group once per preview and confirms real OEM rows idempotently', async () => {
@@ -107,6 +152,8 @@ describe('OEM imports', () => {
         target: 'oem',
         format: 'json',
         idempotencyKey: 'oem-confirmation-0001',
+        originalFileName: 'Códigos OEM.csv',
+        sourceFileFormat: 'csv',
         records: [
           { codigo_unificador: 'D1672', codigo_oem: 'OEM-1', marcas: ['TOYOTA'] },
           { codigo_unificador: 'D1672', codigo_oem: 'OEM-2', marcas: ['TOYOTA', 'LEXUS'] },
@@ -116,10 +163,39 @@ describe('OEM imports', () => {
     );
 
     expect(preview.toSnapshot().rows.every((row) => row.valid)).toBe(true);
+    expect(preview.toSnapshot()).toMatchObject({
+      format: 'json',
+      originalFileName: 'Códigos OEM.csv',
+      sourceFileFormat: 'csv',
+    });
     expect(oemRepository.findGroupByCode).toHaveBeenCalledTimes(1);
+
+    const retry = await previewUseCase.execute(
+      {
+        target: 'oem',
+        format: 'json',
+        idempotencyKey: 'oem-confirmation-0001',
+        originalFileName: 'Archivo renombrado.xlsx',
+        sourceFileFormat: 'xlsx',
+        records: [
+          { codigo_unificador: 'D1672', codigo_oem: 'OEM-1', marcas: ['TOYOTA'] },
+          { codigo_unificador: 'D1672', codigo_oem: 'OEM-2', marcas: ['TOYOTA', 'LEXUS'] },
+        ],
+      },
+      actor,
+    );
+    expect(retry.toSnapshot()).toMatchObject({
+      id: preview.toSnapshot().id,
+      originalFileName: 'Códigos OEM.csv',
+      sourceFileFormat: 'csv',
+    });
 
     const confirmed = await confirmUseCase.execute(preview.toSnapshot().id, actor);
     expect(confirmed.toSnapshot().status).toBe('confirmed');
+    expect(confirmed.toSnapshot()).toMatchObject({
+      originalFileName: 'Códigos OEM.csv',
+      sourceFileFormat: 'csv',
+    });
     expect(oemRepository.findGroupByCode).toHaveBeenCalledTimes(2);
     expect(oemRepository.saveImported).toHaveBeenCalledTimes(2);
     expect(saved.map((oem) => oem.toSnapshot())).toEqual([
