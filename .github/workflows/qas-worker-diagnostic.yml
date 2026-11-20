@@ -1,0 +1,223 @@
+name: Diagnose QAS worker (read only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Inspect QAS worker startup failures
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: qas
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_PAGER: ''
+      AWS_MAX_ATTEMPTS: '2'
+    steps:
+      # Same pinned credential action and environment role as Promote.
+      # No checkout, package installation, service update or credential rotation.
+      - name: Assume the existing QAS diagnostic identity
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: cdr-qas-worker-diagnostic-${{ github.run_id }}
+
+      - name: Read ECS service, stopped tasks and available CloudWatch logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          REGION = os.environ.get('AWS_REGION', '')
+          EXPECTED_ACCOUNT = os.environ.get('AWS_ACCOUNT_ID', '')
+          CLUSTER = 'cdr-pim-qas'
+          SERVICE = 'cdr-pim-qas-worker'
+          TASK_LIMIT = 5
+          LOG_LIMIT = 50
+
+          def safe_text(value):
+              value = str(value)
+              # Keep credential values, private URLs and endpoints out of Actions logs.
+              value = re.sub(
+                  r'''(?i)((?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|DATABASE_URL|PASSWORD|AUTHORIZATION|ACCESS_TOKEN|REFRESH_TOKEN)\s*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)''',
+                  r'\1[REDACTED]', value,
+              )
+              value = re.sub(r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b', '[ACCESS_KEY_REDACTED]', value)
+              value = re.sub(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b', '[TOKEN_REDACTED]', value)
+              value = re.sub(r'''(?i)\b[a-z][a-z0-9+.-]*://[^\s"<>]+''', '[URL_REDACTED]', value)
+              value = re.sub(r'''(?i)\b\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com(?:/[^\s"<>]*)?''', '[REGISTRY_REDACTED]', value)
+              value = re.sub(r'(?i)\b[a-z0-9][a-z0-9.-]*\.(?:rds\.amazonaws\.com|internal|local)(?::\d+)?\b', '[PRIVATE_ENDPOINT_REDACTED]', value)
+              return value[:2400]
+
+          def sanitize(value):
+              if isinstance(value, str):
+                  return safe_text(value)
+              if isinstance(value, list):
+                  return [sanitize(item) for item in value]
+              if isinstance(value, dict):
+                  return {key: sanitize(item) for key, item in value.items()}
+              return value
+
+          def emit(section, value):
+              print(json.dumps({'section': section, 'data': sanitize(value)}, ensure_ascii=False), flush=True)
+
+          def aws_read(service, operation, *arguments, region=REGION):
+              # This is the complete allowlist of AWS operations used by this workflow.
+              allowed = {
+                  ('sts', 'get-caller-identity'),
+                  ('ecs', 'describe-services'),
+                  ('ecs', 'list-tasks'),
+                  ('ecs', 'describe-tasks'),
+                  ('ecs', 'describe-task-definition'),
+                  ('logs', 'get-log-events'),
+              }
+              if (service, operation) not in allowed:
+                  raise RuntimeError('Refused an operation outside the read-only allowlist')
+              try:
+                  result = subprocess.run(
+                      ['aws', service, operation, *arguments, '--region', region,
+                       '--output', 'json', '--no-cli-pager'],
+                      capture_output=True, text=True, timeout=45, check=False,
+                  )
+              except subprocess.TimeoutExpired:
+                  emit('readUnavailable', {'operation': service + ':' + operation, 'errorCode': 'Timeout'})
+                  return None
+              if result.returncode:
+                  # Do not print raw stderr, arguments, task definitions or environment.
+                  match = re.search(r'\(([^)]+)\)', result.stderr)
+                  code = match.group(1) if match and re.fullmatch(r'[A-Za-z0-9_.-]+', match.group(1)) else 'AwsReadFailed'
+                  emit('readUnavailable', {'operation': service + ':' + operation, 'errorCode': code})
+                  return None
+              try:
+                  return json.loads(result.stdout)
+              except json.JSONDecodeError:
+                  emit('readUnavailable', {'operation': service + ':' + operation, 'errorCode': 'InvalidJson'})
+                  return None
+
+          def reference(arn):
+              return str(arn or '').rsplit('/', 1)[-1]
+
+          if not re.fullmatch(r'\d{12}', EXPECTED_ACCOUNT) or not re.fullmatch(r'[a-z]{2}(?:-gov)?-[a-z]+-\d', REGION):
+              emit('refused', {'reason': 'Invalid existing QAS account or region variables'})
+              sys.exit(1)
+          identity = aws_read('sts', 'get-caller-identity')
+          if not identity or identity.get('Account') != EXPECTED_ACCOUNT:
+              emit('refused', {'reason': 'The assumed identity does not match the configured QAS account'})
+              sys.exit(1)
+
+          result = aws_read('ecs', 'describe-services', '--cluster', CLUSTER, '--services', SERVICE)
+          if result is None:
+              sys.exit(1)
+          services = result.get('services', [])
+          if not services:
+              emit('serviceUnavailable', {'failures': [item.get('reason') for item in result.get('failures', [])]})
+              sys.exit(1)
+          service = services[0]
+          emit('service', {
+              'service': SERVICE, 'status': service.get('status'),
+              'desiredCount': service.get('desiredCount'), 'runningCount': service.get('runningCount'),
+              'pendingCount': service.get('pendingCount'),
+              'taskDefinition': reference(service.get('taskDefinition')),
+              'deployments': [{key: item.get(key) for key in (
+                  'id', 'status', 'rolloutState', 'rolloutStateReason',
+                  'desiredCount', 'runningCount', 'pendingCount', 'failedTasks', 'createdAt',
+              )} for item in service.get('deployments', [])],
+              'events': [{key: item.get(key) for key in ('createdAt', 'message')}
+                         for item in service.get('events', [])[:10]],
+          })
+
+          listed = aws_read('ecs', 'list-tasks', '--cluster', CLUSTER, '--service-name', SERVICE,
+                            '--desired-status', 'STOPPED', '--max-results', '100', '--no-paginate')
+          task_arns = (listed or {}).get('taskArns', [])[:100]
+          described = aws_read('ecs', 'describe-tasks', '--cluster', CLUSTER, '--tasks', *task_arns) if task_arns else None
+          tasks = sorted((described or {}).get('tasks', []),
+                         key=lambda item: str(item.get('stoppedAt') or item.get('createdAt') or ''),
+                         reverse=True)[:TASK_LIMIT]
+          emit('stoppedTasks', [{
+              'task': reference(task.get('taskArn')),
+              'taskDefinition': reference(task.get('taskDefinitionArn')),
+              'stopCode': task.get('stopCode'), 'stoppedReason': task.get('stoppedReason'),
+              'stoppedAt': task.get('stoppedAt'),
+              'containers': [{key: container.get(key) for key in (
+                  'name', 'lastStatus', 'reason', 'exitCode', 'healthStatus', 'imageDigest',
+              )} for container in task.get('containers', [])],
+          } for task in tasks])
+
+          definitions = {}
+          definition_arns = [service.get('taskDefinition')] + [task.get('taskDefinitionArn') for task in tasks]
+          for arn in dict.fromkeys(item for item in definition_arns if item):
+              response = aws_read('ecs', 'describe-task-definition', '--task-definition', arn)
+              if response is None:
+                  continue
+              definition = response.get('taskDefinition', {})
+              definitions[arn] = definition
+              projections = []
+              for container in definition.get('containerDefinitions', []):
+                  environment = {item.get('name'): item.get('value') for item in container.get('environment', [])}
+                  secrets = {item.get('name') for item in container.get('secrets', [])}
+                  ssl = str(environment.get('DATABASE_SSL', '')).strip().lower()
+                  version = str(environment.get('APP_VERSION', ''))
+                  log = container.get('logConfiguration') or {}
+                  options = log.get('options') or {}
+                  projections.append({
+                      'container': container.get('name'),
+                      'applicationVersion': version if re.fullmatch(r'[0-9a-f]{40}', version) else None,
+                      'databaseUrlEnvironmentPresent': 'DATABASE_URL' in environment,
+                      'databaseUrlEnvironmentNonEmpty': bool(environment.get('DATABASE_URL')),
+                      'databaseUrlSecretPresent': 'DATABASE_URL' in secrets,
+                      'databaseSsl': True if ssl in ('true', '1') else False if ssl in ('false', '0') else None,
+                      'databaseSslSecretPresent': 'DATABASE_SSL' in secrets,
+                      'caEnvironmentPresent': 'DATABASE_SSL_CA_FILE' in environment,
+                      'caEnvironmentNonEmpty': bool(environment.get('DATABASE_SSL_CA_FILE')),
+                      'caSecretPresent': 'DATABASE_SSL_CA_FILE' in secrets,
+                      'caImageDefaultExpectedFor846OrLater': '/app/certs/rds-global-bundle.pem',
+                      'logDriver': log.get('logDriver'),
+                      'logGroup': options.get('awslogs-group'),
+                      'logStreamPrefix': options.get('awslogs-stream-prefix'),
+                      'logRegion': options.get('awslogs-region', REGION),
+                  })
+              emit('taskDefinitionConfigurationPresence', {
+                  'taskDefinition': reference(arn),
+                  'executionRoleConfigured': bool(definition.get('executionRoleArn')),
+                  'taskRoleConfigured': bool(definition.get('taskRoleArn')),
+                  'containers': projections,
+              })
+
+          for task in tasks:
+              definition = definitions.get(task.get('taskDefinitionArn'), {})
+              for container in definition.get('containerDefinitions', []):
+                  log = container.get('logConfiguration') or {}
+                  options = log.get('options') or {}
+                  group, prefix = options.get('awslogs-group'), options.get('awslogs-stream-prefix')
+                  log_region = options.get('awslogs-region', REGION)
+                  if log.get('logDriver') != 'awslogs' or not group or not prefix:
+                      continue
+                  if log_region != REGION:
+                      emit('logsSkipped', {'task': reference(task.get('taskArn')), 'reason': 'Unexpected log region'})
+                      continue
+                  stream = prefix + '/' + container.get('name', '') + '/' + reference(task.get('taskArn'))
+                  events = aws_read('logs', 'get-log-events', '--log-group-name', group,
+                                    '--log-stream-name', stream, '--limit', str(LOG_LIMIT))
+                  if events is not None:
+                      emit('stoppedTaskLogs', {
+                          'task': reference(task.get('taskArn')), 'container': container.get('name'),
+                          'events': [{key: item.get(key) for key in ('timestamp', 'message')}
+                                     for item in events.get('events', [])[-LOG_LIMIT:]],
+                      })
+          emit('complete', {'readOnly': True, 'service': SERVICE, 'stoppedTaskLimit': TASK_LIMIT, 'logEventsPerContainerLimit': LOG_LIMIT})
+          PY
