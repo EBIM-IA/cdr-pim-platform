@@ -1,6 +1,6 @@
 # ADR-004 — AWS ECS Fargate as the container runtime
 
-**Status:** Accepted · 2026-08-30
+**Status:** Accepted · 2026-08-30. The worker database secret exception is defined in [ADR-018](./ADR-018-worker-database-secret-and-promotion.md).
 
 ## Context
 

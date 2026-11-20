@@ -73,7 +73,10 @@ jobs:
         run: pnpm test
 
       - name: Deployment configuration tests
-        run: python3 -m unittest discover -s scripts -p 'test_*file*.py'
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*file*.py'
+          python3 -m unittest discover -s scripts -p 'test_*worker*.py'
+          python3 -m unittest discover -s scripts -p 'test_verify_ecs_promotion.py'
 
       - name: Build
         run: pnpm build

@@ -12,6 +12,11 @@ import { DrizzleGroupOemCodeRepository } from '../modules/equivalences/infrastru
 import { DrizzleCategoryAttributeImportAdapter } from '../modules/catalog-schema/infrastructure/persistence/drizzle-category-attribute-import.adapter';
 import { CatalogExternalHomologReferencePolicy } from '../modules/equivalences/application/catalog-external-homolog-reference.policy';
 import { DrizzleProductRepository } from '../modules/catalog/infrastructure/persistence/drizzle-product.repository';
+export {
+  probeImportWorkerDatabase,
+  ImportDatabaseProbeError,
+  type ImportDatabaseProbeResult,
+} from './import-database.probe';
 /** Shared worker composition root: no HTTP server, application bootstrap or environment reads. */
 export function createImportBatchRuntime(options: DatabaseOptions & { executionLeaseMs?: number }) {
   const connection = createDatabase(options),

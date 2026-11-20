@@ -197,6 +197,59 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           done
 
+      - name: Prepare all deployment plans from active service definitions
+        env:
+          API_IMAGE: ${{ steps.digests.outputs.api_image }}
+          WEB_IMAGE: ${{ steps.digests.outputs.web_image }}
+          WORKER_IMAGE: ${{ steps.digests.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cluster="cdr-pim-$TARGET_ENVIRONMENT"
+
+          for app in api worker web; do
+            case "$app" in
+              api) image=$API_IMAGE ;;
+              worker) image=$WORKER_IMAGE ;;
+              web) image=$WEB_IMAGE ;;
+              *) exit 1 ;;
+            esac
+            # A family can point at a failed, unused revision. Preserve the definition
+            # actually used by this service, including its roles, ports and other secrets.
+            current=$(aws ecs describe-services --cluster "$cluster" \
+              --services "cdr-pim-$TARGET_ENVIRONMENT-$app" \
+              --query 'services[0].taskDefinition' --output text)
+            if [[ -z "$current" || "$current" == 'None' ]]; then
+              echo "::error::No active task definition was found for $app."
+              exit 1
+            fi
+            aws ecs describe-task-definition --task-definition "$current" \
+              --query taskDefinition > "source-td-$app.json"
+            jq --arg image "$image" --arg version "$IMAGE_TAG" '
+              if any(.containerDefinitions[0].secrets[]?; .name == "APP_VERSION")
+              then error("APP_VERSION must not be overridden by a secret") else . end
+              | .containerDefinitions[0].image = $image
+              | .containerDefinitions[0].environment = (
+                  (.containerDefinitions[0].environment // [])
+                  | map(select(.name != "APP_VERSION"))
+                  + [{"name": "APP_VERSION", "value": $version}]
+                )
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                    .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+            ' "source-td-$app.json" > "plan-td-$app.json"
+          done
+
+          # The operator approved reusing only the API's DATABASE_URL secret reference
+          # within each environment. Never retrieve or copy its plaintext value.
+          python3 scripts/configure-worker-import-runtime.py \
+            plan-td-worker.json source-td-api.json configured-worker.json \
+            --environment "$TARGET_ENVIRONMENT" --region "$AWS_REGION" \
+            --account-id "$AWS_ACCOUNT_ID"
+          mv configured-worker.json plan-td-worker.json
+          python3 scripts/configure-api-file-protection.py \
+            plan-td-api.json protected-api.json
+          mv protected-api.json plan-td-api.json
+
       - name: Run database migrations
         if: ${{ inputs.run_migrations }}
         env:
@@ -204,6 +257,7 @@ jobs:
           MIGRATION_NETWORK_CONFIGURATION: ${{ vars.MIGRATION_NETWORK_CONFIGURATION }}
         run: |
           set -euo pipefail
+          umask 077
           cluster="cdr-pim-$TARGET_ENVIRONMENT"
           family="cdr-pim-$TARGET_ENVIRONMENT-migrate"
 
@@ -248,66 +302,66 @@ jobs:
             exit 1
           fi
 
-      - name: Register task definitions and update services
+      - name: Register the validated task definitions
+        id: register
+        run: |
+          set -euo pipefail
+          for app in worker api web; do
+            new_td=$(aws ecs register-task-definition \
+              --cli-input-json "file://plan-td-$app.json" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+            if [[ -z "$new_td" || "$new_td" == 'None' ]]; then
+              echo "::error::Could not register the validated $app task definition."
+              exit 1
+            fi
+            printf '%s_task_definition=%s\n' "$app" "$new_td" >> "$GITHUB_OUTPUT"
+            echo "cdr-pim-$app -> $new_td"
+          done
+
+      - name: Deploy the worker before its API producer
         env:
-          API_IMAGE: ${{ steps.digests.outputs.api_image }}
-          WEB_IMAGE: ${{ steps.digests.outputs.web_image }}
+          WORKER_TASK_DEFINITION: ${{ steps.register.outputs.worker_task_definition }}
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "cdr-pim-$TARGET_ENVIRONMENT" \
+            --service "cdr-pim-$TARGET_ENVIRONMENT-worker" \
+            --task-definition "$WORKER_TASK_DEFINITION" >/dev/null
+          aws ecs wait services-stable \
+            --cluster "cdr-pim-$TARGET_ENVIRONMENT" \
+            --services "cdr-pim-$TARGET_ENVIRONMENT-worker"
+
+      - name: Verify worker revision and health
+        env:
+          WORKER_TASK_DEFINITION: ${{ steps.register.outputs.worker_task_definition }}
           WORKER_IMAGE: ${{ steps.digests.outputs.worker_image }}
         run: |
           set -euo pipefail
-          cluster="cdr-pim-$TARGET_ENVIRONMENT"
+          # The new hosted worker probes PostgreSQL with verified TLS before starting
+          # health or SQS. A rollback cannot pass this expected-revision/health check.
+          python3 scripts/verify-ecs-promotion.py \
+            --environment "$TARGET_ENVIRONMENT" --app worker \
+            --task-definition "$WORKER_TASK_DEFINITION" \
+            --image "$WORKER_IMAGE" --version "$IMAGE_TAG"
 
-          for app in api worker web; do
-            case "$app" in
-              api) image=$API_IMAGE ;;
-              worker) image=$WORKER_IMAGE ;;
-              web) image=$WEB_IMAGE ;;
-              *) echo "::error::Unsupported application: $app"; exit 1 ;;
-            esac
-
-            # Start from the task definition currently in use, so CPU, memory, environment
-            # and secrets are carried over. The immutable image and its matching observable
-            # version change together; otherwise /health/live reports a stale commit.
-            aws ecs describe-task-definition \
-              --task-definition "cdr-pim-$TARGET_ENVIRONMENT-$app" \
-              --query taskDefinition > "td-$app.json"
-
-            jq --arg image "$image" --arg version "$IMAGE_TAG" '
-              .containerDefinitions[0].image = $image
-              | .containerDefinitions[0].environment = (
-                  (.containerDefinitions[0].environment // [])
-                  | map(select(.name != "APP_VERSION"))
-                  + [{"name": "APP_VERSION", "value": $version}]
-                )
-              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
-                    .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
-            ' "td-$app.json" > "new-td-$app.json"
-
-            if [[ "$app" == 'api' ]]; then
-              python3 scripts/configure-api-file-protection.py \
-                "new-td-$app.json" "protected-td-$app.json"
-              mv "protected-td-$app.json" "new-td-$app.json"
-            fi
-
-            new_td=$(aws ecs register-task-definition \
-              --cli-input-json "file://new-td-$app.json" \
-              --query 'taskDefinition.taskDefinitionArn' --output text)
-
-            echo "cdr-pim-$app -> $new_td"
-
-            aws ecs update-service \
-              --cluster "$cluster" \
-              --service "cdr-pim-$TARGET_ENVIRONMENT-$app" \
-              --task-definition "$new_td" >/dev/null
-          done
-
-      - name: Wait for the deployment to stabilise
+      - name: Deploy API and web after the verified worker
+        env:
+          API_TASK_DEFINITION: ${{ steps.register.outputs.api_task_definition }}
+          WEB_TASK_DEFINITION: ${{ steps.register.outputs.web_task_definition }}
         run: |
-          aws ecs wait services-stable \
-            --cluster "cdr-pim-$TARGET_ENVIRONMENT" \
+          set -euo pipefail
+          cluster="cdr-pim-$TARGET_ENVIRONMENT"
+          for app in api web; do
+            case "$app" in
+              api) task_definition=$API_TASK_DEFINITION ;;
+              web) task_definition=$WEB_TASK_DEFINITION ;;
+            esac
+            aws ecs update-service --cluster "$cluster" \
+              --service "cdr-pim-$TARGET_ENVIRONMENT-$app" \
+              --task-definition "$task_definition" >/dev/null
+          done
+          aws ecs wait services-stable --cluster "$cluster" \
             --services \
               "cdr-pim-$TARGET_ENVIRONMENT-api" \
-              "cdr-pim-$TARGET_ENVIRONMENT-worker" \
               "cdr-pim-$TARGET_ENVIRONMENT-web"
 
       - name: Verify the running images and versions match the promotion
@@ -315,55 +369,30 @@ jobs:
           API_IMAGE: ${{ steps.digests.outputs.api_image }}
           WEB_IMAGE: ${{ steps.digests.outputs.web_image }}
           WORKER_IMAGE: ${{ steps.digests.outputs.worker_image }}
+          API_TASK_DEFINITION: ${{ steps.register.outputs.api_task_definition }}
+          WEB_TASK_DEFINITION: ${{ steps.register.outputs.web_task_definition }}
+          WORKER_TASK_DEFINITION: ${{ steps.register.outputs.worker_task_definition }}
         run: |
           set -euo pipefail
           umask 077
           cluster="cdr-pim-$TARGET_ENVIRONMENT"
-          status=0
-
           for app in api worker web; do
             case "$app" in
-              api) expected=$API_IMAGE ;;
-              worker) expected=$WORKER_IMAGE ;;
-              web) expected=$WEB_IMAGE ;;
+              api) expected=$API_IMAGE; task_definition=$API_TASK_DEFINITION ;;
+              worker) expected=$WORKER_IMAGE; task_definition=$WORKER_TASK_DEFINITION ;;
+              web) expected=$WEB_IMAGE; task_definition=$WEB_TASK_DEFINITION ;;
               *) echo "::error::Unsupported application: $app"; exit 1 ;;
             esac
-
-            task_definition=$(aws ecs describe-services --cluster "$cluster" \
-              --services "cdr-pim-$TARGET_ENVIRONMENT-$app" \
-              --query 'services[0].taskDefinition' --output text)
-            # Verify what ECS reports for the stable service, rather than the local JSON
-            # used to register it. Never emit the full definition or its environment.
-            aws ecs describe-task-definition \
-              --task-definition "$task_definition" \
-              --query taskDefinition > "running-td-$app.json"
-            running=$(jq -r '.containerDefinitions[0].image' "running-td-$app.json")
-            running_version=$(jq -r \
-              '[.containerDefinitions[0].environment[]? | select(.name == "APP_VERSION") | .value][0]' \
-              "running-td-$app.json")
-            protection_ok=true
+            python3 scripts/verify-ecs-promotion.py \
+              --environment "$TARGET_ENVIRONMENT" --app "$app" \
+              --task-definition "$task_definition" --image "$expected" --version "$IMAGE_TAG"
             if [[ "$app" == 'api' ]]; then
-              if ! python3 scripts/configure-api-file-protection.py --check "running-td-$app.json"; then
-                echo '::error::The running API task does not match the file protection policy.'
-                protection_ok=false
-                status=1
-              fi
-            fi
-            rm "running-td-$app.json"
-
-            if [[ "$running" != "$expected" ]]; then
-              echo "::error::$app is running $running, expected $expected"
-              status=1
-            fi
-            if [[ "$running_version" != "$IMAGE_TAG" ]]; then
-              echo "::error::$app reports version $running_version, expected $IMAGE_TAG"
-              status=1
-            fi
-            if [[ "$running" == "$expected" && "$running_version" == "$IMAGE_TAG" && "$protection_ok" == true ]]; then
-              echo "OK  $app  $running  version=$running_version"
+              aws ecs describe-task-definition --task-definition "$task_definition" \
+                --query taskDefinition > running-api.json
+              python3 scripts/configure-api-file-protection.py --check running-api.json
+              rm running-api.json
             fi
           done
-          exit "$status"
 
       - name: Read first file cleanup execution evidence
         id: cleanup-evidence
