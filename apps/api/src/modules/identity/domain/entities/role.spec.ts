@@ -13,6 +13,28 @@ import {
 } from './role';
 
 describe('role capability policy', () => {
+  it('grants bulk technical sheets by default to each business role and migration alias', () => {
+    for (const role of [
+      Role.Administrator,
+      Role.Purchasing,
+      Role.Sales,
+      Role.Admin,
+      Role.Editor,
+      Role.Viewer,
+    ]) {
+      expect(actorHasCapability(actor(role), Capability.TechnicalSheetsBulk)).toBe(true);
+    }
+  });
+
+  it('honors an explicitly revoked bulk grant without falling back to token roles', () => {
+    const resolved = {
+      ...actor(Role.Sales),
+      capabilities: [Capability.CatalogRead, Capability.AttributesRead],
+    };
+    expect(actorHasCapability(resolved, Capability.TechnicalSheetsBulk)).toBe(false);
+    expect(actorHasCapability(resolved, Capability.CatalogRead)).toBe(true);
+    expect(actorHasCapability(resolved, Capability.AttributesRead)).toBe(true);
+  });
   it('allows consultation profiles to read PDF catalogs and reserves writes and sharing for administration', () => {
     for (const role of [
       Role.Administrator,

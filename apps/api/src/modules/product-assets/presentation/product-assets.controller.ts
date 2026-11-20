@@ -34,18 +34,14 @@ import {
   productAssetSelectorSchema,
   productAssetUploadMetadataSchema,
 } from '@cdr/contracts';
-import { NotFoundError, ValidationError } from '@cdr/shared';
+import { ValidationError } from '@cdr/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import {
-  actorHasCapability,
-  Capability,
-  type AuthenticatedActor,
-} from '../../identity/domain/entities/role';
+import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import {
   TECHNICAL_SHEET_VISIBILITY,
   type TechnicalSheetVisibilityPort,
@@ -88,20 +84,12 @@ export class ProductAssetsController {
   @ApiOperation({ summary: 'List active product assets for up to 100 products in one query' })
   async batchList(
     @Query(new ZodValidationPipe(productAssetBatchQuerySchema)) query: ProductAssetBatchQuery,
-    @CurrentActor() actor: AuthenticatedActor,
+    @CurrentActor() _actor: AuthenticatedActor,
   ): Promise<ProductAssetBatchDto> {
     const items = await this.listAssetBatch.execute(query);
-    const policies = actorHasCapability(actor, Capability.AdministrationManage)
-      ? []
-      : await this.visibility.getMany(items.map((item) => item.productId));
-    const hidden = new Set(
-      policies.filter((policy) => !policy.visible).map((policy) => policy.productId),
-    );
     return items.map((item) => ({
       productId: item.productId,
-      assets: item.assets
-        .filter((asset) => asset.toSnapshot().type !== 'FT' || !hidden.has(item.productId))
-        .map(toProductAssetDto),
+      assets: item.assets.map(toProductAssetDto),
     }));
   }
 
@@ -109,17 +97,10 @@ export class ProductAssetsController {
   @ApiOperation({ summary: 'List active images and documents for a product or SKU' })
   async list(
     @Query(new ZodValidationPipe(productAssetSelectorSchema)) query: ProductAssetSelector,
-    @CurrentActor() actor: AuthenticatedActor,
+    @CurrentActor() _actor: AuthenticatedActor,
   ): Promise<ProductAssetListDto> {
     const assets = await this.listAssets.execute(query);
-    const productId = assets[0]?.toSnapshot().productId;
-    const visible =
-      !productId ||
-      actorHasCapability(actor, Capability.AdministrationManage) ||
-      (await this.visibility.get(productId)).visible;
-    return assets
-      .filter((asset) => asset.toSnapshot().type !== 'FT' || visible)
-      .map(toProductAssetDto);
+    return assets.map(toProductAssetDto);
   }
 
   @Post()
@@ -202,17 +183,11 @@ export class ProductAssetsController {
   async download(
     @Param('id') id: string,
     @Query('inline') inline: string | undefined,
-    @CurrentActor() actor: AuthenticatedActor,
+    @CurrentActor() _actor: AuthenticatedActor,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
     const { asset, content } = await this.downloadAsset.execute(id);
     const snapshot = asset.toSnapshot();
-    if (
-      snapshot.type === 'FT' &&
-      !actorHasCapability(actor, Capability.AdministrationManage) &&
-      !(await this.visibility.get(snapshot.productId)).visible
-    )
-      throw new NotFoundError('Product asset', id);
     response.setHeader('Content-Type', snapshot.mimeType);
     response.setHeader('Content-Length', String(content.byteLength));
     response.setHeader(

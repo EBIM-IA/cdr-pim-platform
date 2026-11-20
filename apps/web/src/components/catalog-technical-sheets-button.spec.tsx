@@ -11,11 +11,11 @@ vi.mock('@/lib/technical-sheet-export', () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.assets.mockResolvedValue([]);
-  mocks.download.mockResolvedValue(2);
+  mocks.download.mockResolvedValue(3);
 });
 afterEach(cleanup);
 describe('catalog technical sheets', () => {
-  it('loads every filtered page, expands complete groups, deduplicates SKU and delegates visibility to the exporter', async () => {
+  it('loads every filtered page, expands complete groups and deduplicates SKU', async () => {
     const first = { id: 'a', sku: 'A' },
       second = { id: 'b', sku: 'B' },
       third = { id: 'c', sku: 'C' };
@@ -50,9 +50,7 @@ describe('catalog technical sheets', () => {
         }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      '2 fichas técnicas descargadas. 1 artículo omitido por visibilidad.',
-    );
+    expect(await screen.findByRole('status')).toHaveTextContent('3 fichas técnicas descargadas.');
   });
   it('refuses an oversized group before fetching assets or generating a partial ZIP', async () => {
     mocks.workbook.mockResolvedValue({

@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { PdfDesignWorkspace } from '@/components/pdf-design-workspace';
 import { PageHeader } from '@/components/page-header';
 import { AuditWorkspace } from '@/components/audit-workspace';
 import { CatalogQualityWorkspace } from '@/components/catalog-quality-workspace';
@@ -316,6 +317,15 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       icon: ServerCog,
       mode: 'capabilities',
     },
+    {
+      id: 'pdf-design',
+      label: 'Diseño de ficha PDF',
+      title: 'Diseño de ficha PDF',
+      description:
+        'Formato, logotipos, fuentes y secciones de la ficha técnica, con vista previa del PDF.',
+      icon: FileArchive,
+      mode: 'capabilities',
+    },
   ],
 };
 
@@ -520,6 +530,7 @@ export function ReferenceWorkspace({
 }) {
   const views = workspaceViews[definition.slug] ?? [];
   const [selected, setSelected] = useState(views[0]?.id ?? '');
+  const [pdfDownloadTarget, setPdfDownloadTarget] = useState<HTMLDivElement | null>(null);
   const [axBatchId, setAxBatchId] = useState<string | undefined>();
   const [initialSearchQuery, setInitialSearchQuery] = useState<string | undefined>();
   const active = views.find((view) => view.id === selected) ?? views[0];
@@ -554,18 +565,65 @@ export function ReferenceWorkspace({
     }
     window.history.replaceState({}, '', `${url.pathname}${url.search}`);
   };
+  const pdfDesignerActive = definition.slug === 'administration' && active.id === 'pdf-design';
+  const navigation =
+    definition.slug !== 'catalogs' ? (
+      <nav
+        className={
+          pdfDesignerActive
+            ? 'mb-5 flex gap-1.5 overflow-x-auto border-b pb-3'
+            : 'mb-5 flex gap-1 overflow-x-auto border-b'
+        }
+        aria-label={`Vistas de ${definition.label}`}
+      >
+        {views.map((view) => {
+          const Icon = view.icon;
+          const current = view.id === active.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => changeView(view.id)}
+              aria-current={current ? 'page' : undefined}
+              className={cn(
+                pdfDesignerActive
+                  ? 'inline-flex shrink-0 items-center rounded-full px-3.5 py-1.5 text-xs font-bold transition'
+                  : 'inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-2 text-sm transition',
+                pdfDesignerActive
+                  ? current
+                    ? 'bg-primary text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  : current
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-slate-600 hover:bg-slate-50',
+              )}
+            >
+              {!pdfDesignerActive ? <Icon className="size-4" aria-hidden="true" /> : null}
+              {pdfDesignerActive && view.id === 'settings'
+                ? 'Catálogos de configuración'
+                : view.label}
+            </button>
+          );
+        })}
+      </nav>
+    ) : null;
 
   return (
     <>
+      {pdfDesignerActive ? navigation : null}
       <PageHeader
         eyebrow={definition.eyebrow}
         title={active.title}
         description={active.description}
         actions={
-          <Button variant="outline" onClick={reload} disabled={loading}>
-            <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden="true" />
-            Actualizar
-          </Button>
+          pdfDesignerActive ? (
+            <div ref={setPdfDownloadTarget} />
+          ) : (
+            <Button variant="outline" onClick={reload} disabled={loading}>
+              <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden="true" />
+              Actualizar
+            </Button>
+          )
         }
       />
       <ScreenGuide
@@ -575,35 +633,15 @@ export function ReferenceWorkspace({
         limitation={definition.limitation}
       />
 
-      {definition.slug !== 'catalogs' ? (
-        <nav
-          className="mb-5 flex gap-1 overflow-x-auto border-b"
-          aria-label={`Vistas de ${definition.label}`}
-        >
-          {views.map((view) => {
-            const Icon = view.icon;
-            const current = view.id === active.id;
-            return (
-              <button
-                key={view.id}
-                type="button"
-                onClick={() => changeView(view.id)}
-                aria-current={current ? 'page' : undefined}
-                className={cn(
-                  'inline-flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-4 py-2 text-sm transition',
-                  current
-                    ? 'border-primary bg-white text-primary'
-                    : 'border-transparent text-slate-600 hover:bg-slate-50',
-                )}
-              >
-                <Icon className="size-4" aria-hidden="true" /> {view.label}
-              </button>
-            );
-          })}
-        </nav>
-      ) : null}
+      {!pdfDesignerActive ? navigation : null}
 
-      {loading ? (
+      {definition.slug === 'administration' && active.id === 'pdf-design' ? (
+        <PdfDesignWorkspace
+          canManage={actor?.capabilities.includes('administration:manage') ?? false}
+          downloadActionTarget={pdfDownloadTarget}
+        />
+      ) : null}
+      {loading && active.id !== 'pdf-design' ? (
         <div className="space-y-4" aria-label="Cargando módulo" aria-busy="true">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }, (_, index) => (
@@ -613,7 +651,7 @@ export function ReferenceWorkspace({
           <Skeleton className="h-80 rounded-xl" />
         </div>
       ) : null}
-      {!loading && error ? (
+      {!loading && error && active.id !== 'pdf-design' ? (
         <StatePanel
           variant="error"
           title="No pudimos cargar este módulo"
@@ -622,7 +660,7 @@ export function ReferenceWorkspace({
           onAction={reload}
         />
       ) : null}
-      {!loading && workspace ? (
+      {!loading && workspace && active.id !== 'pdf-design' ? (
         definition.slug === 'quality' && active.id === 'quality' ? (
           <CatalogQualityWorkspace workspace={workspace} />
         ) : definition.slug === 'publication' ? (

@@ -5,9 +5,10 @@ import type { AuthActor } from '@/lib/auth';
 
 import { AppShell } from './app-shell';
 
+const navigation = vi.hoisted(() => ({ pathname: '/catalogs', query: '' }));
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/catalogs',
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => navigation.pathname,
+  useSearchParams: () => new URLSearchParams(navigation.query),
 }));
 
 vi.mock('@/lib/bff-client', () => ({
@@ -32,7 +33,11 @@ beforeAll(() => {
   });
 });
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  navigation.pathname = '/catalogs';
+  navigation.query = '';
+});
 
 afterEach(cleanup);
 
@@ -64,20 +69,41 @@ describe('AppShell navigation', () => {
       '/catalogs',
     );
     expect(
-      screen.getByText('Pantalla 35 de 35 · ref. #37 · Catálogos de productos'),
+      screen.getByText('Pantalla 35 de 36 · ref. #37 · Catálogos de productos'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Mapa · 35 rutas' }).closest('details'),
+      screen.getByRole('button', { name: 'Mapa · 36 rutas' }).closest('details'),
     ).not.toHaveAttribute('open');
 
     fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
     fireEvent.click(screen.getByRole('button', { name: 'Índice de pantallas' }));
 
-    expect(screen.getByText('Mapa de pantallas · 35 rutas')).toBeInTheDocument();
-    expect(screen.getByText(/Inicio de sesión más 34 rutas autenticadas/u)).toBeInTheDocument();
+    expect(screen.getByText('Mapa de pantallas · 36 rutas')).toBeInTheDocument();
+    expect(screen.getByText(/Inicio de sesión más 35 rutas autenticadas/u)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Catálogos de productos' })).toHaveAttribute(
       'href',
       '/catalogs',
+    );
+  });
+
+  it('includes the approved PDF design screen in the administration map and reference pager', () => {
+    navigation.pathname = '/administration';
+    navigation.query = 'view=pdf-design';
+    render(
+      <AppShell
+        actor={{ ...actor, capabilities: [...actor.capabilities, 'menu:administration:view'] }}
+      >
+        <p>Diseño PDF</p>
+      </AppShell>,
+    );
+    expect(
+      screen.getByText('Pantalla 36 de 36 · ref. #38 · Diseño de ficha PDF'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cuenta de Admin' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Índice de pantallas' }));
+    expect(screen.getByRole('link', { name: 'Diseño de ficha PDF' })).toHaveAttribute(
+      'href',
+      '/administration?view=pdf-design',
     );
   });
 

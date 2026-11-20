@@ -10,16 +10,17 @@ import type {
   ProductExperienceDto,
   ProductSalesVariantDto,
 } from '@cdr/contracts';
+import { productStatusSchema } from '@cdr/contracts';
 import { ArrowLeft, Copy, Download, Eye, FileText, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProductGallery } from '@/components/product-gallery';
 import { ProductThumbnail } from '@/components/product-thumbnail';
-import { listTechnicalSheetVisibility } from '@/lib/technical-sheet-visibility-api';
 import { StickyProductNavigation } from '@/components/sticky-product-navigation';
 import { TechnicalSheetPreview } from '@/components/technical-sheet-preview';
 import { Button } from '@/components/ui/button';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
+import { fetchPdfDesignSettings } from '@/lib/pdf-design-api';
 import {
   groupAttributesByTemplateSections,
   technicalAttributesFromSheet,
@@ -29,6 +30,9 @@ import {
   downloadTechnicalSheetPdf,
   technicalSheetBrand,
   technicalSheetDocument,
+  technicalSheetDesign,
+  technicalSheetCopy,
+  type TechnicalSheetVariantSelection,
   technicalSheetLogo,
   technicalSheetMedia,
 } from '@/lib/technical-sheet-export';
@@ -64,12 +68,12 @@ function SheetActions({
   id,
   sku,
   product,
-  visible,
+  variantSelection,
 }: {
   id: string;
   sku: string;
   product: Product;
-  visible: boolean;
+  variantSelection?: TechnicalSheetVariantSelection;
 }) {
   const [preview, setPreview] = useState<{
     sheet: ProductAttributeSheetDto;
@@ -86,16 +90,20 @@ function SheetActions({
         listProductAssets({ productId: id }),
       ]);
       if (download) {
-        const [cdrLogo, media, brand] = await Promise.all([
+        const [cdrLogo, media, brand, settings, copy] = await Promise.all([
           technicalSheetLogo(),
           technicalSheetMedia(assets),
           technicalSheetBrand(sheet.product.brand),
+          fetchPdfDesignSettings(),
+          technicalSheetCopy(sheet, undefined, variantSelection),
         ]);
         await downloadTechnicalSheetPdf({
           ...technicalSheetDocument(sheet, 'metric'),
           cdrLogo,
           media,
           ...brand,
+          ...technicalSheetDesign(sheet, settings.config),
+          ...copy,
         });
       } else setPreview({ sheet, assets });
     } catch (failure) {
@@ -106,7 +114,6 @@ function SheetActions({
       setBusy(false);
     }
   };
-  if (!visible) return null;
   return (
     <>
       <div className={styles.sheetActions}>
@@ -141,14 +148,20 @@ function SheetActions({
         <TechnicalSheetPreview
           open
           product={{
-            ...product,
             id,
             sku,
             name: preview.sheet.product.name,
             brand: preview.sheet.product.brand ?? 'Sin marca',
+            category: preview.sheet.schema.category.name,
+            application: '',
+            status: productStatusSchema.parse(preview.sheet.product.status),
+            completeness: null,
+            attributes: [],
+            ...(id === product.id ? { description: product.description } : {}),
           }}
           sheet={preview.sheet}
           assets={preview.assets}
+          variantSelection={variantSelection}
           unitSystem="metric"
           onClose={() => setPreview(null)}
         />
@@ -184,7 +197,6 @@ export function SalesProductDetail({
   const [members, setMembers] = useState<CatalogWorkbookProductDto[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [membersLoading, setMembersLoading] = useState(false);
-  const [visibleSheets, setVisibleSheets] = useState<ReadonlySet<string>>(new Set());
   const [vehicleQuery, setVehicleQuery] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState('sales-characteristics');
@@ -237,24 +249,20 @@ export function SalesProductDetail({
     (application) => application.active && application.verificationStatus === 'verified',
   );
   const vehicles = verified.filter((application) => vehicleMatches(application, vehicleQuery));
-  const compatible = [
-    ...homologs
-      .filter((row) => row.active && row.approvalStatus === 'approved')
-      .map((row) => ({
-        id: row.id,
-        kind: 'HOMÓLOGO',
-        brand: row.externalBrand,
-        code: row.externalCode,
-      })),
-    ...oemCodes
-      .filter((row) => row.active && row.approvalStatus === 'approved')
-      .map((row) => ({
-        id: row.id,
-        kind: 'OEM',
-        brand: row.brands.join(' · '),
-        code: row.oemCode,
-      })),
-  ];
+  const compatibleHomologs = homologs
+    .filter((row) => row.active && row.approvalStatus === 'approved')
+    .map((row) => ({
+      id: row.id,
+      brand: row.externalBrand,
+      code: row.externalCode,
+    }));
+  const compatibleOemCodes = oemCodes
+    .filter((row) => row.active && row.approvalStatus === 'approved')
+    .map((row) => ({
+      id: row.id,
+      brand: row.brands.join(' · '),
+      code: row.oemCode,
+    }));
   useEffect(() => {
     if (!code) return;
     const controller = new AbortController();
@@ -317,25 +325,6 @@ export function SalesProductDetail({
     providerCode: product.providerCode,
   };
   const equivalents = members.length ? members : [current];
-  const sheetIdsKey = equivalents
-    .map((member) => member.id)
-    .sort()
-    .join(',');
-  useEffect(() => {
-    const controller = new AbortController();
-    setVisibleSheets(new Set());
-    void listTechnicalSheetVisibility(sheetIdsKey.split(',').filter(Boolean), controller.signal)
-      .then((policies) => {
-        if (!controller.signal.aborted)
-          setVisibleSheets(
-            new Set(policies.filter((policy) => policy.visible).map((policy) => policy.productId)),
-          );
-      })
-      .catch(() => {
-        /* Keep actions hidden until the server confirms visibility. */
-      });
-    return () => controller.abort();
-  }, [sheetIdsKey]);
   return (
     <div className={styles.page} data-column-resize="off">
       <Link href="/products" className={styles.back}>
@@ -607,12 +596,13 @@ export function SalesProductDetail({
                 {vehicles.length} aplicaciones verificadas
               </p>
               <div className={styles.scroll}>
-                <table>
+                <table className={styles.vehicles}>
                   <thead>
                     <tr>
                       <th scope="col">Vehículo</th>
                       <th scope="col">Años</th>
                       <th scope="col">Motor</th>
+                      <th scope="col">Tracción</th>
                       <th scope="col">Dónde va</th>
                     </tr>
                   </thead>
@@ -620,9 +610,10 @@ export function SalesProductDetail({
                     {vehicles.map((application) => (
                       <tr key={application.id}>
                         <th scope="row">
-                          {[application.make, application.model, application.bodyStyle]
-                            .filter(Boolean)
-                            .join(' · ')}
+                          {[application.make, application.model].filter(Boolean).join(' ')}
+                          {application.bodyStyle ? (
+                            <span className={styles.vehicleType}> · {application.bodyStyle}</span>
+                          ) : null}
                         </th>
                         <td>
                           {[application.yearFrom, application.yearTo].filter(Boolean).join(' – ') ||
@@ -630,6 +621,9 @@ export function SalesProductDetail({
                         </td>
                         <td>
                           {[application.engine, application.fuel].filter(Boolean).join(' ') || '—'}
+                        </td>
+                        <td className={styles.traction}>
+                          {application.traction?.trim().toLocaleUpperCase('es') || '—'}
                         </td>
                         <td>
                           {[application.area, application.subarea].filter(Boolean).join(' › ') ||
@@ -735,26 +729,45 @@ export function SalesProductDetail({
                     id={member.id}
                     sku={member.sku}
                     product={product}
-                    visible={visibleSheets.has(member.id)}
+                    variantSelection={
+                      variant
+                        ? { type: variant.tipo, applicationId: variant.aplicacion?.id }
+                        : undefined
+                    }
                   />
                 </li>
               ))}
             </ul>
-            <div className={styles.compatible}>
-              <h3>Productos Compatibles</h3>
-              <p className={styles.muted}>Referencias externas del código unificador.</p>
-              <ul>
-                {compatible.map((reference) => (
-                  <li key={reference.id}>
-                    <span className="mr-2 text-xs font-semibold">{reference.kind}</span>
-                    <strong>{reference.brand}</strong> – {reference.code}
-                  </li>
-                ))}
-              </ul>
-              {!compatible.length ? (
-                <p className={styles.muted}>Sin referencias activas y aprobadas.</p>
-              ) : null}
-            </div>
+            {compatibleOemCodes.length || compatibleHomologs.length ? (
+              <div className={styles.compatible}>
+                <h3>Productos Compatibles</h3>
+                <p className={styles.muted}>
+                  Códigos de otras marcas que no vendemos. Si el cliente pide alguno, ofrécele las
+                  equivalencias.
+                </p>
+                <div className={styles.compatibleColumns}>
+                  {[
+                    { label: 'OEM', references: compatibleOemCodes },
+                    { label: 'Homólogos', references: compatibleHomologs },
+                  ].map(({ label, references }) => (
+                    <ul key={label} aria-label={label}>
+                      {references.length ? (
+                        references.map((reference) => (
+                          <li key={reference.id}>
+                            <strong>{reference.brand}</strong> – {reference.code}
+                          </li>
+                        ))
+                      ) : (
+                        <li className={styles.muted}>—</li>
+                      )}
+                    </ul>
+                  ))}
+                </div>
+                <p className={styles.referenceSource}>
+                  OEM y homólogos del código unificador <strong>{code ?? '—'}</strong>
+                </p>
+              </div>
+            ) : null}
           </section>
         </aside>
       </div>

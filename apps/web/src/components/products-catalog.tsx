@@ -185,16 +185,23 @@ function ProductCatalogList({
                 ) : null}
                 {product.dimensions ? <p className={styles.summary}>{product.dimensions}</p> : null}
                 <p className={styles.summary}>
-                  {grouped
-                    ? `${equivalents.length} ${equivalents.length === 1 ? 'equivalencia' : 'equivalencias'} · `
-                    : ''}
-                  Código unificador:{' '}
-                  {product.unifiedCode ? (
-                    <Link href={detailHref} className={styles.unified}>
-                      {product.unifiedCode}
-                    </Link>
+                  {grouped ? (
+                    product.unifiedCode ? (
+                      `${equivalents.length} ${equivalents.length === 1 ? 'equivalencia' : 'equivalencias'}`
+                    ) : (
+                      'Sin código unificador'
+                    )
                   ) : (
-                    'Sin código'
+                    <>
+                      Código unificador:{' '}
+                      {product.unifiedCode ? (
+                        <Link href={detailHref} className={styles.unified}>
+                          {product.unifiedCode}
+                        </Link>
+                      ) : (
+                        'Sin código'
+                      )}
+                    </>
                   )}
                 </p>
                 {showStatus || showCompleteness ? (
@@ -365,6 +372,7 @@ export function ProductsCatalog({
   showCompleteness = false,
   showProductStatus = true,
   showTableDescriptionAndTemplate = true,
+  canGenerateBulkTechnicalSheets = false,
 }: {
   initialSearch?: string;
   initialBrand?: string;
@@ -375,6 +383,7 @@ export function ProductsCatalog({
   showCompleteness?: boolean;
   showProductStatus?: boolean;
   showTableDescriptionAndTemplate?: boolean;
+  canGenerateBulkTechnicalSheets?: boolean;
 }) {
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
@@ -386,6 +395,9 @@ export function ProductsCatalog({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [view, setView] = useState<CatalogView>('table');
+  const [tableTechnicalSheetsHost, setTableTechnicalSheetsHost] = useState<HTMLSpanElement | null>(
+    null,
+  );
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialBrand || initialStatus),
   );
@@ -397,6 +409,10 @@ export function ProductsCatalog({
     statuses: [],
   });
   const [result, setResult] = useState<CatalogWorkbookResultDto | null>(null);
+  const [tableSummary, setTableSummary] = useState<Pick<
+    CatalogWorkbookResultDto,
+    'total' | 'totalArticles' | 'totalBrands'
+  > | null>(null);
   const [relations, setRelations] = useState<Record<string, CatalogRelations>>({});
   const [productAssets, setProductAssets] = useState<Record<string, ProductAssetDto[]>>({});
   const [loading, setLoading] = useState(true);
@@ -404,6 +420,10 @@ export function ProductsCatalog({
   const [revision, setRevision] = useState(0);
   const updateFacets = useCallback(
     (next: CatalogWorkbookResultDto['facets']) => setFacets(next),
+    [],
+  );
+  const updateTableSummary = useCallback(
+    (summary: typeof tableSummary) => setTableSummary(summary),
     [],
   );
 
@@ -663,128 +683,157 @@ export function ProductsCatalog({
       </button>
     ) : null;
 
+  const consultation = !showCompleteness && !canEditAttributes;
+  const consultationSummary = view === 'table' ? tableSummary : !loading && !error ? result : null;
+  const consultationBrandCount = consultationSummary?.totalBrands ?? facets.brands.length;
+  const filterControl = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-expanded={advancedFiltersOpen}
+      aria-controls="catalog-advanced-filters"
+      onClick={() => setAdvancedFiltersOpen((current) => !current)}
+    >
+      <SlidersHorizontal aria-hidden="true" className="size-3.5" />
+      Filtros
+      <span
+        aria-label={`${activeFilterCount} filtros activos`}
+        className={cn(
+          'rounded-full px-1 text-[10px]',
+          activeFilterCount > 0 && 'bg-primary text-white',
+        )}
+      >
+        {activeFilterCount || ''}
+      </span>
+    </Button>
+  );
+  const catalogActions = (
+    <>
+      <div
+        className="flex rounded-lg border bg-white p-0.5"
+        role="group"
+        aria-label="Vista del listado"
+      >
+        {(
+          [
+            ['catalog', 'Catálogo'],
+            ['table', 'Tabla'],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            variant={view === value ? 'outline' : 'ghost'}
+            size="sm"
+            aria-pressed={view === value}
+            onClick={() => setView(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      {view === 'table' || consultation ? (
+        <CategoryTreeSelect
+          label={view === 'table' ? 'Filtrar la tabla por categoría' : 'Filtrar por categoría'}
+          value={category}
+          placeholder="Todas las categorías"
+          options={categoryOptions}
+          disabled={catalogCategories.length === 0}
+          onValueChange={(value) => {
+            setCategory(value);
+            setPage(1);
+          }}
+          className={cn('w-64 max-w-full', consultation && styles.consultationCategory)}
+        />
+      ) : null}
+      {canViewImports ? (
+        <Button
+          asChild
+          variant="secondary"
+          size="sm"
+          title="Importaciones"
+          aria-label="Importaciones"
+        >
+          <Link href="/imports">
+            <Upload className="size-4" aria-hidden="true" />
+            <span className={view === 'table' ? 'sr-only' : undefined}>Importaciones</span>
+          </Link>
+        </Button>
+      ) : null}
+      {canEditAttributes ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setView('sheet')}
+          aria-pressed={view === 'sheet'}
+          aria-label="Actualización masiva"
+          title="Actualización masiva"
+        >
+          <Columns3 aria-hidden="true" className="size-4" />
+          <span className={view === 'table' ? 'sr-only' : undefined}>Actualización masiva</span>
+        </Button>
+      ) : null}
+      {view === 'catalog' && canGenerateBulkTechnicalSheets ? (
+        <CatalogTechnicalSheetsButton
+          query={{
+            filter: [],
+            groupByUnifiedCode: consultation,
+            ...(debouncedSearch ? { q: debouncedSearch } : {}),
+            ...(brand ? { brand } : {}),
+            ...(category ? { categoryId: category } : {}),
+            ...(showProductStatus && status ? { status } : {}),
+            ...(application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL'
+              ? { applicationType: application }
+              : {}),
+            ...(showCompleteness &&
+            (completeness === 'complete' ||
+              completeness === 'attention' ||
+              completeness === 'critical')
+              ? { completeness }
+              : {}),
+          }}
+        />
+      ) : null}
+      {view === 'catalog' ? (
+        <TableExportButtons
+          filename="catalogo-pim-filtrado"
+          sheetName="Productos"
+          headers={exportHeaders}
+          rows={exportRows}
+          disabled={loading}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <>
-      <PageHeader
-        title="Catálogo Maestro de Productos"
-        description={
-          view === 'catalog' && result
-            ? showCompleteness
-              ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
-              : `${formatNumber(total)} ${total === 1 ? 'código unificador' : 'códigos unificadores'} · ${formatNumber(result.totalArticles ?? total)} ${(result.totalArticles ?? total) === 1 ? 'artículo' : 'artículos'} · ${formatNumber(result.totalBrands ?? result.facets.brands.length)} ${(result.totalBrands ?? result.facets.brands.length) === 1 ? 'marca' : 'marcas'}`
-            : 'Productos sincronizados desde ERP (Sismetic / AX)'
-        }
-        actions={
-          <>
-            <div
-              className="flex rounded-lg border bg-white p-0.5"
-              role="group"
-              aria-label="Vista del listado"
-            >
-              {(
-                [
-                  ['catalog', 'Catálogo'],
-                  ['table', 'Tabla'],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={view === value ? 'outline' : 'ghost'}
-                  size="sm"
-                  aria-pressed={view === value}
-                  onClick={() => setView(value)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-            {view === 'table' ? (
-              <CategoryTreeSelect
-                label="Filtrar la tabla por categoría"
-                value={category}
-                placeholder="Todas las categorías"
-                options={categoryOptions}
-                disabled={catalogCategories.length === 0}
-                onValueChange={(value) => {
-                  setCategory(value);
-                  setPage(1);
-                }}
-                className="w-64 max-w-full"
-              />
-            ) : null}
-            {canViewImports ? (
-              <Button
-                asChild
-                variant="secondary"
-                size="sm"
-                title="Importaciones"
-                aria-label="Importaciones"
-              >
-                <Link href="/imports">
-                  <Upload className="size-4" aria-hidden="true" />
-                  <span className={view === 'table' ? 'sr-only' : undefined}>Importaciones</span>
-                </Link>
-              </Button>
-            ) : null}
-            {canEditAttributes ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setView('sheet')}
-                aria-pressed={view === 'sheet'}
-                aria-label="Actualización masiva"
-                title="Actualización masiva"
-              >
-                <Columns3 aria-hidden="true" className="size-4" />
-                <span className={view === 'table' ? 'sr-only' : undefined}>
-                  Actualización masiva
-                </span>
-              </Button>
-            ) : null}
-            {view === 'catalog' ? (
-              <CatalogTechnicalSheetsButton
-                query={{
-                  filter: [],
-                  groupByUnifiedCode: !showCompleteness,
-                  ...(debouncedSearch ? { q: debouncedSearch } : {}),
-                  ...(brand ? { brand } : {}),
-                  ...(category ? { categoryId: category } : {}),
-                  ...(showProductStatus && status ? { status } : {}),
-                  ...(application === 'AUTOMOTRIZ' || application === 'INDUSTRIAL'
-                    ? { applicationType: application }
-                    : {}),
-                  ...(showCompleteness &&
-                  (completeness === 'complete' ||
-                    completeness === 'attention' ||
-                    completeness === 'critical')
-                    ? { completeness }
-                    : {}),
-                }}
-              />
-            ) : null}
-            {view === 'catalog' ? (
-              <TableExportButtons
-                filename="catalogo-pim-filtrado"
-                sheetName="Productos"
-                headers={exportHeaders}
-                rows={exportRows}
-                disabled={loading}
-              />
-            ) : null}
-          </>
-        }
-      />
-      <ScreenGuide
-        objective="Catálogo maestro: busca los SKU recibidos desde ERP, consulta sus especificaciones y completa sus atributos."
-        actions={[
-          'Busca por SKU, descripción, marca o atributos y combina filtros.',
-          'La vista Tabla permite ordenar, filtrar por columna y editar los atributos autorizados.',
-          'El SKU y los datos ERP son de solo lectura; los atributos dependen de la plantilla activa.',
-        ]}
-        dataSource="Catálogo ERP y atributos de las plantillas activas."
-      />
+      {!consultation ? (
+        <PageHeader
+          title="Catálogo Maestro de Productos"
+          description={
+            view === 'catalog' && result
+              ? showCompleteness
+                ? `${formatNumber(total)} SKU · sincronizados desde ERP (Sismetic / AX)`
+                : `${formatNumber(total)} ${total === 1 ? 'código unificador' : 'códigos unificadores'} · ${formatNumber(result.totalArticles ?? total)} ${(result.totalArticles ?? total) === 1 ? 'artículo' : 'artículos'} · ${formatNumber(result.totalBrands ?? result.facets.brands.length)} ${(result.totalBrands ?? result.facets.brands.length) === 1 ? 'marca' : 'marcas'}`
+              : 'Productos sincronizados desde ERP (Sismetic / AX)'
+          }
+          actions={catalogActions}
+        />
+      ) : null}
+      {!consultation ? (
+        <ScreenGuide
+          objective="Catálogo maestro: busca los SKU recibidos desde ERP, consulta sus especificaciones y completa sus atributos."
+          actions={[
+            'Busca por SKU, descripción, marca o atributos y combina filtros.',
+            'La vista Tabla permite ordenar, filtrar por columna y editar los atributos autorizados.',
+            'El SKU y los datos ERP son de solo lectura; los atributos dependen de la plantilla activa.',
+          ]}
+          dataSource="Catálogo ERP y atributos de las plantillas activas."
+        />
+      ) : null}
       {view === 'sheet' ? (
         <>
           <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
@@ -802,14 +851,14 @@ export function ProductsCatalog({
         </>
       ) : (
         <>
-          <Card className="mb-3 overflow-visible">
-            {!showCompleteness ? (
-              <p className="px-4 pt-4 text-xl font-bold">¿Qué necesita el cliente?</p>
+          <Card className={cn('mb-3 overflow-visible', consultation && styles.consultationHeader)}>
+            {consultation ? (
+              <h1 className={styles.consultationTitle}>¿Qué necesita el cliente?</h1>
             ) : null}
             <div
               className={cn(
                 'flex flex-wrap items-center gap-2',
-                showCompleteness ? 'p-2.5' : 'p-4',
+                consultation ? styles.consultationSearch : 'p-2.5',
               )}
             >
               <CatalogSearch
@@ -833,33 +882,56 @@ export function ProductsCatalog({
                   </Link>
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-expanded={advancedFiltersOpen}
-                aria-controls="catalog-advanced-filters"
-                onClick={() => setAdvancedFiltersOpen((current) => !current)}
-              >
-                <SlidersHorizontal aria-hidden="true" className="size-3.5" />
-                Filtros
-                <span
-                  aria-label={`${activeFilterCount} filtros activos`}
-                  className={cn(
-                    'rounded-full px-1 text-[10px]',
-                    activeFilterCount > 0 && 'bg-primary text-white',
-                  )}
-                >
-                  {activeFilterCount || ''}
-                </span>
-              </Button>
+              {!consultation ? filterControl : null}
             </div>
+            {consultation ? (
+              <div className={styles.consultationBar}>
+                <div className={styles.consultationSummary}>
+                  <Link href="/" className={styles.back}>
+                    ← Volver al inicio
+                  </Link>
+                  {consultationSummary ? (
+                    <p className={styles.count} aria-live="polite">
+                      <strong>{formatNumber(consultationSummary.total)}</strong>{' '}
+                      {consultationSummary.total === 1
+                        ? 'código unificador'
+                        : 'códigos unificadores'}{' '}
+                      ·{' '}
+                      <strong>
+                        {formatNumber(
+                          consultationSummary.totalArticles ?? consultationSummary.total,
+                        )}
+                      </strong>{' '}
+                      {(consultationSummary.totalArticles ?? consultationSummary.total) === 1
+                        ? 'artículo'
+                        : 'artículos'}{' '}
+                      {view === 'catalog' ? (
+                        <>
+                          · <strong>{formatNumber(consultationBrandCount)}</strong>{' '}
+                          {consultationBrandCount === 1 ? 'marca' : 'marcas'}
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
+                <div className={styles.consultationActions}>
+                  {view === 'table' && canGenerateBulkTechnicalSheets ? (
+                    <span
+                      ref={setTableTechnicalSheetsHost}
+                      className={styles.bulkTechnicalSheetsHost}
+                    />
+                  ) : null}
+                  {catalogActions}
+                  {filterControl}
+                </div>
+              </div>
+            ) : null}
             {advancedFiltersOpen ? (
               <div
                 id="catalog-advanced-filters"
                 className="grid gap-3 border-t bg-white p-3 sm:grid-cols-2 xl:grid-cols-5"
               >
-                {view !== 'table' ? (
+                {view !== 'table' && !consultation ? (
                   <CategoryTreeSelect
                     label="Línea / categoría"
                     value={category}
@@ -999,7 +1071,10 @@ export function ProductsCatalog({
               showCompleteness={showCompleteness}
               showStatus={showProductStatus}
               showDescriptionAndTemplate={showTableDescriptionAndTemplate}
+              canGenerateBulkTechnicalSheets={canGenerateBulkTechnicalSheets}
+              bulkTechnicalSheetsHost={consultation ? tableTechnicalSheetsHost : undefined}
               onFacetsChange={updateFacets}
+              onSummaryChange={consultation ? updateTableSummary : undefined}
             />
           ) : null}
           {view === 'catalog' ? (

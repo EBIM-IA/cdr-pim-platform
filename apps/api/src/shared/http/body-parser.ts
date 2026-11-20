@@ -10,6 +10,14 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
  * permissive test default. Import previews alone receive the larger limit.
  */
 export function configureBodyParsers(app: NestExpressApplication): void {
+  app.useBodyParser('json', {
+    limit: '32mb',
+    type: (request) => isJson(request) && isPdfDesign(request),
+  });
+  app.useBodyParser('json', {
+    limit: '1mb',
+    type: (request) => isJson(request) && isCatalogParameter(request),
+  });
   app.useBodyParser('json', { limit: '2mb', type: isImportPreviewJson });
   app.useBodyParser('json', {
     limit: '4mb',
@@ -17,7 +25,12 @@ export function configureBodyParsers(app: NestExpressApplication): void {
   });
   app.useBodyParser('json', {
     limit: '100kb',
-    type: (request) => isJson(request) && !isImportPreview(request) && !isCatalogHome(request),
+    type: (request) =>
+      isJson(request) &&
+      !isImportPreview(request) &&
+      !isCatalogHome(request) &&
+      !isPdfDesign(request) &&
+      !isCatalogParameter(request),
   });
   app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
 }
@@ -36,4 +49,12 @@ function isJson(request: IncomingMessage): boolean {
 
 function isCatalogHome(request: IncomingMessage): boolean {
   return request.url?.split('?', 1)[0] === `${API_PREFIX}/catalog/home`;
+}
+
+function isPdfDesign(request: IncomingMessage): boolean {
+  return request.url?.split('?', 1)[0] === `${API_PREFIX}/catalog/admin/pdf-design`;
+}
+
+function isCatalogParameter(request: IncomingMessage): boolean {
+  return request.url?.split('?', 1)[0] === `${API_PREFIX}/catalog/admin/parameters`;
 }

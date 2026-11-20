@@ -16,25 +16,32 @@ const visibility = {
 const admin = { id: 'admin', email: 'admin@example.test', roles: ['ADMINISTRADOR'] as const };
 
 describe('GetProductAttributeSheetUseCase', () => {
-  it('blocks hidden commercial sheets for consultation profiles before loading attributes', async () => {
-    const getProductSheet = vi.fn();
-    const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
-    const policy = {
-      get: vi.fn().mockResolvedValue({ visible: false }),
-      getMany: vi.fn(),
-      save: vi.fn(),
-    };
-    for (const role of ['COMPRAS', 'VENTAS'] as const) {
+  it.each(['COMPRAS', 'VENTAS'] as const)(
+    'keeps the individual technical sheet available for %s despite historical per-SKU hiding and revoked bulk permission',
+    async (role) => {
+      const productId = id();
+      const getProductSheet = vi.fn().mockResolvedValue({
+        schema: { attributes: [] },
+        product: { id: productId, attributes: {} },
+      });
+      const repository = { getProductSheet } as unknown as DynamicCatalogRepositoryPort;
+      const policy = {
+        get: vi.fn().mockResolvedValue({ visible: false }),
+        getMany: vi.fn(),
+        save: vi.fn(),
+      };
       await expect(
-        new GetProductAttributeSheetUseCase(repository, policy).executeTechnicalSheet(id(), {
+        new GetProductAttributeSheetUseCase(repository, policy).executeTechnicalSheet(productId, {
           id: 'reader',
           email: 'reader@example.test',
           roles: [role],
+          capabilities: ['catalog:read', 'attributes:read'],
         }),
-      ).rejects.toThrow('not found');
-    }
-    expect(getProductSheet).not.toHaveBeenCalled();
-  });
+      ).resolves.toMatchObject({ product: { id: productId } });
+      expect(getProductSheet).toHaveBeenCalledOnce();
+      expect(policy.get).not.toHaveBeenCalled();
+    },
+  );
   it('preserves canonical completeness in the product sheet response', async () => {
     const productId = id();
     const getProductSheet = vi.fn().mockResolvedValue({

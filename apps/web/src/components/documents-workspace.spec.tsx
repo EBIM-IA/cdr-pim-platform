@@ -530,8 +530,12 @@ describe('DocumentsWorkspace', () => {
     }));
     mocks.fetchDocumentsCatalog.mockResolvedValue({ products: [...products, second], assets: {} });
     render(<DocumentsWorkspace canWrite />);
-    await screen.findByRole('link', { name: second.sku });
-    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    await screen.findByText(second.sku, { selector: 'a' });
+    const toolbar = within(
+      screen.getByRole('toolbar', { name: 'Acciones de imágenes y documentos' }),
+    );
+    const exportButton = toolbar.getByRole('button', { name: 'Exportar Excel' });
+    fireEvent.click(exportButton);
     expect(mocks.exportXlsx.mock.calls[0]![0].rows).toHaveLength(105);
     expect(mocks.exportXlsx.mock.calls[0]![0].rows.at(-1)[0]).toBe(second.sku);
     fireEvent.change(screen.getByLabelText('Filtrar Código artículo (sintaxis AX)'), {
@@ -540,13 +544,13 @@ describe('DocumentsWorkspace', () => {
     fireEvent.change(screen.getByLabelText('Filtrar Ficha técnica (sintaxis AX)'), {
       target: { value: '""' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }));
+    fireEvent.click(exportButton);
     const exported = mocks.exportXlsx.mock.calls[1]![0];
     expect(exported.rows).toHaveLength(1);
     expect(exported.rows[0][0]).toBe(second.sku);
     expect(exported.headers).toContain('Ficha técnica');
     expect(exported.rows[0][exported.headers.indexOf('Ficha técnica')]).toBe('Obligatorio');
-    expect(screen.queryByRole('link', { name: 'SKU-000' })).not.toBeInTheDocument();
+    expect(screen.queryByText('SKU-000', { selector: 'a' })).not.toBeInTheDocument();
   });
 
   it('switches table and contextual slots without discarding the selected SKU or making extra catalog requests', async () => {

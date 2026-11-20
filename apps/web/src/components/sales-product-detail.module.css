@@ -362,6 +362,17 @@
   font-weight: 400;
   color: #1c1c1a;
 }
+.vehicles {
+  min-width: 700px;
+}
+.vehicleType {
+  font-weight: 400;
+  color: #5c5c58;
+}
+.traction {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .aside {
   position: sticky;
   top: 72px;
@@ -458,13 +469,37 @@
   padding: 2px 0 0;
   font-size: 13px;
 }
-.compatible ul {
+.compatibleColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   margin-top: 10px;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.compatibleColumns ul {
+  min-width: 0;
+}
+.compatibleColumns ul:first-child {
+  padding-right: 12px;
+}
+.compatibleColumns ul + ul {
+  padding-left: 12px;
+  border-left: 1.5px solid #1d4e89;
 }
 .compatible li {
+  padding: 6px 0;
+  border-bottom: 1px solid #eeeeea;
   overflow-wrap: anywhere;
+}
+.compatible li:last-child {
+  border-bottom: 0;
+}
+.referenceSource {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e4e4e0;
+  color: #5c5c58;
+  font-size: 12px;
 }
 .documents {
   padding: 0 24px 16px;

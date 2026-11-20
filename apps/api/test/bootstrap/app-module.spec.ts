@@ -188,6 +188,69 @@ describe('AppModule bootstrap', () => {
     });
   });
 
+  describe('production body parser limits', () => {
+    // An unauthenticated 401 proves that parsing finished and the request reached the
+    // real guard, without invoking configuration writes or contacting PostgreSQL.
+    it.each([
+      ['PDF design', '/api/v1/catalog/admin/pdf-design', 2 * 1_024 * 1_024],
+      [
+        'PDF design with query',
+        '/api/v1/catalog/admin/pdf-design?revision=current',
+        2 * 1_024 * 1_024,
+      ],
+      ['brand logo', '/api/v1/catalog/admin/parameters', 256 * 1_024],
+      ['brand logo with query', '/api/v1/catalog/admin/parameters?kind=brand', 256 * 1_024],
+    ])(
+      'allows a %s JSON body over 100 KiB to reach authentication',
+      async (_label, path, bytes) => {
+        const payload = { data: 'A'.repeat(bytes) };
+        expect(Buffer.byteLength(JSON.stringify(payload))).toBeGreaterThan(100 * 1_024);
+        const call = request(app.getHttpServer());
+        const response = await (path.includes('/pdf-design') ? call.put(path) : call.post(path))
+          .send(payload)
+          .expect(401);
+
+        expect(response.body.error).toMatchObject({
+          code: 'UNAUTHORIZED',
+          message: 'Missing bearer token',
+        });
+      },
+    );
+
+    it.each([
+      ['PDF design', '/api/v1/catalog/admin/pdf-design', 32 * 1_024 * 1_024],
+      ['brand logo', '/api/v1/catalog/admin/parameters', 1_024 * 1_024],
+    ])('rejects a %s JSON body above its scoped ceiling', async (_label, path, ceiling) => {
+      const call = request(app.getHttpServer());
+      const response = await (path.includes('/pdf-design') ? call.put(path) : call.post(path))
+        .send({ data: 'A'.repeat(ceiling + 1_024) })
+        .expect(413);
+
+      expect(response.body.error).toMatchObject({
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body exceeds the size limit',
+        details: { limitBytes: ceiling },
+      });
+    });
+
+    it.each([
+      '/api/v1/products',
+      '/api/v1/catalog/admin/categories',
+      '/api/v1/catalog/admin/pdf-design/other',
+      '/api/v1/catalog/admin/parameters/other',
+    ])('retains the 100 KiB JSON limit for %s', async (path) => {
+      const response = await request(app.getHttpServer())
+        .post(path)
+        .send({ data: 'A'.repeat(128 * 1_024) })
+        .expect(413);
+
+      expect(response.body.error).toMatchObject({
+        code: 'PAYLOAD_TOO_LARGE',
+        details: { limitBytes: 100 * 1_024 },
+      });
+    });
+  });
+
   it('accepts, retains and retrieves a local AX mock batch without a human JWT', async () => {
     const payload = {
       schemaVersion: 'draft-0',
