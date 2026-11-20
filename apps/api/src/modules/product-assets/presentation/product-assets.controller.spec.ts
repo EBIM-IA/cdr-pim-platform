@@ -41,35 +41,43 @@ function setup() {
   return { controller, visibility };
 }
 
-describe('Hidden technical sheet files', () => {
-  it('removes hidden FT documents from single and batch consultation lists', async () => {
-    const { controller } = setup();
-    const actor = { id: 'sales', email: 'sales@example.test', roles: ['VENTAS'] as const };
-    expect(await controller.list({ productId }, actor)).toEqual([]);
-    expect(await controller.batchList({ productIds: [productId] }, actor)).toEqual([
-      { productId, assets: [] },
-    ]);
-  });
-  it('rejects direct download URLs for consultation profiles while keeping administrator access', async () => {
-    const { controller } = setup();
-    const response = { setHeader: vi.fn() } as unknown as Response;
-    await expect(
-      controller.download(
-        assetId,
-        undefined,
-        { id: 'sales', email: 'sales@example.test', roles: ['VENTAS'] },
-        response,
-      ),
-    ).rejects.toThrow('not found');
-    expect(response.setHeader).not.toHaveBeenCalled();
-    await expect(
-      controller.download(
-        assetId,
-        undefined,
-        { id: 'admin', email: 'admin@example.test', roles: ['ADMINISTRADOR'] },
-        response,
-      ),
-    ).resolves.toBeDefined();
-    expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
-  });
+describe('Individual technical sheet files', () => {
+  it.each(['COMPRAS', 'VENTAS', 'ADMINISTRADOR'] as const)(
+    'includes historical hidden FT files in individual and batch asset lists for %s',
+    async (role) => {
+      const { controller, visibility } = setup();
+      const actor = { id: 'reader', email: 'reader@example.test', roles: [role] };
+      expect(await controller.list({ productId }, actor)).toMatchObject([
+        { id: assetId, type: 'FT' },
+      ]);
+      expect(await controller.batchList({ productIds: [productId] }, actor)).toMatchObject([
+        { productId, assets: [{ id: assetId, type: 'FT' }] },
+      ]);
+      expect(visibility.get).not.toHaveBeenCalled();
+      expect(visibility.getMany).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['COMPRAS', 'VENTAS', 'ADMINISTRADOR'] as const)(
+    'allows an authenticated individual FT download for %s even without bulk permission',
+    async (role) => {
+      const { controller, visibility } = setup();
+      const response = { setHeader: vi.fn() } as unknown as Response;
+      await expect(
+        controller.download(
+          assetId,
+          undefined,
+          {
+            id: 'reader',
+            email: 'reader@example.test',
+            roles: [role],
+            capabilities: ['catalog:read'],
+          },
+          response,
+        ),
+      ).resolves.toBeDefined();
+      expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+      expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+      expect(visibility.get).not.toHaveBeenCalled();
+    },
+  );
 });

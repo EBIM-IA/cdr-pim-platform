@@ -69,6 +69,12 @@ export class DynamicCatalogController {
     private readonly reassignTemplate: ReassignProductTemplateUseCase,
   ) {}
 
+  @Get('technical-sheets/authorize')
+  @RequireCapabilities(Capability.TechnicalSheetsBulk)
+  authorizeBulkTechnicalSheets() {
+    return { allowed: true as const };
+  }
+
   @Get('categories')
   @ApiOperation({ summary: 'List active categories with a visible active template' })
   @ApiOkResponse({ schema: openApiSchema(catalogCategoryListSchema) })

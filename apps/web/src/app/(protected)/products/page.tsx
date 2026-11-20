@@ -48,6 +48,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       initialSearch={initialSearch}
       initialBrand={initialBrand}
       initialStatus={salesOnly ? '' : initialStatus}
+      canGenerateBulkTechnicalSheets={actor.capabilities.includes('technical-sheets:bulk')}
       canEditAttributes={actor?.capabilities.includes('attributes:write') ?? false}
       canViewQuality={actor?.capabilities.includes('menu:ai-quality:view') ?? false}
       canViewImports={actor?.capabilities.includes('menu:imports:view') ?? false}

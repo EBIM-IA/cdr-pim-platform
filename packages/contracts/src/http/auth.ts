@@ -36,6 +36,7 @@ export const authCapabilitySchema = z.enum([
   'menu:administration:view',
   'catalog:read',
   'catalog:write',
+  'technical-sheets:bulk',
   'product-catalogs:read',
   'product-catalogs:write',
   'product-catalogs:share',

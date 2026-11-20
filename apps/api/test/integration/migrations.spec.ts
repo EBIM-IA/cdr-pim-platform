@@ -78,6 +78,7 @@ describe('migration runner', () => {
         'import_batches',
         'import_executions',
         'import_rows',
+        'pdf_design_settings',
         'product_assets',
         'product_attribute_drafts',
         'product_attribute_values',

@@ -4,6 +4,56 @@ import { Capability, Role, actorHasCapability } from '../domain/entities/role';
 import type { ModulePolicy } from '../domain/ports/module-policy.port';
 
 describe('Application module policies', () => {
+  it.each([Role.Purchasing, Role.Sales])(
+    'defaults bulk generation on for %s and revokes it immediately without restricting individual reads',
+    async (role) => {
+      let policies: ModulePolicy[] = [];
+      const useCase = new ModulePolicyUseCase({
+        read: async () => policies,
+        save: async (policy) => {
+          policies = [policy];
+        },
+      });
+      const reader = { id: 'reader', email: 'reader@example.test', roles: [role] };
+      const administrator = { ...reader, roles: [Role.Administrator] };
+      expect(
+        actorHasCapability(await useCase.resolve(reader), Capability.TechnicalSheetsBulk),
+      ).toBe(true);
+      await useCase.save(
+        { role, capability: Capability.TechnicalSheetsBulk, visible: false },
+        administrator,
+      );
+      const disabled = await useCase.resolve(reader);
+      expect(actorHasCapability(disabled, Capability.TechnicalSheetsBulk)).toBe(false);
+      expect(actorHasCapability(disabled, Capability.CatalogRead)).toBe(true);
+      expect(actorHasCapability(disabled, Capability.AttributesRead)).toBe(true);
+      expect(actorHasCapability(disabled, Capability.CatalogWrite)).toBe(false);
+      expect(
+        actorHasCapability(await useCase.resolve(administrator), Capability.TechnicalSheetsBulk),
+      ).toBe(true);
+      await useCase.reset(administrator);
+      expect(
+        actorHasCapability(await useCase.resolve(reader), Capability.TechnicalSheetsBulk),
+      ).toBe(true);
+    },
+  );
+
+  it('keeps the administrator bulk grant enabled and reserves policy changes for administration', async () => {
+    const useCase = new ModulePolicyUseCase({ read: async () => [], save: async () => {} });
+    const actor = { id: 'admin', email: 'admin@example.test', roles: [Role.Administrator] };
+    await expect(
+      useCase.save(
+        { role: Role.Administrator, capability: Capability.TechnicalSheetsBulk, visible: false },
+        actor,
+      ),
+    ).rejects.toThrow('conserva');
+    await expect(
+      useCase.save(
+        { role: Role.Sales, capability: Capability.TechnicalSheetsBulk, visible: false },
+        { ...actor, roles: [Role.Sales] },
+      ),
+    ).rejects.toThrow('ADMINISTRADOR');
+  });
   it('defaults consultation profiles to Products and Catalogs, and never elevates mutation grants', async () => {
     const policies: ModulePolicy[] = [
       { role: Role.Sales, capability: Capability.MenuApplicationsView, visible: true },

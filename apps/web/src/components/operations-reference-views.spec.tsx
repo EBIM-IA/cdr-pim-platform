@@ -101,7 +101,7 @@ describe('Reference operations layouts', () => {
         }),
       ),
     );
-    expect(await screen.findByText(/Módulo actualizado/)).toBeVisible();
+    expect(await screen.findByRole('status')).toHaveTextContent('Permiso actualizado');
     expect(screen.getByRole('checkbox', { name: 'Productos para VENTAS' })).toBeChecked();
     expect(
       screen.getByRole('checkbox', { name: 'Administración para ADMINISTRADOR' }),

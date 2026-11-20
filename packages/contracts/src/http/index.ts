@@ -29,3 +29,5 @@ export * from './catalog-parameters';
 export * from './unified-code-request';
 
 export * from './category-governance';
+
+export * from './pdf-design';

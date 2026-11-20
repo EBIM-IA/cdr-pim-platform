@@ -141,6 +141,42 @@ beforeEach(() => {
 });
 
 describe('ProductsCatalog table view', () => {
+  it('uses the approved consultation heading and return link for sales and purchasing', () => {
+    render(<ProductsCatalog />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: '¿Qué necesita el cliente?' }),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: '← Volver al inicio' })).toHaveAttribute('href', '/');
+    expect(
+      screen.queryByRole('heading', { name: 'Catálogo Maestro de Productos' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('requires the bulk PDF capability in both catalog and table views', async () => {
+    const { rerender } = render(<ProductsCatalog />);
+    expect(mocks.workbook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canGenerateBulkTechnicalSheets: false }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
+    await screen.findAllByText('UNI-6205');
+    expect(
+      screen.queryByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }),
+    ).not.toBeInTheDocument();
+
+    rerender(<ProductsCatalog canGenerateBulkTechnicalSheets />);
+    expect(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Tabla' }));
+    expect(mocks.workbook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canGenerateBulkTechnicalSheets: true }),
+    );
+    const host = mocks.workbook.mock.lastCall?.[0].bulkTechnicalSheetsHost as HTMLElement;
+    expect(host).toBeInstanceOf(HTMLElement);
+    expect(host.parentElement).toBe(
+      screen.getByRole('group', { name: 'Vista del listado' }).parentElement,
+    );
+  });
+
   it('opens the reference catalog list and forwards write capability to the table', async () => {
     render(<ProductsCatalog canEditAttributes showCompleteness />);
 
@@ -248,7 +284,7 @@ describe('ProductsCatalog table view', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
 
     fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
-    const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
+    const category = await screen.findByRole('combobox', { name: 'Filtrar por categoría' });
     fireEvent.focus(category);
     fireEvent.click(await screen.findByRole('button', { name: 'Rodamientos' }));
 
@@ -294,7 +330,7 @@ describe('ProductsCatalog table view', () => {
     render(<ProductsCatalog />);
     fireEvent.click(screen.getByRole('button', { name: 'Catálogo' }));
     fireEvent.click(screen.getByRole('button', { name: /Filtros/u }));
-    const category = await screen.findByRole('combobox', { name: 'Línea / categoría' });
+    const category = await screen.findByRole('combobox', { name: 'Filtrar por categoría' });
     fireEvent.focus(category);
     fireEvent.click(await screen.findByRole('button', { name: 'Catálogo industrial' }));
     await waitFor(() =>
@@ -317,6 +353,6 @@ describe('ProductsCatalog table view', () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByRole('combobox', { name: 'Línea / categoría' })).toBeEnabled();
+    expect(await screen.findByRole('combobox', { name: 'Filtrar por categoría' })).toBeEnabled();
   });
 });

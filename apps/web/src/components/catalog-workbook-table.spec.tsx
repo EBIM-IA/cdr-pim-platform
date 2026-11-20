@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   patchAttribute: vi.fn(),
   downloadCsv: vi.fn(),
   downloadXlsx: vi.fn(),
+  downloadSheets: vi.fn(),
+  assets: vi.fn(),
 }));
 
 vi.mock('@/lib/dynamic-catalog-api', () => ({
@@ -30,6 +32,11 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
 vi.mock('@/lib/tabular-export', () => ({
   downloadCsv: mocks.downloadCsv,
   downloadXlsx: mocks.downloadXlsx,
+}));
+vi.mock('@/lib/product-assets-api', () => ({ listProductAssetsBatch: mocks.assets }));
+vi.mock('@/lib/technical-sheet-export', () => ({
+  downloadTechnicalSheetsZip: mocks.downloadSheets,
+  MAX_TECHNICAL_SHEETS_PER_ZIP: 250,
 }));
 
 const templateId = '22222222-2222-4222-8222-222222222222';
@@ -120,6 +127,8 @@ beforeEach(() => {
   window.localStorage.clear();
   Object.values(mocks).forEach((mock) => mock.mockReset());
   mocks.fetchWorkbook.mockResolvedValue(workbook);
+  mocks.assets.mockResolvedValue([]);
+  mocks.downloadSheets.mockResolvedValue(2);
   mocks.patchAttribute.mockResolvedValue({
     productId: productOne,
     attributeKey: 'descripcion_tecnica',
@@ -132,6 +141,71 @@ beforeEach(() => {
 });
 
 describe('CatalogWorkbookTable', () => {
+  it('places bulk PDF in the consultation bar while retaining live column filters and sorting', async () => {
+    const host = document.createElement('span');
+    const { container } = render(
+      <CatalogWorkbookTable
+        canEdit={false}
+        canGenerateBulkTechnicalSheets
+        bulkTechnicalSheetsHost={host}
+        q="rodamiento"
+        brand="FAG"
+        categoryId={categoryId}
+      />,
+    );
+    const tableCard = container.firstElementChild as HTMLElement;
+    container.prepend(host);
+    await screen.findByText('UNI-1', { selector: 'a' });
+    const download = within(host).getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' });
+    expect(download).toBeVisible();
+    expect(
+      within(tableCard).queryByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Filtro de columna Código Unificador' }),
+      {
+        target: { value: 'UNI-*' },
+      },
+    );
+    await waitFor(() => expect(mocks.fetchWorkbook).toHaveBeenCalledTimes(2));
+    fireEvent.click(download);
+
+    await waitFor(() => expect(mocks.downloadSheets).toHaveBeenCalledOnce());
+    expect(mocks.fetchWorkbook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        pageSize: 100,
+        q: 'rodamiento',
+        brand: 'FAG',
+        categoryId,
+        groupByUnifiedCode: true,
+        columnFilter: [JSON.stringify({ key: 'base:unifier', expression: 'UNI-*' })],
+        sort: JSON.stringify({ key: 'base:unifier', direction: 'asc' }),
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(mocks.downloadSheets).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ id: productOne, sku: 'SKU-1' }),
+        expect.objectContaining({ id: productTwo, sku: 'SKU-2' }),
+      ],
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('keeps individual product access while the role disables bulk PDF generation', async () => {
+    const { rerender } = render(<CatalogWorkbookTable canEdit={false} />);
+    expect(await screen.findByRole('link', { name: 'UNI-1' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Fichas técnicas PDF (ZIP)' }),
+    ).not.toBeInTheDocument();
+
+    rerender(<CatalogWorkbookTable canEdit={false} canGenerateBulkTechnicalSheets />);
+    expect(screen.getByRole('button', { name: 'Fichas técnicas PDF (ZIP)' })).toBeVisible();
+  });
+
   it('keeps unclassified SKU accessible without inventing completeness or editable attributes', async () => {
     mocks.fetchWorkbook.mockResolvedValue({
       ...workbook,
@@ -308,21 +382,21 @@ describe('CatalogWorkbookTable', () => {
 
   it('uses optimistic concurrency, treats a blank as no-op and a dash as clear', async () => {
     render(<CatalogWorkbookTable canEdit />);
-    const edit = await screen.findByRole('button', {
-      name: 'Editar Descripción técnica de SKU-1',
+    const edit = await screen.findByLabelText('Editar Descripción técnica de SKU-1', {
+      selector: 'button',
     });
     fireEvent.click(edit);
-    let input = screen.getByRole('textbox', {
-      name: 'Editar Descripción técnica de SKU-1',
+    let input = screen.getByLabelText('Editar Descripción técnica de SKU-1', {
+      selector: 'input',
     });
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(mocks.patchAttribute).not.toHaveBeenCalled();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Editar Descripción técnica de SKU-1' }),
+      await screen.findByLabelText('Editar Descripción técnica de SKU-1', { selector: 'button' }),
     );
-    input = screen.getByRole('textbox', { name: 'Editar Descripción técnica de SKU-1' });
+    input = screen.getByLabelText('Editar Descripción técnica de SKU-1', { selector: 'input' });
     fireEvent.change(input, { target: { value: '-' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 

@@ -115,6 +115,9 @@ secciones de ficha/PDF, visibilidad por SKU, columnas adicionales de aplicacione
 reportes y seguimiento de importaciones. Las importaciones asíncronas usan SQS y el worker con acceso a PostgreSQL;
 el modo local en memoria conserva la confirmación síncrona. Las dependencias pendientes de CDR siguen explícitas.
 
+La alineación con el diseño aprobado del 17 de noviembre, incluido el nuevo editor de fichas PDF (#38), se documenta en
+[`DESIGN_ALIGNMENT_2026-11-20.md`](docs/product/DESIGN_ALIGNMENT_2026-11-20.md). Requiere aplicar la migración `0057` antes del despliegue.
+
 ## Comandos
 
 ```bash

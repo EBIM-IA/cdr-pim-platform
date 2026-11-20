@@ -3,6 +3,7 @@ import type {
   ProductAttributeSheetDto,
   ProductExperienceDto,
 } from '@cdr/contracts';
+import { createDefaultPdfDesignConfig } from '@cdr/contracts';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,8 +26,27 @@ import {
 import type { Product } from '@/lib/types';
 import { fetchProductExperience } from '@/lib/product-experience-api';
 import { listProductAssets, uploadProductAsset } from '@/lib/product-assets-api';
+import { createTechnicalSheetPdf } from '@/lib/technical-sheet-pdf';
+import { fetchPdfDesignSettings } from '@/lib/pdf-design-api';
 
 import { ProductDetailView } from './product-detail-view';
+
+vi.mock('@/lib/pdf-design-api', () => ({ fetchPdfDesignSettings: vi.fn() }));
+vi.mock('@/lib/technical-sheet-pdf', () => ({ createTechnicalSheetPdf: vi.fn() }));
+vi.mock('@/lib/technical-sheet-export', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  technicalSheetLogo: vi.fn(async () => new Uint8Array([1])),
+  technicalSheetMedia: vi.fn(async () => []),
+  technicalSheetBrand: vi.fn(async () => ({})),
+}));
+vi.mock('@/components/pdf-document-pages', () => ({
+  PdfDocumentPages: ({ bytes, label }: { bytes: Uint8Array | null; label: string }) =>
+    bytes ? (
+      <figure role="img" aria-label={label} data-pdf-bytes={bytes.join(',')} />
+    ) : (
+      <p>Preparando documento</p>
+    ),
+}));
 
 vi.mock('@/lib/technical-sheet-visibility-api', () => ({
   getTechnicalSheetVisibility: vi.fn(async () => ({ visible: true, version: 0 })),
@@ -260,6 +280,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchProduct).mockResolvedValue(product);
   vi.mocked(fetchProductExperience).mockResolvedValue(experience);
+  vi.mocked(fetchPdfDesignSettings).mockResolvedValue({
+    config: createDefaultPdfDesignConfig(),
+    updatedAt: null,
+  });
+  vi.mocked(createTechnicalSheetPdf).mockResolvedValue(new Uint8Array([37, 80, 68, 70]));
   vi.mocked(listProductAssets).mockResolvedValue([]);
   vi.mocked(fetchProductAttributeSheet).mockResolvedValue(sheet);
   vi.mocked(fetchProductTechnicalSheet).mockResolvedValue(sheet);
@@ -418,8 +443,75 @@ describe('ProductDetailView operational data', () => {
       ).not.toBeInTheDocument();
       expect(content.queryByText('Fuente: Manual')).not.toBeInTheDocument();
       expect(listAuditChanges).not.toHaveBeenCalled();
+      expect(
+        content.getByRole('button', { name: `Ver ficha técnica de ${product.sku}` }),
+      ).toBeInTheDocument();
+      expect(
+        content.getByRole('button', { name: `Descargar ficha técnica de ${product.sku}` }),
+      ).toBeInTheDocument();
     },
   );
+
+  it('shows traction beside the engine and keeps the body type with the vehicle', async () => {
+    const applications = await listApplications({ unifiedCode: 'D1672' });
+    vi.mocked(listApplications).mockResolvedValue(
+      applications.map((application) => ({ ...application, verificationStatus: 'verified' })),
+    );
+    render(<ProductDetailView productId={product.id} consumerMode />);
+    const traction = await screen.findByRole('columnheader', { name: 'Tracción' });
+    const table = within(traction.closest('table')!);
+    expect(table.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Vehículo',
+      'Años',
+      'Motor',
+      'Tracción',
+      'Dónde va',
+    ]);
+    const row = table.getAllByRole('row')[1]!;
+    expect(within(row).getByRole('rowheader')).toHaveTextContent('Toyota Hilux · PICKUP');
+    expect(within(row).getAllByRole('cell')[2]).toHaveTextContent('4X4');
+  });
+
+  it('presents approved OEM and homolog references in separate named columns', async () => {
+    vi.mocked(listHomologs).mockResolvedValue([
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        groupId: '77777777-7777-4777-8777-777777777777',
+        unifiedCode: 'D1672',
+        externalCode: 'EXT-D1672',
+        externalBrand: 'NSK',
+        name: 'Referencia aprobada',
+        active: true,
+        approvalStatus: 'approved',
+        source: 'manual',
+        importBatchId: null,
+        createdAt: '2026-11-16T12:00:00.000Z',
+        updatedAt: '2026-11-16T12:00:00.000Z',
+      },
+    ]);
+    vi.mocked(listOemCodes).mockResolvedValue([
+      {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        groupId: '77777777-7777-4777-8777-777777777777',
+        unifiedCode: 'D1672',
+        oemCode: 'OEM-D1672',
+        brands: ['Toyota'],
+        active: true,
+        approvalStatus: 'approved',
+        source: 'manual',
+        importBatchId: null,
+        createdAt: '2026-11-16T12:00:00.000Z',
+        updatedAt: '2026-11-16T12:00:00.000Z',
+      },
+    ]);
+    render(<ProductDetailView productId={product.id} consumerMode />);
+    expect(await screen.findByRole('list', { name: 'OEM' })).toHaveTextContent(
+      'Toyota – OEM-D1672',
+    );
+    expect(screen.getByRole('list', { name: 'Homólogos' })).toHaveTextContent('NSK – EXT-D1672');
+    expect(screen.queryByText('HOMÓLOGO', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('OEM', { exact: true })).not.toBeInTheDocument();
+  });
 
   it.each([
     { role: 'ADMINISTRADOR', showCompleteness: true, showProductStatus: true },
@@ -786,7 +878,7 @@ describe('ProductDetailView operational data', () => {
     expect(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' })).toBeInTheDocument();
   });
 
-  it('previews a technical sheet using only attributes enabled by the template', async () => {
+  it('previews the downloadable PDF bytes using only attributes enabled by the template', async () => {
     const view = render(<ProductDetailView productId={product.id} />);
     const rendered = within(view.container);
 
@@ -797,13 +889,92 @@ describe('ProductDetailView operational data', () => {
     fireEvent.click(rendered.getByRole('button', { name: 'Ficha técnica (PDF)' }));
 
     const dialog = rendered.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
-    expect(within(dialog).getByText('Especificaciones publicables')).toBeInTheDocument();
-    const exportedAttributes = dialog.querySelector('.sheet-attributes');
-    expect(exportedAttributes).not.toBeNull();
-    expect(
-      within(exportedAttributes as HTMLElement).getByText('Código unificador'),
-    ).toBeInTheDocument();
-    expect(within(dialog).queryByText('Descripción interna')).not.toBeInTheDocument();
+    const preview = await within(dialog).findByRole('img', {
+      name: `Ficha técnica ${product.sku}`,
+    });
+    expect(preview).toHaveAttribute('data-pdf-bytes', '37,80,68,70');
+    expect(createTechnicalSheetPdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attributes: [
+          expect.objectContaining({ key: 'codigo_unificador', label: 'Código unificador' }),
+        ],
+      }),
+    );
+    const document = vi.mocked(createTechnicalSheetPdf).mock.calls.at(-1)![0];
+    expect(JSON.stringify(document)).not.toContain('Descripción interna');
+    expect(within(dialog).getByRole('button', { name: 'Descargar PDF' })).toBeEnabled();
+  });
+
+  it('does not re-export a commercial description withdrawn after the product page loaded', async () => {
+    const previousCopy = { titulo: 'Título anterior', descripcion: 'COMERCIAL RETIRADO' };
+    const loaded = {
+      ...experience,
+      variants: experience.variants.map((variant) => ({
+        ...variant,
+        descripcionEcommerce: previousCopy,
+      })),
+    };
+    const current = {
+      ...experience,
+      variants: experience.variants.map((variant, index) => ({
+        ...variant,
+        descripcionEcommerce:
+          index === 0
+            ? { titulo: 'Otra aplicación', descripcion: 'APROBADA PARA OTRA APLICACIÓN' }
+            : null,
+      })),
+    };
+    vi.mocked(fetchProductExperience).mockResolvedValueOnce(loaded).mockResolvedValue(current);
+    window.history.replaceState(
+      {},
+      '',
+      `/products/${product.id}?aplicacion=${experience.variants[1]!.aplicacion!.id}`,
+    );
+    render(<ProductDetailView productId={product.id} />);
+    await screen.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
+    await waitFor(() => expect(fetchProductExperience).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Ficha técnica (PDF)' }));
+    const dialog = screen.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
+    await within(dialog).findByRole('img', { name: `Ficha técnica ${product.sku}` });
+    expect(fetchProductExperience).toHaveBeenCalledTimes(2);
+    const document = vi.mocked(createTechnicalSheetPdf).mock.calls.at(-1)![0];
+    expect(document.description).toBeUndefined();
+    expect(JSON.stringify(document)).not.toContain('COMERCIAL RETIRADO');
+    expect(JSON.stringify(document)).not.toContain('APROBADA PARA OTRA APLICACIÓN');
+    expect(document.technicalDescription).toContain('Código unificador');
+  });
+
+  it('resolves the selected application description from the current server projection', async () => {
+    const current = {
+      ...experience,
+      variants: experience.variants.map((variant, index) => ({
+        ...variant,
+        descripcionEcommerce: {
+          titulo: `Variante ${index}`,
+          descripcion: index === 1 ? 'DESCRIPCIÓN VIGENTE SELECCIONADA' : 'OTRA APLICACIÓN',
+        },
+      })),
+    };
+    vi.mocked(fetchProductExperience).mockResolvedValueOnce(experience).mockResolvedValue(current);
+    window.history.replaceState(
+      {},
+      '',
+      `/products/${product.id}?aplicacion=${experience.variants[1]!.aplicacion!.id}`,
+    );
+    render(<ProductDetailView productId={product.id} />);
+    await screen.findByRole('heading', {
+      name: `${product.sku} : ${product.providerCode}`,
+      level: 1,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Ficha técnica (PDF)' }));
+    const dialog = screen.getByRole('dialog', { name: `Ficha técnica · ${product.sku}` });
+    await within(dialog).findByRole('img', { name: `Ficha técnica ${product.sku}` });
+    expect(vi.mocked(createTechnicalSheetPdf).mock.calls.at(-1)![0].description).toBe(
+      'DESCRIPCIÓN VIGENTE SELECCIONADA',
+    );
   });
 
   it('saves every edited PIM field in one atomic batch', async () => {

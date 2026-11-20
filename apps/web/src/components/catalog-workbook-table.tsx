@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { usePersistentColumnOrder } from '@/components/column-order';
 import {
@@ -305,7 +306,10 @@ export function CatalogWorkbookTable({
   showCompleteness = false,
   showStatus = true,
   showDescriptionAndTemplate = true,
+  canGenerateBulkTechnicalSheets = false,
+  bulkTechnicalSheetsHost,
   onFacetsChange,
+  onSummaryChange,
 }: {
   readonly q?: string;
   readonly brand?: string;
@@ -317,7 +321,12 @@ export function CatalogWorkbookTable({
   readonly showCompleteness?: boolean;
   readonly showStatus?: boolean;
   readonly showDescriptionAndTemplate?: boolean;
+  readonly canGenerateBulkTechnicalSheets?: boolean;
+  readonly bulkTechnicalSheetsHost?: HTMLElement | null;
   readonly onFacetsChange?: (facets: CatalogWorkbookResultDto['facets']) => void;
+  readonly onSummaryChange?: (
+    summary: Pick<CatalogWorkbookResultDto, 'total' | 'totalArticles' | 'totalBrands'> | null,
+  ) => void;
 }) {
   const [rows, setRows] = useState<CatalogWorkbookProductDto[]>([]);
   const [dynamicColumns, setDynamicColumns] = useState<CatalogWorkbookColumnDto[]>([]);
@@ -428,6 +437,7 @@ export function CatalogWorkbookTable({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    onSummaryChange?.(null);
     void fetchCatalogWorkbook(
       {
         page,
@@ -458,6 +468,11 @@ export function CatalogWorkbookTable({
           brands: result.totalBrands ?? result.facets.brands.length,
         });
         onFacetsChange?.(result.facets);
+        onSummaryChange?.({
+          total: result.total,
+          totalArticles: result.totalArticles ?? result.total,
+          totalBrands: result.totalBrands ?? result.facets.brands.length,
+        });
         setEditing(null);
       })
       .catch((requestError: unknown) => {
@@ -479,6 +494,7 @@ export function CatalogWorkbookTable({
     categoryId,
     completeness,
     onFacetsChange,
+    onSummaryChange,
     page,
     pageSize,
     q,
@@ -720,6 +736,29 @@ export function CatalogWorkbookTable({
   }
 
   const consultation = !canEdit && !showCompleteness;
+  const technicalSheetsAction = canGenerateBulkTechnicalSheets ? (
+    <CatalogTechnicalSheetsButton
+      compact={!consultation}
+      query={{
+        filter: [],
+        columnFilter: serializedColumnFilters,
+        groupByUnifiedCode: consultation,
+        ...(q ? { q } : {}),
+        ...(brand ? { brand } : {}),
+        ...(status ? { status } : {}),
+        ...(applicationType ? { applicationType } : {}),
+        ...(completeness ? { completeness } : {}),
+        ...(categoryId ? { categoryId } : {}),
+        ...(serializedSort ? { sort: serializedSort } : {}),
+      }}
+    />
+  ) : null;
+  const technicalSheetsPlacement =
+    bulkTechnicalSheetsHost === undefined
+      ? technicalSheetsAction
+      : bulkTechnicalSheetsHost
+        ? createPortal(technicalSheetsAction, bulkTechnicalSheetsHost)
+        : null;
   const showFilterSummary =
     table.filteredColumnKeys.length > 0 ||
     Object.values(columnExpressions).some((expression) => expression.trim()) ||
@@ -730,14 +769,14 @@ export function CatalogWorkbookTable({
   return (
     <Card className="min-w-0 overflow-hidden">
       <div className="flex min-h-8 flex-wrap items-center justify-between gap-1 border-b px-3 py-1 text-[11px] text-muted-foreground">
-        <span>
+        <span hidden={!!onSummaryChange}>
           {formatNumber(total)}{' '}
           {consultation ? (total === 1 ? 'código unificador' : 'códigos unificadores') : 'SKU'}
           {consultation
             ? ` · ${formatNumber(groupCounts.articles)} ${groupCounts.articles === 1 ? 'artículo' : 'artículos'} · ${formatNumber(groupCounts.brands)} ${groupCounts.brands === 1 ? 'marca' : 'marcas'}`
             : ''}
         </span>
-        <div className="flex items-center gap-1 [&_button]:h-7 [&_button]:px-2">
+        <div className="ml-auto flex items-center gap-1 [&_button]:h-7 [&_button]:px-2">
           <Button
             type="button"
             size="sm"
@@ -775,21 +814,7 @@ export function CatalogWorkbookTable({
               </Button>
             </>
           ) : null}
-          <CatalogTechnicalSheetsButton
-            compact
-            query={{
-              filter: [],
-              columnFilter: serializedColumnFilters,
-              groupByUnifiedCode: consultation,
-              ...(q ? { q } : {}),
-              ...(brand ? { brand } : {}),
-              ...(status ? { status } : {}),
-              ...(applicationType ? { applicationType } : {}),
-              ...(completeness ? { completeness } : {}),
-              ...(categoryId ? { categoryId } : {}),
-              ...(serializedSort ? { sort: serializedSort } : {}),
-            }}
-          />
+          {technicalSheetsPlacement}
           <Button
             type="button"
             size="sm"

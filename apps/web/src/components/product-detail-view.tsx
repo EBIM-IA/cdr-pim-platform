@@ -39,7 +39,6 @@ import { ProductRelationsDrawer } from '@/components/product-relations-drawer';
 import { ApplicationsWorkspace } from '@/components/applications-workspace';
 import { EquivalencesWorkspace, type EquivalencesView } from '@/components/equivalences-workspace';
 import { DocumentsWorkspace } from '@/components/documents-workspace';
-import { ProductTechnicalSheetVisibility } from '@/components/product-technical-sheet-visibility';
 import { ProductGallery } from '@/components/product-gallery';
 import { ScreenGuide } from '@/components/screen-guide';
 import { StatePanel } from '@/components/state-panel';
@@ -2863,6 +2862,7 @@ export function ProductDetailView({
         : product.application);
   const variants = experience?.variants.filter((variant) => variant.productId === product.id) ?? [];
   const selectedVariant = variants.find((variant) => variantKey(variant) === selectedVariantKey);
+  const documentVariant = selectedVariant ?? variants[0];
   const heroName =
     selectedVariant?.nombreAmigable ||
     experience?.nombreGeneral ||
@@ -2989,7 +2989,11 @@ export function ProductDetailView({
             <TechnicalSheetPreview
               open={technicalSheetOpen}
               assets={assets}
-              commercialCopy={(selectedVariant ?? variants[0])?.descripcionEcommerce}
+              variantSelection={
+                documentVariant
+                  ? { type: documentVariant.tipo, applicationId: documentVariant.aplicacion?.id }
+                  : undefined
+              }
               product={product}
               sheet={technicalSheet}
               unitSystem={unitSystem}
@@ -3038,7 +3042,6 @@ export function ProductDetailView({
             canManage={canWriteAssets}
             onAssetsChange={setAssets}
           />
-          {showCompleteness ? <ProductTechnicalSheetVisibility productId={product.id} /> : null}
           <div className="mt-2">
             <span className="block text-[10px] text-muted-foreground">Marca</span>
             <strong className="text-base">{product.brand}</strong>

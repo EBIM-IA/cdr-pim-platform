@@ -44,7 +44,7 @@ export function ModulePolicyEditor({
         ),
       );
       setMessage(
-        'Módulo actualizado. El cambio queda auditado y se aplica desde la siguiente solicitud.',
+        'Permiso actualizado. El cambio queda auditado y se aplica desde la siguiente solicitud.',
       );
       router.refresh();
     } catch (error) {
@@ -147,6 +147,33 @@ export function ModulePolicyEditor({
             </tbody>
           </table>
         </div>
+        <section className="mt-5 border-t pt-4" aria-label="Fichas técnicas PDF por perfil">
+          <h3 className="font-semibold">Fichas técnicas PDF</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Permite generar y descargar varias fichas en un ZIP desde Productos. La ficha individual
+            sigue disponible para todos los perfiles.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-5">
+            {roles.map((role) => (
+              <label key={role} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  aria-label={`Fichas técnicas PDF para ${role}`}
+                  checked={
+                    grants
+                      .find((entry) => entry.role === role)
+                      ?.capabilities.includes('technical-sheets:bulk') ?? false
+                  }
+                  disabled={!canManage || busy || role === 'ADMINISTRADOR'}
+                  onChange={(event) =>
+                    void save(role, 'technical-sheets:bulk', event.target.checked)
+                  }
+                />
+                {role}
+              </label>
+            ))}
+          </div>
+        </section>
         <div className="mt-4 flex justify-end">
           <Button
             size="sm"

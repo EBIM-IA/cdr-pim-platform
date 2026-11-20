@@ -1,3 +1,7 @@
+import { PdfDesignSettingsUseCase } from './application/pdf-design-settings.use-case';
+import { PdfDesignSettingsController } from './presentation/pdf-design-settings.controller';
+import { PDF_DESIGN_SETTINGS } from './domain/ports/pdf-design-settings.port';
+import { DrizzlePdfDesignSettings } from './infrastructure/persistence/drizzle-pdf-design-settings';
 import { CategoryGovernanceUseCase } from './application/category-governance.use-case';
 import { CategoryGovernanceController } from './presentation/category-governance.controller';
 import { CATEGORY_GOVERNANCE } from './domain/ports/category-governance.port';
@@ -66,6 +70,7 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
 @Module({
   imports: [ApplicationsModule, CatalogModule, ProductAssetsModule],
   controllers: [
+    PdfDesignSettingsController,
     CategoryGovernanceController,
     CatalogHomeController,
     CatalogParametersController,
@@ -76,6 +81,8 @@ import { CatalogAdministrationController } from './presentation/catalog-administ
     ProductNamingController,
   ],
   providers: [
+    PdfDesignSettingsUseCase,
+    { provide: PDF_DESIGN_SETTINGS, useClass: DrizzlePdfDesignSettings },
     CategoryGovernanceUseCase,
     { provide: CATEGORY_GOVERNANCE, useClass: PostgresCategoryGovernanceAdapter },
     CatalogHomeUseCases,

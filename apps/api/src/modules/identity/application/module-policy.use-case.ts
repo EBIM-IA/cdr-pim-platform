@@ -14,7 +14,7 @@ import {
   type BusinessRole,
 } from '../domain/entities/role';
 
-/** Menu policies never grant data mutation capabilities or modify identity-provider roles. */
+/** Policies configure menus and bulk PDF generation without granting data mutation privileges. */
 @Injectable()
 export class ModulePolicyUseCase {
   constructor(@Inject(MODULE_POLICY) private readonly policies: ModulePolicyPort) {}
@@ -24,8 +24,17 @@ export class ModulePolicyUseCase {
   async save(policy: ModulePolicy, actor: AuthenticatedActor) {
     if (!actor.roles.some((role) => normalizeBusinessRole(role) === Role.Administrator))
       throw new ForbiddenError('Solo ADMINISTRADOR puede configurar módulos');
-    if (!policy.capability.startsWith('menu:'))
-      throw new ValidationError('La política debe identificar un módulo');
+    if (
+      !policy.capability.startsWith('menu:') &&
+      policy.capability !== Capability.TechnicalSheetsBulk
+    )
+      throw new ValidationError('La política debe identificar un módulo o fichas PDF');
+    if (
+      policy.role === Role.Administrator &&
+      policy.capability === Capability.TechnicalSheetsBulk &&
+      !policy.visible
+    )
+      throw new ValidationError('ADMINISTRADOR conserva la generación de fichas técnicas');
     if (
       policy.role === Role.Administrator &&
       policy.capability === Capability.MenuAdministrationView &&

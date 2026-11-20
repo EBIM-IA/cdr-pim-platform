@@ -1,26 +1,25 @@
 'use client';
 
 import type { ProductAttributeSheetDto, ProductAssetDto } from '@cdr/contracts';
-import { Download, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-
-import { ProductThumbnail } from '@/components/product-thumbnail';
+import { Download, Printer, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  downloadTechnicalSheetPdf,
-  technicalSheetDocument,
-  technicalSheetMedia,
-  technicalSheetLogo,
-  technicalSheetBrand,
-} from '@/lib/technical-sheet-export';
+import { PdfDocumentPages } from '@/components/pdf-document-pages';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
 import {
-  groupAttributesByTemplateSections,
-  technicalAttributesFromSheet,
-  unifiedCodeFromSheet,
-} from '@/lib/product-detail-data';
+  technicalSheetDocument,
+  technicalSheetDesign,
+  technicalSheetMedia,
+  technicalSheetLogo,
+  technicalSheetCopy,
+  technicalSheetBrand,
+  type TechnicalSheetVariantSelection,
+} from '@/lib/technical-sheet-export';
+import { fetchPdfDesignSettings } from '@/lib/pdf-design-api';
+import { createTechnicalSheetPdf } from '@/lib/technical-sheet-pdf';
+import { downloadBinary, technicalSheetFilename } from '@/lib/zip-export';
 import type { Product } from '@/lib/types';
-import { displayMeasurement, type MeasurementSystem } from '@/lib/units';
+import type { MeasurementSystem } from '@/lib/units';
 
 interface TechnicalSheetPreviewProps {
   readonly open: boolean;
@@ -29,25 +28,8 @@ interface TechnicalSheetPreviewProps {
   readonly unitSystem: MeasurementSystem;
   readonly onClose: () => void;
   readonly assets?: readonly ProductAssetDto[];
-  readonly commercialCopy?: { titulo: string; descripcion: string } | null;
+  readonly variantSelection?: TechnicalSheetVariantSelection;
 }
-
-function printableValue(
-  value: string | number | boolean,
-  unit: string | null,
-  key: string,
-  unitSystem: MeasurementSystem,
-): string {
-  const measurement = displayMeasurement(
-    value,
-    { unit: unit ?? undefined, attributeKey: key },
-    unitSystem,
-  );
-  if (measurement) return measurement.primary.text;
-  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
-  return `${String(value)}${unit ? ` ${unit}` : ''}`;
-}
-
 export function TechnicalSheetPreview({
   open,
   product,
@@ -55,270 +37,176 @@ export function TechnicalSheetPreview({
   unitSystem,
   onClose,
   assets = [],
-  commercialCopy,
+  variantSelection,
 }: TechnicalSheetPreviewProps) {
-  const [printError, setPrintError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const [brandInfo, setBrandInfo] = useState<{ brandLogo?: string; brandDescription?: string }>({});
+  const [bytes, setBytes] = useState<Uint8Array | null>(null),
+    [error, setError] = useState(''),
+    [designName, setDesignName] = useState('');
+  const dialog = useRef<HTMLElement>(null),
+    close = useRef(onClose);
+  close.current = onClose;
+  const assetKey = assets.map((asset) => `${asset.id}:${asset.position ?? ''}`).join(',');
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    void technicalSheetBrand(product.brand, controller.signal)
-      .then(setBrandInfo)
-      .catch((failure: unknown) => {
-        if (!controller.signal.aborted)
-          setPrintError(
-            failure instanceof Error ? failure.message : 'No se pudo consultar la marca.',
-          );
+    setBytes(null);
+    setError('');
+    void (async () => {
+      const [current, settings, logo, media, brand] = await Promise.all([
+        fetchProductTechnicalSheet(product.id, controller.signal),
+        fetchPdfDesignSettings(controller.signal),
+        technicalSheetLogo(controller.signal),
+        technicalSheetMedia(assets, controller.signal),
+        technicalSheetBrand(product.brand, controller.signal),
+      ]);
+      const options = technicalSheetDesign(current, settings.config);
+      const copy = await technicalSheetCopy(current, controller.signal, variantSelection);
+      const output = await createTechnicalSheetPdf({
+        ...technicalSheetDocument(current, unitSystem),
+        cdrLogo: logo,
+        media,
+        ...brand,
+        ...options,
+        ...copy,
       });
+      if (!controller.signal.aborted) {
+        setBytes(output);
+        setDesignName(options.design.name);
+      }
+    })().catch((failure: unknown) => {
+      if (!controller.signal.aborted)
+        setError(failure instanceof Error ? failure.message : 'No se pudo generar la ficha PDF.');
+    });
     return () => controller.abort();
-  }, [open, product.brand]);
-  const closePreview = useCallback(() => {
-    setPrintError(null);
-    onClose();
-  }, [onClose]);
-  const attributes = useMemo(
-    () =>
-      technicalAttributesFromSheet(sheet)
-        .filter(
-          (attribute) =>
-            attribute.includeInTechnicalSheet &&
-            attribute.canExport &&
-            attribute.value !== null &&
-            String(attribute.value).trim() !== '',
-        )
-        .map((attribute) => ({
-          ...attribute,
-          printable: printableValue(
-            attribute.value as string | number | boolean,
-            attribute.unit,
-            attribute.key,
-            unitSystem,
-          ),
-        })),
-    [sheet, unitSystem],
-  );
-  const configuredColumns = sheet.schema.columns.filter(
-    (column) => column.includeInTechnicalSheet && column.permissions.export,
-  ).length;
-  const omitted = sheet.schema.columns.length - attributes.length;
-  const unifiedCode = unifiedCodeFromSheet(sheet) ?? product.unifiedCode;
-
+    // Reload when the actual asset identity changes, without recreating PDF for array allocation.
+  }, [
+    open,
+    product.id,
+    product.brand,
+    sheet,
+    unitSystem,
+    assetKey,
+    variantSelection?.type,
+    variantSelection?.applicationId,
+  ]);
   useEffect(() => {
     if (!open) return;
-    const previousOverflow = document.body.style.overflow;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePreview();
+    dialog.current?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close.current();
+      if (event.key !== 'Tab' || !dialog.current) return;
+      const elements = [
+          ...dialog.current.querySelectorAll<HTMLElement>(
+            'button:not(:disabled),a[href],input,select,[tabindex="0"]',
+          ),
+        ],
+        first = elements[0],
+        last = elements.at(-1);
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || document.activeElement === dialog.current)
+      ) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', keydown);
     return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', closeOnEscape);
+      document.body.style.overflow = overflow;
+      window.removeEventListener('keydown', keydown);
+      previous?.focus();
     };
-  }, [closePreview, open]);
-
+  }, [open]);
   if (!open) return null;
-
+  const print = () => {
+    if (!bytes) return;
+    const buffer = new ArrayBuffer(bytes.length);
+    new Uint8Array(buffer).set(bytes);
+    const url = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' })),
+      frame = document.createElement('iframe');
+    frame.title = 'Impresión de ficha técnica';
+    frame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+    frame.src = url;
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        window.open(url, '_blank', 'noopener');
+      }
+      window.setTimeout(() => {
+        frame.remove();
+        URL.revokeObjectURL(url);
+      }, 60_000);
+    };
+    document.body.append(frame);
+  };
   return (
     <div
-      className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/55 p-4 sm:p-8"
+      className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/55 p-3 sm:p-7"
       role="presentation"
     >
       <button
         type="button"
         className="fixed inset-0 cursor-default"
         aria-label="Cerrar vista previa"
-        onClick={closePreview}
+        onClick={onClose}
       />
       <section
+        ref={dialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="technical-sheet-title"
-        className="relative mx-auto max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="relative mx-auto max-w-5xl overflow-hidden rounded-xl bg-white shadow-xl outline-none"
       >
-        <header className="no-print flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4 sm:px-7">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">
-              Vista previa descargable
-            </p>
-            <h2 id="technical-sheet-title" className="mt-1 text-xl font-bold">
+            <h2 id="technical-sheet-title" className="text-xl font-bold">
               Ficha técnica · {product.sku}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {attributes.length} atributos con valor de {configuredColumns} configurados para la
-              ficha; {omitted} omitidos por configuración o falta de dato.
+            <p className="mt-1 text-xs text-slate-500">
+              {designName
+                ? `Diseño ${designName} · vista previa del PDF que se descarga`
+                : 'Preparando documento…'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              disabled={downloading}
-              onClick={() => {
-                setPrintError(null);
-                setDownloading(true);
-                void Promise.all([
-                  fetchProductTechnicalSheet(product.id),
-                  technicalSheetLogo(),
-                  technicalSheetMedia(assets),
-                  technicalSheetBrand(product.brand),
-                ])
-                  .then(async ([current, cdrLogo, media, brand]) => {
-                    await downloadTechnicalSheetPdf({
-                      ...technicalSheetDocument(current, unitSystem),
-                      cdrLogo,
-                      media,
-                      ...brand,
-                      ...(commercialCopy
-                        ? { name: commercialCopy.titulo, description: commercialCopy.descripcion }
-                        : product.description
-                          ? { description: product.description }
-                          : {}),
-                    });
-                  })
-                  .catch((error: unknown) => {
-                    setPrintError(
-                      error instanceof Error
-                        ? error.message
-                        : 'No fue posible generar la ficha PDF.',
-                    );
-                  })
-                  .finally(() => setDownloading(false));
-              }}
-            >
-              <Download aria-hidden="true" className="size-4" />{' '}
-              {downloading ? 'Generando PDF…' : 'Descargar PDF'}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" disabled={!bytes} onClick={print}>
+              <Printer className="size-4" aria-hidden="true" />
+              Imprimir
             </Button>
             <Button
               type="button"
-              variant="ghost"
-              size="icon"
-              onClick={closePreview}
-              aria-label="Cerrar"
+              disabled={!bytes}
+              onClick={() =>
+                bytes &&
+                downloadBinary(bytes, technicalSheetFilename(product.sku), 'application/pdf')
+              }
             >
-              <X aria-hidden="true" className="size-5" />
+              <Download className="size-4" aria-hidden="true" />
+              Descargar PDF
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar">
+              <X className="size-5" />
             </Button>
           </div>
         </header>
-
-        {printError ? (
-          <p
-            className="no-print border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-800"
-            role="alert"
-          >
-            {printError}
+        {error ? (
+          <p role="alert" className="border-b bg-red-50 px-5 py-3 text-sm text-red-800">
+            {error}
           </p>
         ) : null}
-
-        <div className="max-h-[calc(100vh-10rem)] overflow-y-auto bg-slate-100 p-4 sm:p-8">
-          <article
-            id="technical-sheet-document"
-            data-file-name={`ficha-tecnica-${product.sku}.pdf`}
-            className="sheet mx-auto min-h-[1120px] max-w-[794px] border-t-[6px] border-primary bg-white px-8 py-7 shadow-sm"
-          >
-            <header className="sheet-header flex items-center justify-between gap-6 border-b pb-4">
-              {/* The official asset is served locally; no third-party request is needed to print. */}
-              <img
-                className="sheet-logo h-auto w-44 rounded bg-[#222222] p-2"
-                src="/brand/cdr-logo.png"
-                alt="Casa del Rulimán"
-              />
-              <div className="text-right">
-                <p className="sheet-kicker text-[10px] font-extrabold uppercase tracking-[.1em] text-primary">
-                  Ficha técnica comercial
-                </p>
-                <h1 className="mt-1 text-2xl font-bold leading-tight">
-                  {commercialCopy?.titulo ?? product.name}
-                </h1>
-                <p className="sheet-code mt-1 font-mono text-xs text-muted-foreground">
-                  Código artículo {product.sku}
-                </p>
-              </div>
-            </header>
-
-            <div className="sheet-summary mt-5 grid gap-6 sm:grid-cols-[190px_1fr]">
-              <div className="sheet-art overflow-hidden rounded-xl bg-[#f4f5f6] text-slate-600">
-                <ProductThumbnail
-                  product={{ ...product, category: sheet.schema.category.name }}
-                  assets={assets}
-                />
-              </div>
-              <div>
-                <p className="sheet-description text-sm leading-6 text-muted-foreground">
-                  {commercialCopy?.descripcion ??
-                    product.description ??
-                    'Producto del catálogo maestro CDR. Consulte las especificaciones vigentes antes de seleccionar su aplicación.'}
-                </p>
-                <dl className="sheet-base mt-4 grid grid-cols-2 gap-x-6 gap-y-3">
-                  {[
-                    ['Marca', product.brand],
-                    ['Categoría', sheet.schema.category.name],
-                    [
-                      'Plantilla',
-                      `${sheet.schema.template.name} v${sheet.schema.template.version}`,
-                    ],
-                    ['Código unificador', unifiedCode ?? 'No registrado'],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <dt className="text-[10px] text-muted-foreground">{label}</dt>
-                      <dd className="mt-0.5 text-xs font-bold">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            </div>
-
-            {brandInfo.brandLogo || brandInfo.brandDescription ? (
-              <section className="mt-5 border-t pt-4">
-                <h2 className="text-xs font-bold text-primary">Información de marca</h2>
-                {brandInfo.brandLogo ? (
-                  <img
-                    src={brandInfo.brandLogo}
-                    alt={`Logo de ${product.brand}`}
-                    className="mt-2 max-h-14 max-w-36 object-contain"
-                  />
-                ) : null}
-                {brandInfo.brandDescription ? (
-                  <p className="mt-2 text-xs text-muted-foreground">{brandInfo.brandDescription}</p>
-                ) : null}
-              </section>
-            ) : null}
-
-            {(sheet.schema.sections?.length
-              ? groupAttributesByTemplateSections(sheet, attributes)
-              : [{ title: 'Especificaciones publicables', attributes }]
-            ).map((group) => (
-              <section key={group.title}>
-                <h2 className="sheet-section-title mt-7 text-xs font-extrabold uppercase tracking-[.08em] text-primary">
-                  {group.title}
-                </h2>
-                <dl className="sheet-attributes grid grid-cols-1 overflow-hidden rounded-lg border sm:grid-cols-2">
-                  {group.attributes.map((attribute) => (
-                    <div
-                      key={attribute.key}
-                      className="sheet-attribute border-b px-3 py-2.5 sm:odd:border-r"
-                    >
-                      <dt className="text-[10px] text-muted-foreground">{attribute.label}</dt>
-                      <dd className="mt-1 break-words text-xs font-bold">{attribute.printable}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            ))}
-            {!attributes.length ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
-                No hay atributos exportables con valor para esta plantilla. Un administrador debe
-                revisar la configuración antes de entregar la ficha.
-              </div>
-            ) : null}
-
-            <footer className="sheet-footer mt-6 border-t pt-3 text-[9px] leading-relaxed text-muted-foreground">
-              Documento generado desde el catálogo maestro CDR. La identidad del SKU y la
-              configuración de atributos se conservan en el PIM. Sistema mostrado:{' '}
-              {unitSystem === 'metric' ? 'Métrico' : 'Imperial'}. Verifique la aplicación y la
-              versión vigente antes de utilizar el producto.
-            </footer>
-          </article>
+        <div className="max-h-[calc(100vh-12rem)] overflow-auto bg-[#eef0f2] p-3 sm:p-6">
+          <div className="mx-auto max-w-[794px]">
+            <PdfDocumentPages bytes={bytes} label={`Ficha técnica ${product.sku}`} />
+          </div>
         </div>
       </section>
     </div>

@@ -9,7 +9,7 @@ import { env } from '@/lib/env';
 import { securePrivateResponse, upstreamTimeoutSignal } from '@/lib/http-security';
 import { getAccessToken } from '@/lib/server-auth';
 
-type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface PrivateApiProxyOptions<
   TInput extends ZodTypeAny | undefined,

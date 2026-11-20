@@ -1,3 +1,4 @@
+import { pdfDesignSettings } from '../../modules/catalog-schema/infrastructure/persistence/pdf-design-settings.tables';
 import {
   catalogCategoryErpCodes,
   categoryDynamicAttributes,
@@ -74,6 +75,7 @@ import {
  * assembles the Nest modules.
  */
 export const schema = {
+  pdfDesignSettings,
   applicationColumnSettings,
   catalogCategoryErpCodes,
   categoryDynamicAttributes,
@@ -124,6 +126,7 @@ export const schema = {
 };
 
 export {
+  pdfDesignSettings,
   applicationColumnSettings,
   catalogCategoryErpCodes,
   categoryDynamicAttributes,

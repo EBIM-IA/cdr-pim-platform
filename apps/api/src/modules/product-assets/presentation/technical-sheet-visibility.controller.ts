@@ -8,11 +8,7 @@ import {
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
 import { CurrentActor } from '../../../shared/http/current-actor.decorator';
 import { ZodValidationPipe } from '../../../shared/http/zod-validation.pipe';
-import {
-  actorHasCapability,
-  Capability,
-  type AuthenticatedActor,
-} from '../../identity/domain/entities/role';
+import { Capability, type AuthenticatedActor } from '../../identity/domain/entities/role';
 import { TechnicalSheetVisibilityUseCase } from '../application/technical-sheet-visibility.use-case';
 
 @Controller('assets/technical-sheet-visibility')
@@ -23,12 +19,12 @@ export class TechnicalSheetVisibilityController {
   @Get()
   list(
     @Query(new ZodValidationPipe(productAssetBatchQuerySchema)) query: ProductAssetBatchQuery,
-    @CurrentActor() actor: AuthenticatedActor,
+    @CurrentActor() _actor: AuthenticatedActor,
   ) {
     return this.visibility.list(query.productIds).then((policies) =>
       policies.map((policy) => ({
         ...policy,
-        canView: policy.visible || actorHasCapability(actor, Capability.AdministrationManage),
+        canView: true,
       })),
     );
   }

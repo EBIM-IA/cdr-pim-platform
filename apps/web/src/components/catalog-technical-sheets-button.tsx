@@ -68,7 +68,7 @@ export function CatalogTechnicalSheetsButton({
         onProgress: (complete, total) => setProgress(`Generando ${complete}/${total}…`),
       });
       setNotice(
-        `${count} ${count === 1 ? 'ficha técnica descargada' : 'fichas técnicas descargadas'}. ${products.length - count} ${products.length - count === 1 ? 'artículo omitido' : 'artículos omitidos'} por visibilidad.`,
+        `${count} ${count === 1 ? 'ficha técnica descargada' : 'fichas técnicas descargadas'}.`,
       );
     } catch (failure) {
       if (!request.signal.aborted)

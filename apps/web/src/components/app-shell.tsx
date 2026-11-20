@@ -234,6 +234,12 @@ const pageSequence = [
     label: 'Catálogos de productos',
     capability: 'menu:catalogs:view',
   },
+  {
+    reference: 38,
+    href: '/administration?view=pdf-design',
+    label: 'Diseño de ficha PDF',
+    capability: 'menu:administration:view',
+  },
 ] as const satisfies readonly {
   reference: number;
   href: string;
@@ -364,6 +370,7 @@ const screenIndex = [
       ['Reportes Operativos', '/reports?view=reports', 'menu:reports:view'],
       ['Reporte de Búsquedas', '/reports?view=searches', 'menu:reports:view'],
       ['Catálogos de Configuración', '/administration?view=settings', 'menu:administration:view'],
+      ['Diseño de ficha PDF', '/administration?view=pdf-design', 'menu:administration:view'],
     ],
   },
 ] as const;
@@ -672,7 +679,15 @@ function referencePage(pathname: string, view: string | null): number {
     return view === 'sources' ? 28 : view === 'batches' ? 30 : 29;
   }
   if (pathname.startsWith('/administration')) {
-    return view === 'roles' ? 32 : view === 'audit' ? 33 : view === 'settings' ? 36 : 31;
+    return view === 'roles'
+      ? 32
+      : view === 'audit'
+        ? 33
+        : view === 'settings'
+          ? 36
+          : view === 'pdf-design'
+            ? 38
+            : 31;
   }
   if (pathname.startsWith('/reports')) return view === 'searches' ? 35 : 34;
   return 4;

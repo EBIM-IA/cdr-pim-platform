@@ -1,5 +1,18 @@
-import type { ProductAssetDto, ProductAttributeSheetDto } from '@cdr/contracts';
-import { listTechnicalSheetVisibility } from '@/lib/technical-sheet-visibility-api';
+import {
+  type PdfDesignConfig,
+  type ProductAssetDto,
+  type ProductAttributeSheetDto,
+} from '@cdr/contracts';
+import { fetchProductExperience } from '@/lib/product-experience-api';
+import { catalogHomeSettings } from '@/lib/catalog-home-api';
+import { fetchPdfDesignSettings } from '@/lib/pdf-design-api';
+import {
+  resolvePdfDesign,
+  resolvePdfBrandLogo,
+  decodePdfDataUrl,
+  normalizeLogoBrand,
+  pdfImageDataUrl,
+} from '@/lib/pdf-designs';
 import { authenticatedBffFetch } from '@/lib/bff-client';
 import { listCatalogParameters } from '@/lib/catalog-parameters-api';
 import { fetchProductTechnicalSheet } from '@/lib/dynamic-catalog-api';
@@ -42,10 +55,24 @@ export function technicalSheetDocument(
   };
   return {
     sku: sheet.product.sku,
+    templateId: sheet.schema.template.id,
+    supplierCode:
+      String(
+        sheet.product.attributes.codigo_proveedor?.value ??
+          sheet.product.attributes.codigoProveedor?.value ??
+          '',
+      ) || undefined,
+    friendlyName: sheet.product.name,
+    technicalDescription: exported
+      .map(
+        (attribute) =>
+          `${attribute.label}: ${displayMeasurement(attribute.value!, { unit: attribute.unit ?? undefined, attributeKey: attribute.key }, unitSystem)?.primary.text ?? String(attribute.value)}${attribute.unit && !displayMeasurement(attribute.value!, { unit: attribute.unit, attributeKey: attribute.key }, unitSystem) ? ` ${attribute.unit}` : ''}`,
+      )
+      .join('. '),
     name: sheet.product.name,
     brand: sheet.product.brand,
     category: sheet.schema.category.name,
-    template: `${sheet.schema.template.name} v${sheet.schema.template.version}`,
+    template: sheet.schema.template.name,
     unifiedCode: unifiedCodeFromSheet(authorizedSheet),
     unitSystem,
     attributes: exported.map((attribute) => ({
@@ -137,25 +164,147 @@ export async function technicalSheetMedia(
     }),
   );
 }
-export async function technicalSheetBrand(brand: string | null, signal?: AbortSignal) {
+const HOME_PDF_BRANDS: Record<string, string> = {
+  BOSCH: 'bosch',
+  CHALLENGE: 'challenge',
+  CYCLO: 'cyclo',
+  DJF: 'djf',
+  FORCELUBE: 'forcelube',
+  GMB: 'gmb',
+  GOODYEAR: 'goodyear',
+  'JASON INDUSTRIAL': 'jason-industrial',
+  KOYO: 'koyo-jtekt',
+  MRK: 'mrk',
+  NSK: 'nsk',
+  OKAMI: 'okami',
+  SCHAEFFLER: 'schaeffler-luk-ina-fag',
+  SEPCO: 'sepco',
+  SNR: 'snr',
+  STANLEY: 'stanley',
+  STP: 'stp',
+  TIMKEN: 'timken',
+  VDC: 'vdc',
+  'WD 40': 'wd-40',
+};
+export async function technicalSheetBrand(
+  brand: string | null,
+  signal?: AbortSignal,
+  registeredBrands?: Awaited<ReturnType<typeof listCatalogParameters>>,
+) {
   if (!brand?.trim()) return {};
-  const brands = await listCatalogParameters('brand', signal);
-  const selected = brands.find(
-    (item) =>
-      item.active &&
-      item.value.trim().toLocaleLowerCase('es') === brand.trim().toLocaleLowerCase('es'),
-  );
+  const brands = registeredBrands ?? (await listCatalogParameters('brand', signal));
+  const key = normalizeLogoBrand(brand),
+    aliases: Record<string, string> = { FAG: 'SCHAEFFLER', INA: 'SCHAEFFLER', LUK: 'SCHAEFFLER' };
+  const alias = aliases[key] ?? aliases[key.split(' ')[0] ?? ''];
+  const active = brands.filter((item) => item.active);
+  const selected = active.find((item) => normalizeLogoBrand(item.value) === key);
+  const parent =
+    active
+      .filter((item) => item.logoDataUrl && key.startsWith(normalizeLogoBrand(item.value) + ' '))
+      .sort((a, b) => b.value.length - a.value.length)[0] ??
+    active.find((item) => item.logoDataUrl && normalizeLogoBrand(item.value) === alias);
+  const own = selected?.logoDataUrl ? selected : parent;
+  if (own?.logoDataUrl)
+    return {
+      brandLogo: own.logoDataUrl,
+      brandLogoSource: own === selected ? ('Propio' as const) : ('Heredado' as const),
+      brandLogoVia: own.value,
+      brandDescription: selected?.description ?? undefined,
+    };
+  const saved = await catalogHomeSettings(undefined, signal);
+  const homeKey =
+    alias ??
+    (HOME_PDF_BRANDS[key]
+      ? key
+      : Object.keys(HOME_PDF_BRANDS)
+          .filter((candidate) => key.startsWith(candidate + ' '))
+          .sort((a, b) => b.length - a.length)[0]);
+  const home =
+    saved.config.brands.find((entry) => normalizeLogoBrand(entry.key) === key) ??
+    saved.config.brands.find((entry) => normalizeLogoBrand(entry.key) === homeKey);
+  const url = home ? home.image : homeKey ? `/home/marcas/${HOME_PDF_BRANDS[homeKey]}.png` : null;
+  if (!url) return { brandDescription: selected?.description ?? undefined };
+  if (url.startsWith('data:'))
+    return {
+      brandLogo: url,
+      brandLogoSource: 'Inicio' as const,
+      brandLogoVia: home?.key ?? homeKey,
+      brandDescription: selected?.description ?? undefined,
+    };
+  const bytes = await bytesFromPrivateUrl(url, signal);
+  if (url.endsWith('.svg')) {
+    const copy = new ArrayBuffer(bytes.length);
+    new Uint8Array(copy).set(bytes);
+    return {
+      brandLogoSource: 'Inicio' as const,
+      brandLogoVia: home?.key ?? homeKey,
+      brandLogo: await pdfImageDataUrl(new File([copy], 'marca.svg', { type: 'image/svg+xml' })),
+      brandDescription: selected?.description ?? undefined,
+    };
+  }
+  const mime = bytes[0] === 255 && bytes[1] === 216 ? 'image/jpeg' : 'image/png';
   return {
-    brandLogo: selected?.logoDataUrl ?? undefined,
+    brandLogoSource: 'Inicio' as const,
+    brandLogoVia: home?.key ?? homeKey,
+    brandLogo: `data:${mime};base64,${btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''))}`,
     brandDescription: selected?.description ?? undefined,
   };
 }
 export async function technicalSheetLogo(signal?: AbortSignal): Promise<Uint8Array> {
-  return bytesFromPrivateUrl('/brand/cdr-logo.png', signal);
+  return bytesFromPrivateUrl('/brand/cdr-logo-color.png', signal);
+}
+export function technicalSheetDesign(sheet: ProductAttributeSheetDto, config: PdfDesignConfig) {
+  const brandLogo = resolvePdfBrandLogo(config, sheet.product.brand ?? '');
+  return {
+    ...resolvePdfDesign(config, sheet.schema.template.id),
+    ...(config.cdrLogoDataUrl ? { cdrLogo: decodePdfDataUrl(config.cdrLogoDataUrl) } : {}),
+    ...(brandLogo ? { brandLogo: brandLogo.dataUrl } : {}),
+  };
+}
+/** Names and approved, current commercial copy come from the server's variant projection. */
+export interface TechnicalSheetVariantSelection {
+  readonly type: 'automotriz' | 'industrial';
+  readonly applicationId?: string;
+}
+export async function technicalSheetCopy(
+  sheet: ProductAttributeSheetDto,
+  signal?: AbortSignal,
+  selection?: TechnicalSheetVariantSelection,
+) {
+  const experience = await fetchProductExperience(sheet.product.id, signal);
+  const variant = selection
+    ? experience.variants.find(
+        (variant) =>
+          variant.tipo === selection.type &&
+          (selection.applicationId
+            ? variant.aplicacion?.id === selection.applicationId
+            : variant.aplicacion === null),
+      )
+    : experience.variants[0];
+  const copy = variant?.descripcionEcommerce;
+  return {
+    friendlyName: experience.nombreGeneral || sheet.product.name,
+    ...(copy ? { description: copy.descripcion } : {}),
+  };
 }
 export async function downloadTechnicalSheetPdf(input: TechnicalSheetDocument): Promise<void> {
   const bytes = await createTechnicalSheetPdf(input);
   downloadBinary(bytes, technicalSheetFilename(input.sku), 'application/pdf');
+}
+export async function authorizeBulkTechnicalSheets(signal?: AbortSignal): Promise<void> {
+  const response = await authenticatedBffFetch('/api/catalog/technical-sheets/authorize', {
+    cache: 'no-store',
+    signal,
+  });
+  if (!response.ok)
+    throw new Error(
+      response.status === 403
+        ? 'Tu perfil no tiene habilitada la generación masiva de fichas técnicas PDF.'
+        : 'No se pudo comprobar el permiso de fichas técnicas. Vuelve a intentarlo.',
+    );
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('allowed' in body) || body.allowed !== true)
+    throw new Error('No se pudo comprobar el permiso de fichas técnicas.');
 }
 export async function downloadTechnicalSheetsZip(
   products: readonly { id: string; sku: string }[],
@@ -164,20 +313,14 @@ export async function downloadTechnicalSheetsZip(
 ): Promise<number> {
   if (!products.length || products.length > MAX_TECHNICAL_SHEETS_PER_ZIP)
     throw new Error(`Selecciona entre 1 y ${MAX_TECHNICAL_SHEETS_PER_ZIP} SKU con los filtros.`);
-  const policies = await listTechnicalSheetVisibility(
-    products.map((product) => product.id),
-    options.signal,
-  );
-  const visibleIds = new Set(
-    policies.filter((policy) => policy.canView ?? policy.visible).map((policy) => policy.productId),
-  );
-  const eligible = products.filter((product) => visibleIds.has(product.id));
-  if (!eligible.length) throw new Error('No hay SKU con ficha técnica accesible en la selección.');
+  await authorizeBulkTechnicalSheets(options.signal);
+  const eligible = products;
   const entries: BinaryZipEntry[] = [],
     filenames = new Set<string>();
-  const [cdrLogo, brands] = await Promise.all([
+  const [cdrLogo, brands, settings] = await Promise.all([
     technicalSheetLogo(options.signal),
     listCatalogParameters('brand', options.signal),
+    fetchPdfDesignSettings(options.signal),
   ]);
   for (const product of [...eligible].sort((a, b) =>
     a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0,
@@ -187,17 +330,17 @@ export async function downloadTechnicalSheetsZip(
       fetchProductTechnicalSheet(product.id, options.signal),
       technicalSheetMedia(assetsByProduct[product.id] ?? [], options.signal),
     ]);
-    const brand = brands.find(
-      (item) =>
-        item.active &&
-        item.value.toLocaleLowerCase('es') === (sheet.product.brand ?? '').toLocaleLowerCase('es'),
-    );
+    const [brand, copy] = await Promise.all([
+      technicalSheetBrand(sheet.product.brand, options.signal, brands),
+      technicalSheetCopy(sheet, options.signal),
+    ]);
     const bytes = await createTechnicalSheetPdf({
       ...technicalSheetDocument(sheet, 'metric'),
       cdrLogo,
       media,
-      brandLogo: brand?.logoDataUrl ?? undefined,
-      brandDescription: brand?.description ?? undefined,
+      ...brand,
+      ...technicalSheetDesign(sheet, settings.config),
+      ...copy,
     });
     let filename = technicalSheetFilename(sheet.product.sku);
     if (filenames.has(filename.toLowerCase()))
