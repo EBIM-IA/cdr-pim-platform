@@ -25,3 +25,4 @@ and update the status of the old one — never edit history.
 | [015](./ADR-015-token-authenticated-pdf-catalog-sharing.md)     | Token-authenticated private PDF catalog sharing         | Accepted |
 | [016](./ADR-016-file-scanning-and-object-retention.md)          | Malware scanning and 30-day object retention            | Accepted |
 | [017](./ADR-017-shared-import-worker-runtime.md)                | Shared import runtime in the SQS worker                 | Accepted |
+| [018](./ADR-018-worker-database-secret-and-promotion.md)        | Worker database secret and verified promotion           | Accepted |

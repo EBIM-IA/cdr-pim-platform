@@ -59,6 +59,15 @@ Mechanically (`promote.yml`), per application:
 Step 8 is what makes `IMAGE_QAS == IMAGE_PRD` verifiable rather than assumed: promote the
 same tag to both environments and the assertion prints the same digest in each run.
 
+Promotion prepares every service plan from its active task definition before migrating or
+updating services. The worker is deployed and verified first, then API/web. The gate checks
+the expected task revision, image, version, running tasks and explicit container health;
+`services-stable` alone can also describe a successful rollback. The current hosted worker
+checks its PostgreSQL connection, verified TLS and import schema before starting SQS or health.
+Its missing database reference is populated only from the same environment's existing API
+`DATABASE_URL` secret reference, as explicitly approved in [ADR-018](../adr/ADR-018-worker-database-secret-and-promotion.md).
+No plaintext credentials, IAM policies or security groups are copied or expanded.
+
 Tagging: `<full-git-sha>` always. A strictly validated `v<semver>` release event may add an
 alias only after proving the tagged commit belongs to `main`; it reuses the existing OCI
 index without rebuilding, preserving its provenance and SBOM. **`latest` is never published

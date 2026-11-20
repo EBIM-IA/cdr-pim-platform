@@ -45,8 +45,8 @@ COPY --from=build --chown=node:node /repo/apps/api/certs/rds-global-bundle.pem .
 ENV DATABASE_SSL_CA_FILE=/app/certs/rds-global-bundle.pem
 
 EXPOSE 3002
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3002)+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.WORKER_PORT||3002)+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # No init system and no shell wrapper: the process must receive SIGTERM directly so its
 # graceful-drain handler runs before ECS escalates to SIGKILL.

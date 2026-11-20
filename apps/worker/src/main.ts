@@ -1,4 +1,5 @@
 import { ImportBatchHandler } from './handlers/import-batch.handler';
+import { probeImportWorkerDatabase } from '@cdr/api/import-worker';
 import { loadWorkerEnv } from '@cdr/config';
 import { InMemoryQueueAdapter, type QueueConsumerPort, SqsQueueAdapter } from '@cdr/messaging';
 import { createLogger, sanitizeLogText } from '@cdr/shared';
@@ -17,6 +18,18 @@ async function bootstrap(): Promise<void> {
     level: env.LOG_LEVEL,
     pretty: env.APP_ENV === 'local',
   });
+
+  // ECS must not mark a hosted worker healthy or let it consume jobs until its
+  // exact database identity, verified TLS and import schema are usable.
+  if (env.APP_ENV === 'qas' || env.APP_ENV === 'prd') {
+    const database = await probeImportWorkerDatabase({
+      url: env.DATABASE_URL!,
+      poolMax: env.DATABASE_POOL_MAX,
+      ssl: env.DATABASE_SSL,
+      sslCaFile: env.DATABASE_SSL_CA_FILE,
+    });
+    logger.info('Worker import database verified before queue startup', { ...database });
+  }
 
   const queue: QueueConsumerPort =
     env.QUEUE_DRIVER === 'sqs'
