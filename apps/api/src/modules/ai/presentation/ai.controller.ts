@@ -1,23 +1,26 @@
 import { BootstrapCodeAffixesUseCase } from '../application/bootstrap-code-affixes.use-case';
-import { bootstrapCodeAffixesSchema, type BootstrapCodeAffixesInput } from '@cdr/contracts';
 import { SearchAssistantUseCase } from '../application/search-assistant.use-case';
-import { aiSearchAssistantRequestSchema, type AiSearchAssistantRequest } from '@cdr/contracts';
 import { Inject } from '@nestjs/common';
 import {
   QUALITY_CANDIDATE_CAPTURE,
   type QualityCandidateCapturePort,
 } from '../../quality/domain/ports/quality-candidate-capture.port';
 import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type AiCommercialProposalRequest,
   type AiCommercialProposalResponse,
   type AiExtractionCandidatesRequest,
   type AiExtractionCandidatesResponse,
+  type AiSearchAssistantRequest,
+  type BootstrapCodeAffixesInput,
   aiCommercialProposalRequestSchema,
   aiCommercialProposalResponseSchema,
   aiExtractionCandidatesRequestSchema,
   aiExtractionCandidatesResponseSchema,
+  aiSearchAssistantRequestSchema,
+  bootstrapCodeAffixesResultSchema,
+  bootstrapCodeAffixesSchema,
 } from '@cdr/contracts';
 
 import { RequireCapabilities } from '../../../shared/http/capability.decorator';
@@ -47,6 +50,9 @@ export class AiController {
   @HttpCode(200)
   @RateLimit('ai')
   @RequireCapabilities(Capability.AdministrationManage)
+  @ApiOperation({ summary: 'Suggest reviewable code affixes from documents or catalog codes' })
+  @ApiBody({ schema: openApiSchema(bootstrapCodeAffixesSchema) })
+  @ApiOkResponse({ schema: openApiSchema(bootstrapCodeAffixesResultSchema) })
   async bootstrap(
     @Body(new ZodValidationPipe(bootstrapCodeAffixesSchema)) body: BootstrapCodeAffixesInput,
     @CurrentActor() actor: AuthenticatedActor,

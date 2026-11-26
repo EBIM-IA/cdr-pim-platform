@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extractAssetCandidates, generateCommercialProposal } from './ai-api';
+import { bootstrapCodeAffixes, extractAssetCandidates, generateCommercialProposal } from './ai-api';
 
 const productId = '10000000-0000-4000-8000-000000000001';
 const assetId = '50000000-0000-4000-8000-000000000001';
@@ -63,6 +63,30 @@ describe('AI same-origin client', () => {
         body: JSON.stringify({ expectedAttributes: ['diametro'] }),
       }),
     );
+  });
+
+  it('preserves the documentary request and accepts sampled catalog counts from the same endpoint', async () => {
+    const result = { model: 'fake-generation-v1', simulated: true, items: [], skipped: 0 };
+    const sample = { sku: 18, provider: 12, homolog: 3 };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(result))
+      .mockResolvedValueOnce(Response.json({ ...result, sample }));
+    vi.stubGlobal('fetch', fetcher);
+    const documentaryInput = {
+      evidence: 'El fabricante indica que 2RS significa dos sellos.',
+      family: 'Rodamientos',
+    };
+    const catalogInput = { source: 'catalog', brand: 'SKF' } as const;
+    await expect(bootstrapCodeAffixes(documentaryInput)).resolves.toEqual(result);
+    await expect(bootstrapCodeAffixes(catalogInput)).resolves.toEqual({ ...result, sample });
+    for (const [index, input] of [documentaryInput, catalogInput].entries()) {
+      expect(fetcher).toHaveBeenNthCalledWith(
+        index + 1,
+        '/api/operations/ai/code-affixes/bootstrap',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+      );
+    }
   });
 
   it('rejects invalid identifiers and inputs before making a network request', async () => {

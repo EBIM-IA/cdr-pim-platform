@@ -258,6 +258,33 @@
 .specifications h3 {
   margin-bottom: 10px;
 }
+.templateSpecifications > :is(section, p) {
+  padding: 16px 24px;
+  border-top: 1px solid #e4e4e0;
+}
+.templateValues {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 0 20px;
+  margin: 6px 0 0;
+  font-size: 15px;
+}
+.templateValues > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #eeeeea;
+  overflow-wrap: anywhere;
+}
+.templateValues dt {
+  color: #5c5c58;
+}
+.templateValues dd {
+  margin: 0;
+  font-weight: 600;
+}
 .scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -572,6 +599,7 @@
     grid-template-columns: 1fr;
   }
   .specifications > div,
+  .templateSpecifications > :is(section, p),
   .card > h2,
   .vehicleHead h2 {
     padding: 16px;

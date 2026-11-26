@@ -36,6 +36,7 @@ import type {
   AttributeChange,
   AttributeUpdateRequest,
   CatalogAttributeFilter,
+  CatalogCodeSample,
   CatalogGridOptions,
   CatalogTemplateSelector,
   CatalogWorkbookOptions,
@@ -196,6 +197,73 @@ function workbookAxExpressionSql(columnLabel: SQL, expression: string): SQL<bool
 @Injectable()
 export class DrizzleDynamicCatalogRepository implements DynamicCatalogRepositoryPort {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
+
+  async sampleCodes(
+    roles: readonly string[],
+    brand?: string,
+  ): Promise<readonly CatalogCodeSample[]> {
+    if (!roles.length) return [];
+    const brandKey = brand?.toUpperCase();
+    const productBrand = sql`NULLIF(UPPER(BTRIM(${products.brand})), '')`;
+    const allowedRoles = sql.join(
+      roles.map((role) => sql`${role}`),
+      sql`, `,
+    );
+    // Cycle through brands within each code kind, using a stable ordering that does not
+    // crowd out brands or code series that appear later in the workbook sort order.
+    // Apply workbook visibility before reading the supplier attribute and keep its identifier fallback.
+    return this.db.execute<CatalogCodeSample>(sql`
+      WITH catalog_codes AS (
+        SELECT BTRIM(${products.sku}) AS sku, ${productBrand} AS brand,
+          COALESCE((
+            SELECT NULLIF(BTRIM(CASE
+              WHEN definition.data_type = 'date' THEN supplier.value_date::text
+              WHEN definition.data_type NOT IN ('number', 'measurement', 'boolean') THEN supplier.value_text
+            END), '')
+            FROM product_attribute_values AS supplier
+            JOIN attribute_definitions AS definition ON definition.id = supplier.attribute_definition_id
+            WHERE supplier.product_id = ${products.id}
+              AND definition.key = 'codigo_proveedor' AND definition.active = TRUE
+              AND supplier.deleted_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM ${productTemplateAssignments}
+                JOIN ${attributeTemplates}
+                  ON ${attributeTemplates.id} = ${productTemplateAssignments.templateId}
+                JOIN ${catalogCategories}
+                  ON ${catalogCategories.id} = ${attributeTemplates.categoryId}
+                JOIN ${templateAttributeAssignments}
+                  ON ${templateAttributeAssignments.templateId} = ${attributeTemplates.id}
+                  AND ${templateAttributeAssignments.attributeDefinitionId} = definition.id
+                JOIN ${templateAttributeRoleAccess}
+                  ON ${templateAttributeRoleAccess.templateId} = ${attributeTemplates.id}
+                  AND ${templateAttributeRoleAccess.attributeDefinitionId} = definition.id
+                WHERE ${productTemplateAssignments.productId} = ${products.id}
+                  AND ${attributeTemplates.status} = 'active' AND ${catalogCategories.active} = TRUE
+                  AND ${templateAttributeAssignments.active} = TRUE
+                  AND ${templateAttributeRoleAccess.canView} = TRUE
+                  AND ${templateAttributeRoleAccess.role} IN (${allowedRoles})
+              )
+          ), NULLIF(BTRIM(${workbookIdentifierSql('manufacturer_part_number')}), '')) AS provider
+        FROM ${products}
+        WHERE ${products.status} <> 'archived'
+          ${brandKey ? sql`AND ${productBrand} = ${brandKey}` : sql``}
+      ), codes AS (
+        SELECT 'sku' AS kind, sku AS code, brand FROM catalog_codes
+        UNION ALL
+        SELECT 'provider', provider, brand FROM catalog_codes
+      ), unique_codes AS (
+        SELECT DISTINCT kind, code, brand FROM codes
+        WHERE LENGTH(code) BETWEEN 1 AND 120 AND COALESCE(LENGTH(brand), 0) <= 120
+      ), brand_samples AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY kind, brand ORDER BY MD5(code), code) AS brand_rank
+        FROM unique_codes
+      ), source_samples AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY kind ORDER BY brand_rank, brand, code) AS source_rank
+        FROM brand_samples
+      )
+      SELECT kind, code, brand FROM source_samples WHERE source_rank <= 60 ORDER BY kind, source_rank
+    `);
+  }
 
   async listActiveCategories(roles: readonly string[]) {
     if (roles.length === 0) return [];

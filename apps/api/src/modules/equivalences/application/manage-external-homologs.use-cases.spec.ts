@@ -45,6 +45,10 @@ class MemoryHomologRepository implements ExternalHomologRepositoryPort {
     return [];
   }
 
+  async sampleApprovedCodes() {
+    return [];
+  }
+
   async insertWithAudit(homolog: ExternalHomolog, audit: HomologAuditWriteContext) {
     this.item = ExternalHomolog.rehydrate(homolog.toSnapshot());
     this.audits.push(audit);

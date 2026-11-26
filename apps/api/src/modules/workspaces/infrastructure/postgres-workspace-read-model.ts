@@ -1289,10 +1289,26 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
     await this.sql`SELECT 1`;
     const aiProviders = resolveAiCapabilityProviders(this.env);
     const axMockEnabled = this.env.AX_MOCK_MODE === 'local';
+    const axReceiverEnabled =
+      this.env.AX_INTEGRATION_MODE === 'inbound' &&
+      this.env.AX_INTEGRATION_AUTH_MODE === 'static_bearer' &&
+      Boolean(this.env.AX_INTEGRATION_TOKEN);
+    const axMappingDependency =
+      'Sismetic debe entregar el mapeo actualizado de los dos campos informados. CDR debe aprobar las reglas de aplicación y sobrescritura antes de procesar los lotes.';
+    const ecommerceDependency =
+      'Falta confirmar la documentación técnica de Narvis y el contrato de PrestaShop, incluido el ambiente de pruebas, los accesos y el mapeo.';
+    const tecdocDependency =
+      'El contrato requiere corrección, revisión legal y aprobación. La conexión necesita la licencia, la documentación técnica y las credenciales de TecDoc.';
     const rows: WorkspaceRow[] = [
       {
         id: 'postgresql',
-        values: { system: 'PostgreSQL', configured: true, state: 'Conectado para lectura' },
+        values: {
+          system: 'PostgreSQL',
+          configured: true,
+          state: 'Conectado para lectura',
+          operation: null,
+          dependency: null,
+        },
       },
       {
         id: 'queue',
@@ -1300,6 +1316,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           system: 'Cola de trabajos',
           configured: true,
           state: this.env.QUEUE_DRIVER === 'sqs' ? 'SQS configurado' : 'Memoria local no durable',
+          operation: null,
+          dependency: null,
         },
       },
       {
@@ -1308,6 +1326,8 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           system: 'Almacenamiento de objetos',
           configured: true,
           state: this.env.STORAGE_DRIVER === 's3' ? 'S3 configurado' : 'Memoria local no durable',
+          operation: null,
+          dependency: null,
         },
       },
       {
@@ -1316,16 +1336,20 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           system: 'Proveedor de IA',
           configured: true,
           state: `Embeddings: ${aiProviders.embeddings}; generación: ${aiProviders.generation}; documentos: ${aiProviders.documentExtraction}`,
+          operation: null,
+          dependency: null,
         },
       },
       {
         id: 'ax',
         values: {
-          system: 'Dynamics AX',
-          configured:
-            this.env.AX_INTEGRATION_AUTH_MODE === 'static_bearer' &&
-            !!this.env.AX_INTEGRATION_TOKEN,
-          state: 'Receptor PUSH durable · aplicación al catálogo pendiente de reglas aprobadas',
+          system: 'Sismetic / Dynamics AX',
+          configured: axReceiverEnabled,
+          state: axReceiverEnabled
+            ? 'Recepción habilitada en este entorno'
+            : 'Recepción deshabilitada en este entorno',
+          operation: 'Recepción PUSH de lotes de AX hacia el PIM con almacenamiento persistente.',
+          dependency: axMappingDependency,
         },
       },
       {
@@ -1336,18 +1360,60 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           state: axMockEnabled
             ? 'Receptor draft-0 local habilitado; memoria volátil y sin escritura al catálogo'
             : 'Deshabilitado por defecto; no es la integración AX de producción',
+          operation: null,
+          dependency: null,
         },
       },
       {
         id: 'prestashop',
-        values: { system: 'PrestaShop', configured: false, state: 'Adaptador no implementado' },
+        values: {
+          system: 'PrestaShop',
+          configured: false,
+          state: 'Sin conexión',
+          operation: 'Publicación del catálogo del PIM en el canal e-commerce.',
+          dependency: ecommerceDependency,
+        },
+      },
+      {
+        id: 'ecommerce-images',
+        values: {
+          system: 'Imágenes e-commerce',
+          configured: false,
+          state: 'Sin conexión',
+          operation: 'Intercambio de imágenes de productos con el canal e-commerce.',
+          dependency:
+            'Falta la documentación técnica de Narvis para confirmar el origen de las imágenes, cómo vincularlas a los SKU y el acceso de pruebas.',
+        },
+      },
+      {
+        id: 'tecdoc',
+        values: {
+          system: 'TecDoc',
+          configured: false,
+          state: 'Sin conexión',
+          operation: 'Consulta de referencias y aplicaciones vehiculares para enriquecer un SKU.',
+          dependency: tecdocDependency,
+        },
+      },
+      {
+        id: 'manufacturers',
+        values: {
+          system: 'Fabricantes por marca',
+          configured: false,
+          state: 'Sin conexión',
+          operation: 'Consulta de catálogos, fichas técnicas y planos en la fuente del fabricante.',
+          dependency:
+            'Para habilitar una conexión se requieren una fuente autorizada por marca, acceso, catálogo de referencia y reglas de mapeo.',
+        },
       },
       {
         id: 'orders',
         values: {
           system: 'Canal de pedidos',
           configured: false,
-          state: 'Sistema destino no definido',
+          state: 'Sin conexión',
+          operation: 'Envío de información al sistema de pedidos acordado con CDR.',
+          dependency: 'Falta definir el sistema destino y su contrato de intercambio.',
         },
       },
     ];
@@ -1362,20 +1428,26 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           integerMetric('ax-received-batches', 'Lotes AX recibidos', axInbox.totalBatches),
           integerMetric('ax-received-records', 'Registros AX recibidos', axInbox.totalRecords),
           integerMetric('configured-components', 'Componentes configurados', configured),
-          integerMetric('blocked-external-systems', 'Sistemas externos bloqueados', 3),
+          integerMetric(
+            'blocked-external-systems',
+            'Integraciones con operaciones bloqueadas',
+            rows.filter((row) => typeof row.values.dependency === 'string').length,
+          ),
           textMetric('environment', 'Entorno', this.env.APP_ENV),
         ],
         columns: [
           { key: 'system', label: 'Sistema', type: 'text' },
           { key: 'configured', label: 'Configurado', type: 'status' },
           { key: 'state', label: 'Estado real', type: 'status' },
+          { key: 'operation', label: 'Alcance', type: 'text' },
+          { key: 'dependency', label: 'Requisitos pendientes', type: 'text' },
         ],
         rows,
         notices: [
           info(
             'no-connectivity-test',
             'No se invocaron adaptadores externos',
-            'La vista revela solo capacidades y configuración validada, nunca secretos. Los adaptadores reales de AX, PrestaShop y pedidos no se ejecutan.',
+            'La vista muestra configuración conocida y ejecuciones persistidas. Los estados de los conectores no provienen de una prueba de conexión.',
           ),
           axMockEnabled
             ? warning(
@@ -1404,16 +1476,9 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
                 'Mock AX local',
                 'El receptor provisional está deshabilitado. Solo puede activarse en local/test con una credencial de máquina dedicada.',
               ),
-          blockedAction(
-            'sync-ax',
-            'Integración AX de producción',
-            'Faltan confirmar PUSH o PULL, transporte, mapeo, autenticación, reintentos y conectividad. El mock local no resuelve estas decisiones.',
-          ),
-          blockedAction(
-            'publish-prestashop',
-            'Probar PrestaShop',
-            'Faltan versión, API habilitada, credenciales y mapeo.',
-          ),
+          blockedAction('sync-ax', 'Aplicar lotes AX al catálogo', axMappingDependency),
+          blockedAction('publish-prestashop', 'Probar PrestaShop', ecommerceDependency),
+          blockedAction('query-tecdoc', 'Consultar TecDoc', tecdocDependency),
         ],
       }),
     };

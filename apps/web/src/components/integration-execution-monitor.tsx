@@ -60,8 +60,8 @@ export function IntegrationExecutionMonitor({
         <div className="border-b p-4">
           <h3 className="font-semibold">Ejecuciones observadas</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Recepciones AX e importaciones persistidas. Recibido indica almacenamiento del lote; la
-            aplicación de AX sigue pendiente de reglas aprobadas.
+            Recepciones AX e importaciones persistidas. Recibido indica que el lote quedó guardado.
+            Aplicar los lotes AX al catálogo requiere el mapeo y las reglas aprobadas.
           </p>
           <div className="mt-4 grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_160px_160px_auto]">
             <label className="grid gap-1 text-xs font-semibold">

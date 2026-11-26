@@ -645,6 +645,7 @@ function emptyHomologs(): ExternalHomologRepositoryPort {
     findById: vi.fn(async () => null),
     list: vi.fn(async () => []),
     searchEligible: vi.fn(async () => []),
+    sampleApprovedCodes: vi.fn(async () => []),
     insertWithAudit: vi.fn(async () => undefined),
     updateWithAudit: vi.fn(async (homolog) => ({
       kind: 'updated' as const,

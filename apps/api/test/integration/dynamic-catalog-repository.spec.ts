@@ -15,6 +15,7 @@ import {
   groupApplications,
   productAttributeValues,
   productAssets,
+  productIdentifiers,
   products,
   templateAttributeAssignments,
   templateAttributeRoleAccess,
@@ -43,6 +44,89 @@ describe('DrizzleDynamicCatalogRepository', () => {
     await seedDemoCatalog(database.db);
   });
   afterAll(() => database.close());
+
+  it('samples real active article and supplier codes by exact brand', async () => {
+    const roles = ['ADMINISTRADOR'];
+    const brand = 'Muestra %_';
+    const first = { id: newUuid(), sku: 'CDR-CODE-FIRST', name: 'Primer artículo', brand };
+    const second = { id: newUuid(), sku: 'CDR-CODE-SECOND', name: 'Segundo artículo', brand };
+    await database.db
+      .insert(products)
+      .values([
+        first,
+        second,
+        { ...second, id: newUuid(), sku: 'CDR-CODE-ARCHIVE', status: 'archived' },
+        { ...second, id: newUuid(), sku: 'CDR-CODE-OTHER-BRAND', brand: 'Muestra AB' },
+      ]);
+    const [supplierDefinition] = await database.db
+      .select({ id: attributeDefinitions.id })
+      .from(attributeDefinitions)
+      .where(eq(attributeDefinitions.key, 'codigo_proveedor'));
+    const definitionId = supplierDefinition!.id;
+    const supplierGrant = and(
+      eq(templateAttributeRoleAccess.attributeDefinitionId, definitionId),
+      eq(templateAttributeRoleAccess.role, roles[0]!),
+    );
+    const [activeTemplate] = await database.db
+      .select({ id: attributeTemplates.id })
+      .from(attributeTemplates)
+      .innerJoin(catalogCategories, eq(catalogCategories.id, attributeTemplates.categoryId))
+      .innerJoin(
+        templateAttributeRoleAccess,
+        eq(templateAttributeRoleAccess.templateId, attributeTemplates.id),
+      )
+      .where(
+        and(
+          supplierGrant,
+          eq(templateAttributeRoleAccess.canView, true),
+          eq(attributeTemplates.status, 'active'),
+          eq(catalogCategories.active, true),
+        ),
+      )
+      .limit(1);
+    await database.db
+      .insert(productTemplateAssignments)
+      .values({ productId: first.id, templateId: activeTemplate!.id });
+    await database.db.insert(productAttributeValues).values([
+      {
+        productId: first.id,
+        attributeDefinitionId: definitionId,
+        valueText: 'CDR-SUPPLIER-CURRENT',
+      },
+      { productId: second.id, attributeDefinitionId: definitionId, valueText: 'CDR-NO-TEMPLATE' },
+    ]);
+    await database.db.insert(productIdentifiers).values([
+      { id: newUuid(), productId: first.id, type: 'manufacturer_part_number', value: 'CDR-OLD' },
+      {
+        id: newUuid(),
+        productId: second.id,
+        type: 'manufacturer_part_number',
+        value: 'CDR-SECOND',
+      },
+    ]);
+    const rows = await repository.sampleCodes(roles, 'muestra %_');
+    expect(rows).toHaveLength(4);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { kind: 'sku', code: first.sku, brand: 'MUESTRA %_' },
+        { kind: 'sku', code: second.sku, brand: 'MUESTRA %_' },
+        { kind: 'provider', code: 'CDR-SUPPLIER-CURRENT', brand: 'MUESTRA %_' },
+        { kind: 'provider', code: 'CDR-SECOND', brand: 'MUESTRA %_' },
+      ]),
+    );
+
+    await database.db
+      .update(templateAttributeRoleAccess)
+      .set({ canView: false, canEdit: false, canImport: false, canExport: false })
+      .where(and(supplierGrant, eq(templateAttributeRoleAccess.templateId, activeTemplate!.id)));
+    const redacted = await repository.sampleCodes(roles, brand);
+    expect(
+      redacted
+        .filter((row) => row.kind === 'provider')
+        .map((row) => row.code)
+        .sort(),
+    ).toEqual(['CDR-OLD', 'CDR-SECOND']);
+  });
 
   it('paginates complete unified-code groups, counts matched SKUs and keeps exact SKU searches scoped', async () => {
     const options = { roles: ['VENTAS'], page: 1, pageSize: 100, filters: [] };

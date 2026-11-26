@@ -131,19 +131,32 @@ export const parsedProductCodeSchema = z.object({
 });
 export type ParsedProductCodeDto = z.infer<typeof parsedProductCodeSchema>;
 
-export const bootstrapCodeAffixesSchema = z
-  .object({
+const affixScopeSchema = z.string().trim().min(1).max(120).optional();
+
+export const bootstrapCodeAffixesSchema = z.union([
+  z.strictObject({
     evidence: z.string().trim().min(30).max(30000),
-    brand: z.string().trim().min(1).max(120).optional(),
-    family: z.string().trim().min(1).max(120).optional(),
-  })
-  .strict();
+    brand: affixScopeSchema,
+    family: affixScopeSchema,
+  }),
+  z.strictObject({
+    source: z.literal('catalog'),
+    brand: affixScopeSchema,
+  }),
+]);
 export type BootstrapCodeAffixesInput = z.infer<typeof bootstrapCodeAffixesSchema>;
 export const bootstrapCodeAffixesResultSchema = z.object({
   model: z.string(),
   simulated: z.boolean(),
   items: z.array(codeAffixSchema).max(100),
   skipped: z.number().int().nonnegative(),
+  sample: z
+    .object({
+      sku: z.number().int().nonnegative(),
+      provider: z.number().int().nonnegative(),
+      homolog: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 export const bulkValidateCodeAffixesSchema = z
   .object({

@@ -48,20 +48,45 @@ export function resolvePdfBrandLogo(config: PdfDesignConfig, brand: string) {
     entries.find((entry) => entry.key === alias);
   return parent ? { dataUrl: parent.dataUrl, source: 'Heredado', via: parent.brand } : undefined;
 }
+export function suggestedLogoFilename(brand: string): string {
+  const stem =
+    brand
+      .replace(/[<>:"/\\|?*]|\p{Cc}/gu, ' ')
+      .replace(/\s+/gu, ' ')
+      .replace(/^[. ]+|[. ]+$/gu, '') || 'Logotipo';
+  const reserved = /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu.test(stem);
+  return `${reserved ? `Logo ${stem}` : stem}.png`;
+}
 export function matchLogoFilename(filename: string, brands: readonly string[]): string {
   const compact = (value: string) => normalizeLogoBrand(value).replace(/[^A-Z0-9]/gu, '');
-  const name = normalizeLogoBrand(
+  const basename =
     filename
-      .split('/')
+      .split(/[/\\]/u)
       .at(-1)
-      ?.replace(/\.[^.]+$/u, '') ?? '',
-  ).replace(/\b(LOGOTIPO|LOGOTYPE|LOGO|MARCA|BRAND|COLOR|OFICIAL|FINAL|HD|RGB|CMYK|V\d+)\b/gu, '');
+      ?.replace(/\.[^.]+$/u, '') ?? '';
+  const literalMatch = brands.find(
+    (brand) => brand.localeCompare(basename, 'es', { sensitivity: 'accent' }) === 0,
+  );
+  if (literalMatch) return literalMatch;
+  const name = normalizeLogoBrand(basename);
+  const exact = compact(name);
+  if (!exact) return '';
+  const exactMatches = brands.filter((brand) => compact(brand) === exact);
+  if (exactMatches.length > 0) return exactMatches.length === 1 ? exactMatches[0]! : '';
+  const withoutLabels = compact(
+    name.replace(
+      /\b(LOGOTIPO|LOGOTYPE|LOGO|MARCA|BRAND|COLOR|OFICIAL|FINAL|HD|RGB|CMYK|V\d+)\b/gu,
+      '',
+    ),
+  );
+  if (!withoutLabels) return '';
+  const matchesWithoutLabels = brands.filter((brand) => compact(brand) === withoutLabels);
+  if (matchesWithoutLabels.length > 0)
+    return matchesWithoutLabels.length === 1 ? matchesWithoutLabels[0]! : '';
   return (
-    brands.find((brand) => compact(brand) === compact(name)) ??
     [...brands]
       .sort((a, b) => b.length - a.length)
-      .find((brand) => compact(brand).length >= 3 && compact(name).startsWith(compact(brand))) ??
-    ''
+      .find((brand) => compact(brand).length >= 3 && withoutLabels.startsWith(compact(brand))) ?? ''
   );
 }
 export function decodePdfDataUrl(value: string): Uint8Array {

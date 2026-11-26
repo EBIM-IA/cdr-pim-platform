@@ -17,6 +17,11 @@ export interface EligibleHomologMatch {
   readonly products: readonly HomologProductMatch[];
 }
 
+export type ApprovedHomologCode = {
+  readonly code: string;
+  readonly brand: string | null;
+};
+
 export interface HomologAuditWriteContext extends AuditWriteContext {
   readonly action: AuditAction;
 }
@@ -32,6 +37,7 @@ export interface ExternalHomologRepositoryPort {
   list(unifiedCode?: string, includeInactive?: boolean): Promise<ExternalHomolog[]>;
   /** Exact code or partial name of active, approved external references only. */
   searchEligible(query: string): Promise<EligibleHomologMatch[]>;
+  sampleApprovedCodes(brand?: string): Promise<readonly ApprovedHomologCode[]>;
   /** Inserts the aggregate and its immutable audit event in one transaction. */
   insertWithAudit(homolog: ExternalHomolog, audit: HomologAuditWriteContext): Promise<void>;
   /** Optimistically updates the aggregate and audit event in one transaction. */

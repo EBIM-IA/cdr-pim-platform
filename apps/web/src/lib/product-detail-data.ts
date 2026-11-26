@@ -69,8 +69,8 @@ export function groupAttributesByTemplateSections<T extends { key: string }>(
   const sections = [...(sheet.schema.sections ?? [])].sort((a, b) => a.position - b.position);
   const columns = new Map(sheet.schema.columns.map((column) => [column.key, column]));
   const assigned = new Set(sections.map((section) => section.key));
-  const groups = sections.map((section, index) => ({
-    title: `${index + 1}. ${section.label}`,
+  const groups = sections.map((section) => ({
+    title: section.label,
     note: 'Sección definida por la plantilla',
     attributes: attributes.filter(
       (attribute) => columns.get(attribute.key)?.sectionKey === section.key,
@@ -81,11 +81,13 @@ export function groupAttributesByTemplateSections<T extends { key: string }>(
   );
   if (remaining.length)
     groups.push({
-      title: `${sections.length + 1}. Otros atributos`,
+      title: 'Otros atributos',
       note: 'Atributos pendientes de asignar a una sección',
       attributes: remaining,
     });
-  return groups.filter((group) => group.attributes.length > 0);
+  return groups
+    .filter((group) => group.attributes.length > 0)
+    .map((group, index) => ({ ...group, title: `${index + 1}. ${group.title}` }));
 }
 
 export function unifiedCodeFromSheet(sheet: ProductAttributeSheetDto | null): string | undefined {

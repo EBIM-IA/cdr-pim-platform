@@ -76,6 +76,12 @@ export interface ProductAttributeAssignment {
   readonly definition: TemplateAttribute;
 }
 
+export type CatalogCodeSample = {
+  readonly kind: 'sku' | 'provider';
+  readonly code: string;
+  readonly brand: string | null;
+};
+
 export interface AttributeChange {
   readonly productId: Uuid;
   readonly before: ProductAttributeCell | null;
@@ -143,6 +149,7 @@ export interface DynamicCatalogRepositoryPort {
   } | null>;
   listGrid(options: CatalogGridOptions): Promise<{ items: CatalogGridProduct[]; total: number }>;
   listWorkbook(options: CatalogWorkbookOptions): Promise<CatalogWorkbookResult>;
+  sampleCodes(roles: readonly string[], brand?: string): Promise<readonly CatalogCodeSample[]>;
   findProductAttributeAssignment(
     productId: Uuid,
     attributeKey: string,

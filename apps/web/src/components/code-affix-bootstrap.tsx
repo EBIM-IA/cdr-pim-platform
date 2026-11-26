@@ -12,6 +12,7 @@ export function CodeAffixBootstrap({
   rules: CodeAffixDto[];
   onSaved: () => void;
 }) {
+  const [source, setSource] = useState<'catalog' | 'document'>('catalog');
   const [evidence, setEvidence] = useState(''),
     [brand, setBrand] = useState(''),
     [family, setFamily] = useState('');
@@ -30,54 +31,96 @@ export function CodeAffixBootstrap({
     <Card className="p-5 space-y-3">
       <h3 className="text-sm font-semibold">Carga inicial con IA</h3>
       <p className="text-xs text-muted-foreground">
-        Pega evidencia del fabricante. La IA propone afijos pendientes; revisa sus citas y confianza
-        antes de validarlos.
+        Revisa los ejemplos y la confianza de cada sugerencia antes de validarla.
       </p>
+      <fieldset className="flex flex-wrap gap-x-5 gap-y-2 text-xs" disabled={busy}>
+        <legend className="mb-1 font-medium">Fuente de evidencia</legend>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="code-affix-source"
+            checked={source === 'catalog'}
+            onChange={() => setSource('catalog')}
+          />
+          Códigos del catálogo
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="code-affix-source"
+            checked={source === 'document'}
+            onChange={() => setSource('document')}
+          />
+          Evidencia del fabricante
+        </label>
+      </fieldset>
+      {source === 'catalog' ? (
+        <p className="text-xs text-muted-foreground">
+          Analiza una muestra de códigos de artículo, proveedor y homólogos aprobados.
+        </p>
+      ) : null}
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="text-xs">
-          Marca
+          Marca (opcional)
           <input
             className="mt-1 block w-full rounded border p-2"
             value={brand}
             maxLength={120}
+            disabled={busy}
             onChange={(event) => setBrand(event.target.value)}
           />
         </label>
-        <label className="text-xs">
-          Familia
-          <input
-            className="mt-1 block w-full rounded border p-2"
-            value={family}
-            maxLength={120}
-            onChange={(event) => setFamily(event.target.value)}
+        {source === 'document' ? (
+          <label className="text-xs">
+            Familia (opcional)
+            <input
+              className="mt-1 block w-full rounded border p-2"
+              value={family}
+              maxLength={120}
+              disabled={busy}
+              onChange={(event) => setFamily(event.target.value)}
+            />
+          </label>
+        ) : null}
+      </div>
+      {source === 'document' ? (
+        <label className="block text-xs">
+          Evidencia documental
+          <textarea
+            className="mt-1 block min-h-28 w-full rounded border p-2"
+            maxLength={30000}
+            value={evidence}
+            disabled={busy}
+            onChange={(event) => setEvidence(event.target.value)}
           />
         </label>
-      </div>
-      <label className="block text-xs">
-        Evidencia documental
-        <textarea
-          className="mt-1 block min-h-28 w-full rounded border p-2"
-          maxLength={30000}
-          value={evidence}
-          onChange={(event) => setEvidence(event.target.value)}
-        />
-      </label>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
-          disabled={busy || evidence.trim().length < 30}
+          disabled={busy || (source === 'document' && evidence.trim().length < 30)}
           onClick={async () => {
             setBusy(true);
             setError('');
             setNotice('');
             try {
-              const result = await bootstrapCodeAffixes({
-                evidence,
-                ...(brand.trim() ? { brand: brand.trim() } : {}),
-                ...(family.trim() ? { family: family.trim() } : {}),
-              });
+              const scope = brand.trim() ? { brand: brand.trim() } : {};
+              const result = await bootstrapCodeAffixes(
+                source === 'catalog'
+                  ? { source: 'catalog', ...scope }
+                  : { evidence, ...scope, ...(family.trim() ? { family: family.trim() } : {}) },
+              );
+              const sample = result.sample;
               setNotice(
-                `${result.items.length} sugerencias guardadas; ${result.skipped} descartadas.${result.simulated ? ' Proveedor simulado: no se inventan sugerencias.' : ''}`,
+                [
+                  sample
+                    ? `Muestra del catálogo (${sample.sku} de artículo, ${sample.provider} de proveedor, ${sample.homolog} homólogos).`
+                    : '',
+                  `${result.items.length} sugerencias guardadas y ${result.skipped} descartadas.`,
+                  result.simulated ? 'Proveedor de IA simulado.' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' '),
               );
               onSaved();
             } catch (cause) {
@@ -87,7 +130,7 @@ export function CodeAffixBootstrap({
             }
           }}
         >
-          Proponer afijos con IA
+          {source === 'catalog' ? 'Analizar códigos con IA' : 'Proponer afijos con IA'}
         </Button>
         <Button
           size="sm"
