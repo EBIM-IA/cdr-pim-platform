@@ -210,6 +210,9 @@ export function SalesProductDetail({
       )
     : [];
   const columns = new Map(sheet?.schema.columns.map((column) => [column.key, column]) ?? []);
+  const templateGroups = sheet?.schema.sections?.length
+    ? groupAttributesByTemplateSections(sheet, attributes)
+    : null;
   const measurements = attributes.filter(
     (attribute) =>
       columns.get(attribute.key)?.dataType === 'measurement' || /^\([^)]+\)/u.test(attribute.label),
@@ -473,12 +476,12 @@ export function SalesProductDetail({
           ) : null}
           <section className={styles.card} id="sales-characteristics">
             <h2>Características técnicas</h2>
-            {sheet?.schema.sections?.length ? (
-              <div className="grid gap-4">
-                {groupAttributesByTemplateSections(sheet, attributes).map((group) => (
+            {templateGroups ? (
+              <div className={styles.templateSpecifications}>
+                {templateGroups.map((group) => (
                   <section key={group.title}>
                     <h3>{group.title}</h3>
-                    <dl className={styles.kv}>
+                    <dl className={styles.templateValues}>
                       {group.attributes.map((attribute) => (
                         <div key={attribute.key}>
                           <dt>{attribute.label}</dt>
@@ -499,6 +502,7 @@ export function SalesProductDetail({
                     </dl>
                   </section>
                 ))}
+                {!templateGroups.length ? <p>Sin características registradas.</p> : null}
               </div>
             ) : (
               <div className={styles.specifications}>

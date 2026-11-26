@@ -439,10 +439,9 @@ function ConnectorCards({ rows }: { rows: readonly WorkspaceRow[] }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {rows.map((row) => {
-        const values = Object.values(row.values);
-        const name = String(values[0] ?? row.id);
-        const state = String(values.at(-1) ?? 'Sin estado');
-        const configured = values.some((value) => value === true);
+        const name = String(row.values.system ?? row.id);
+        const state = String(row.values.state ?? 'Sin estado');
+        const configured = row.values.configured === true;
         return (
           <Card key={row.id} className="flex min-h-44 flex-col p-5">
             <div className="flex items-start justify-between gap-3">

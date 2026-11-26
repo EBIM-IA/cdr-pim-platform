@@ -41,6 +41,8 @@ export function contentSecurityPolicy(nonce: string, development: boolean): stri
     `connect-src 'self'${development ? ' ws: wss:' : ''}`,
     "media-src 'self'",
     "object-src 'none'",
+    // The technical sheet prints the generated PDF from a same-origin object URL.
+    "frame-src 'self' blob:",
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",

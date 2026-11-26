@@ -85,8 +85,8 @@ const sourceInfo = {
   fabricante: {
     label: 'Fabricante',
     description: 'Fichas técnicas, catálogos y planos autorizados',
-    state: 'Configurable',
-    note: 'Consulta documental por marca.',
+    state: 'Sin conexión',
+    note: 'Consulta los candidatos respaldados por documentación del fabricante.',
   },
   archivo: {
     label: 'Archivo',
@@ -103,12 +103,12 @@ const sourceInfo = {
   tecdoc: {
     label: 'TecDoc',
     description: 'Artículos y aplicaciones vehiculares',
-    state: 'Por confirmar',
-    note: 'Pendiente de licencia y configuración de conexión.',
+    state: 'Sin conexión',
+    note: 'Consulta remota pendiente de contrato y licencia.',
   },
 } as const;
 
-function ExternalSources() {
+function ExternalSources({ workspace }: { workspace: WorkspaceDto }) {
   const [products, setProducts] = useState<CatalogWorkbookProductDto[]>([]);
   const [categories, setCategories] = useState<AdminCatalogCategoryDto[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -162,6 +162,8 @@ function ExternalSources() {
   }, [query, revision]);
   const product = products.find((item) => item.id === selectedId);
   const category = categories.find((item) => item.id === product?.category?.id);
+  const manufacturers = workspace.rows.find((row) => row.id === 'manufacturers')?.values;
+  const tecdoc = workspace.rows.find((row) => row.id === 'tecdoc')?.values;
   const sources = (Object.keys(sourceInfo) as (keyof typeof sourceInfo)[])
     .map((key) => ({ key, ...sourceInfo[key], rank: category?.sourcePriority[key] }))
     .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
@@ -191,8 +193,8 @@ function ExternalSources() {
         </Select>
         {product ? (
           <p className="text-xs text-muted-foreground sm:col-span-2">
-            {product.template?.name ?? 'Sin plantilla'} · Prioridad BUSQUEDA de la categoría{' '}
-            {category?.name ?? 'sin asignar'}
+            {product.template?.name ?? 'Sin plantilla'} · Prioridad de fuentes ·{' '}
+            {category?.name ?? 'Sin categoría asignada'}
           </p>
         ) : null}
       </Card>
@@ -245,6 +247,24 @@ function ExternalSources() {
           <p className="text-sm text-muted-foreground">No hay SKU para estos filtros.</p>
         )}
       </Panel>
+      {manufacturers ? (
+        <Panel title="Otros conectores">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold">{String(manufacturers.system)}</h3>
+                <StatusBadge tone="neutral">{String(manufacturers.state)}</StatusBadge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {String(manufacturers.operation)}
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setDetail('fabricante')}>
+              Ver requisitos por marca
+            </Button>
+          </div>
+        </Panel>
+      ) : null}
       <div className="flex gap-2">
         <Button asChild size="sm" variant="outline">
           <a href="/quality?view=sources">Prioridad de fuentes</a>
@@ -258,11 +278,21 @@ function ExternalSources() {
           <p className="mb-3 text-xs font-semibold">SKU: {product?.sku ?? 'Sin seleccionar'}</p>
           <p className="text-sm">{sourceInfo[detail].description}</p>
           <p className="mt-3 text-sm text-muted-foreground">{sourceInfo[detail].note}</p>
+          {detail === 'fabricante' && manufacturers ? (
+            <>
+              <p className="mt-4 text-sm">
+                <strong>Marca del SKU</strong> · {product?.brand ?? 'Sin seleccionar'}
+              </p>
+              <p className="mt-2 text-sm">{String(manufacturers.dependency)}</p>
+            </>
+          ) : null}
           {detail === 'tecdoc' ? (
             <>
               <p className="mt-4 text-sm">
-                La consulta remota necesita licencia, credenciales y contrato del proveedor. No se
-                ha ejecutado una consulta ni sustituido datos del SKU.
+                {String(
+                  tecdoc?.dependency ??
+                    'La consulta remota requiere contrato, licencia, documentación técnica y credenciales de TecDoc.',
+                )}
               </p>
               <Button className="mt-4" disabled>
                 Consultar SKU en TecDoc
@@ -344,10 +374,11 @@ export function IntegrationsReferenceView({
       setBusy(false);
     }
   }
-  if (view === 'sources') return <ExternalSources />;
+  if (view === 'sources') return <ExternalSources workspace={workspace} />;
   const components = workspace.rows.filter(
     (row) => !['ax-mock', 'queue', 'storage', 'postgresql', 'ai'].includes(row.id),
   );
+  const ax = components.find((row) => row.id === 'ax');
   const detail = components.find((row) => row.id === detailId);
   const recentTable = (
     <div className="overflow-auto">
@@ -406,7 +437,7 @@ export function IntegrationsReferenceView({
           value={batch?.recordCount ?? 0}
           note="Conservados en el inbox durable"
         />
-        <Indicator label="Aplicados al catálogo" value="—" note="Pendiente de reglas aprobadas" />
+        <Indicator label="Aplicados al catálogo" value="—" note="Pendiente de mapeo y reglas" />
         <Indicator
           label="Procesamiento"
           value="Pendiente"
@@ -430,7 +461,10 @@ export function IntegrationsReferenceView({
         </dl>
         <p className="mt-4 text-xs text-muted-foreground">
           {batch
-            ? 'El lote se recibió y validó estructuralmente. Aplicarlo al catálogo requiere las reglas de sobrescritura aprobadas por CDR.'
+            ? String(
+                ax?.values.dependency ??
+                  'El lote se recibió y validó estructuralmente. Aplicarlo al catálogo requiere el mapeo y las reglas aprobadas por CDR.',
+              )
             : 'Selecciona un lote recibido para consultar su cabecera y sus registros.'}
         </p>
       </Panel>
@@ -520,7 +554,7 @@ export function IntegrationsReferenceView({
           <Button
             size="sm"
             disabled
-            title="Requiere reglas de aplicación y sobrescritura aprobadas por CDR"
+            title="Requiere el mapeo y las reglas de aplicación y sobrescritura aprobadas por CDR"
           >
             Reprocesar advertencias
           </Button>
@@ -571,7 +605,7 @@ export function IntegrationsReferenceView({
               <Indicator
                 label="Aplicación al catálogo"
                 value="Pendiente"
-                note="Espera reglas aprobadas por CDR"
+                note="Requiere mapeo y reglas aprobadas"
               />
               <Indicator
                 label="Conectores externos"
@@ -580,30 +614,38 @@ export function IntegrationsReferenceView({
               />
             </div>
           ) : null}
-          <Panel
-            title={workspace.integrationMonitor ? 'Lotes AX recibidos' : 'Ejecuciones recientes'}
-          >
-            {recentTable}
-            <p className="mt-3 text-xs text-muted-foreground">
-              Se muestran los últimos 50 lotes recibidos; recepción no acredita aplicación al
-              catálogo.
-            </p>
-          </Panel>
           <Panel title="Conectores">
             <div className="grid gap-3 md:grid-cols-3">
               {components.map((row) => (
                 <Card key={row.id} className="p-4">
-                  <Database className="mb-2 size-5 text-primary" />
-                  <h3 className="text-sm font-semibold">{String(row.values.system ?? row.id)}</h3>
-                  <p className="my-3 text-xs text-muted-foreground">
-                    {String(row.values.state ?? '')}
-                  </p>
-                  <Button size="sm" variant="outline" onClick={() => setDetailId(row.id)}>
+                  <div className="flex items-center gap-2">
+                    <Database aria-hidden="true" className="size-5 shrink-0 text-primary" />
+                    <h3 className="text-sm font-semibold">{String(row.values.system ?? row.id)}</h3>
+                  </div>
+                  <div className="my-3">
+                    <StatusBadge tone={row.values.configured === true ? 'info' : 'neutral'}>
+                      {String(row.values.state ?? '')}
+                    </StatusBadge>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Ver detalle de ${String(row.values.system ?? row.id)}`}
+                    onClick={() => setDetailId(row.id)}
+                  >
                     Detalle
                   </Button>
                 </Card>
               ))}
             </div>
+          </Panel>
+          <Panel
+            title={workspace.integrationMonitor ? 'Lotes AX recibidos' : 'Ejecuciones recientes'}
+          >
+            {recentTable}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Historial de recepción de los últimos 50 lotes.
+            </p>
           </Panel>
           {detailId === 'batch' ? (
             <WorkspaceDrawer
@@ -615,18 +657,38 @@ export function IntegrationsReferenceView({
           ) : null}
           {detail ? (
             <WorkspaceDrawer title={String(detail.values.system)} onClose={() => setDetailId(null)}>
-              <p className="text-sm">{String(detail.values.state ?? '')}</p>
+              <StatusBadge tone={detail.values.configured === true ? 'info' : 'neutral'}>
+                {String(detail.values.state)}
+              </StatusBadge>
+              <dl className="mt-4 space-y-4 text-sm">
+                {detail.values.operation ? (
+                  <div>
+                    <dt className="font-semibold">Alcance</dt>
+                    <dd className="mt-1 text-muted-foreground">
+                      {String(detail.values.operation)}
+                    </dd>
+                  </div>
+                ) : null}
+                {detail.values.dependency ? (
+                  <div>
+                    <dt className="font-semibold">Requisitos pendientes</dt>
+                    <dd className="mt-1 text-muted-foreground">
+                      {String(detail.values.dependency)}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
               {detail.id === 'ax' ? (
                 <>
                   <p className="my-3 text-xs text-muted-foreground">
                     {inbox?.totalBatches ?? 0} lotes recibidos · {inbox?.totalRecords ?? 0}{' '}
-                    registros. Aplicación y reintentos pendientes de aprobación funcional.
+                    registros.
                   </p>
                   {recentTable}
                 </>
               ) : (
                 <p className="mt-3 text-sm text-muted-foreground">
-                  Sin ejecuciones productivas registradas.
+                  Sin ejecuciones registradas para este conector.
                 </p>
               )}
             </WorkspaceDrawer>

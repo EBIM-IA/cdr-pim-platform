@@ -13,6 +13,7 @@ import {
   type ExternalHomologSnapshot,
 } from '../../domain/entities/external-homolog';
 import type {
+  ApprovedHomologCode,
   EligibleHomologMatch,
   ExternalHomologMutationResult,
   ExternalHomologRepositoryPort,
@@ -99,6 +100,29 @@ export class DrizzleExternalHomologRepository implements ExternalHomologReposito
       });
     }
     return result;
+  }
+
+  async sampleApprovedCodes(brand?: string): Promise<readonly ApprovedHomologCode[]> {
+    const brandKey = brand?.toUpperCase();
+    const homologBrand = sql`NULLIF(UPPER(BTRIM(${externalHomologs.externalBrand})), '')`;
+    return this.db.execute<ApprovedHomologCode>(sql`
+      WITH unique_codes AS (
+        SELECT DISTINCT BTRIM(${externalHomologs.externalCode}) AS code, ${homologBrand} AS brand
+        FROM ${externalHomologs}
+        WHERE ${externalHomologs.active} = TRUE AND ${externalHomologs.approvalStatus} = 'approved'
+          AND LENGTH(BTRIM(${externalHomologs.externalCode})) BETWEEN 1 AND 120
+          AND COALESCE(LENGTH(${homologBrand}), 0) <= 120
+          ${brandKey ? sql`AND ${homologBrand} = ${brandKey}` : sql``}
+          AND EXISTS (
+            SELECT 1 FROM ${equivalenceGroupMembers}
+            WHERE ${equivalenceGroupMembers.groupId} = ${externalHomologs.groupId}
+          )
+      ), brand_samples AS (
+        SELECT code, brand, ROW_NUMBER() OVER (PARTITION BY brand ORDER BY MD5(code), code) AS brand_rank
+        FROM unique_codes
+      )
+      SELECT code, brand FROM brand_samples ORDER BY brand_rank, brand, code LIMIT 60
+    `);
   }
 
   async insertWithAudit(homolog: ExternalHomolog, audit: HomologAuditWriteContext): Promise<void> {

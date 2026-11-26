@@ -314,17 +314,38 @@ describe('PostgresWorkspaceReadModel', () => {
   it('reports the local AX mock honestly without treating it as the production adapter', async () => {
     const integrations = await readModel.read('integrations', actor);
 
+    expect(() => workspaceSchema.parse(integrations)).not.toThrow();
     expect(integrations.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: 'ax',
-          values: expect.objectContaining({ configured: false }),
+          values: expect.objectContaining({
+            configured: false,
+            state: 'Recepción deshabilitada en este entorno',
+            dependency: expect.stringContaining('mapeo actualizado de los dos campos'),
+          }),
         }),
         expect.objectContaining({
           id: 'ax-mock',
           values: expect.objectContaining({
             configured: false,
             state: expect.stringContaining('Deshabilitado por defecto'),
+          }),
+        }),
+        expect.objectContaining({
+          id: 'ecommerce-images',
+          values: expect.objectContaining({
+            configured: false,
+            state: 'Sin conexión',
+            dependency: expect.stringContaining('Narvis'),
+          }),
+        }),
+        expect.objectContaining({
+          id: 'tecdoc',
+          values: expect.objectContaining({
+            configured: false,
+            state: 'Sin conexión',
+            dependency: expect.stringContaining('licencia'),
           }),
         }),
       ]),
@@ -336,6 +357,8 @@ describe('PostgresWorkspaceReadModel', () => {
           availability: 'blocked',
         }),
         expect.objectContaining({ id: 'sync-ax', availability: 'blocked' }),
+        expect.objectContaining({ id: 'publish-prestashop', availability: 'blocked' }),
+        expect.objectContaining({ id: 'query-tecdoc', availability: 'blocked' }),
       ]),
     );
   });

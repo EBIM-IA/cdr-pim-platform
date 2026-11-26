@@ -30,6 +30,7 @@ function repository(
     getActiveSchema: async () => null,
     getProductSheet: async () => null,
     listGrid: async () => ({ items: [], total: 0 }),
+    sampleCodes: async () => [],
     listWorkbook: async () => ({
       columns: [],
       facets: { brands: [], applicationTypes: [], statuses: [] },

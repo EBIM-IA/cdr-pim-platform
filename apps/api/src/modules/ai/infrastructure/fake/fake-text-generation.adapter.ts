@@ -36,7 +36,7 @@ export class FakeTextGenerationAdapter implements TextGenerationProviderPort {
       data &&
       typeof data === 'object' &&
       'recordType' in data &&
-      data.recordType === 'code_affix_evidence'
+      (data.recordType === 'code_affix_evidence' || data.recordType === 'code_affix_catalog')
     )
       return {
         text: JSON.stringify({ items: [] }),

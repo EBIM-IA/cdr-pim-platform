@@ -10,6 +10,7 @@ import { resolveAiCapabilityProviders, type ApiEnv } from '@cdr/config';
 import { API_ENV } from '../../shared/tokens';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CatalogSchemaModule } from '../catalog-schema/catalog-schema.module';
+import { EquivalencesModule } from '../equivalences/equivalences.module';
 import { ProductAssetsModule } from '../product-assets/product-assets.module';
 import {
   ExtractAssetCandidatesUseCase,
@@ -44,6 +45,7 @@ import { AiController } from './presentation/ai.controller';
     ProductAssetsModule,
     QualityModule,
     CodeAffixesModule,
+    EquivalencesModule,
   ],
   controllers: [AiController, EcommerceDescriptionController],
   providers: [

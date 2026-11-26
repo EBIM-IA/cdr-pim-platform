@@ -97,8 +97,10 @@ describe('product detail operational data', () => {
       schema: {
         ...sheet.schema,
         sections: [
-          { key: 'technical', label: 'Dimensiones', position: 1 },
+          { key: 'technical', label: 'Dimensiones', position: 2 },
           { key: 'identity', label: 'Identificación', position: 0 },
+          { key: 'documents', label: 'Documentos', position: 1 },
+          { key: 'unused', label: 'Usos', position: 3 },
         ],
         columns: sheet.schema.columns.map((column) => ({
           ...column,
@@ -111,9 +113,14 @@ describe('product detail operational data', () => {
       'codigo_unificador',
       'descripcion_interna',
     ]);
-    const groups = groupAttributesByTemplateSections(configured, attributes);
-    expect(groups.map((group) => group.title)).toEqual(['1. Identificación', '2. Dimensiones']);
-    expect(groups.flatMap((group) => group.attributes)).toHaveLength(2);
+    const unassigned = { ...attributes[1]!, key: 'unassigned' };
+    const groups = groupAttributesByTemplateSections(configured, [...attributes, unassigned]);
+    expect(groups.map((group) => group.title)).toEqual([
+      '1. Identificación',
+      '2. Dimensiones',
+      '3. Otros atributos',
+    ]);
+    expect(groups.flatMap((group) => group.attributes)).toEqual([...attributes, unassigned]);
   });
 
   it('resolves the unifier code from the role-filtered sheet', () => {

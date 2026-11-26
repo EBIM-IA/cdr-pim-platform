@@ -201,8 +201,54 @@ describe('Reference operations layouts', () => {
     );
     expect(screen.getByRole('columnheader', { name: 'Recibidos' })).toBeVisible();
     expect(screen.getByText('Todavía no se recibieron lotes AX.')).toBeVisible();
-    expect(screen.getByText('Espera reglas aprobadas por CDR')).toBeVisible();
+    expect(screen.getByText('Requiere mapeo y reglas aprobadas')).toBeVisible();
     expect(screen.getByText('Receptor PUSH durable')).toBeVisible();
+  });
+  it('describes unconnected providers without offering an execution or retry', () => {
+    render(
+      <IntegrationsReferenceView
+        workspace={{
+          ...workspace,
+          slug: 'integrations',
+          rows: [
+            {
+              id: 'ecommerce-images',
+              values: {
+                system: 'Imágenes e-commerce',
+                configured: false,
+                state: 'Sin conexión',
+                operation: 'Intercambio de imágenes de productos',
+                dependency: 'Documentación técnica de Narvis pendiente.',
+              },
+            },
+            {
+              id: 'tecdoc',
+              values: {
+                system: 'TecDoc',
+                configured: false,
+                state: 'Sin conexión',
+                operation: 'Consulta de referencias',
+                dependency: 'Licencia de TecDoc pendiente.',
+              },
+            },
+          ],
+        }}
+        view="monitor"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalle de Imágenes e-commerce' }));
+    const images = within(screen.getByRole('dialog', { name: 'Imágenes e-commerce' }));
+    expect(images.getByText('Sin conexión')).toBeVisible();
+    expect(images.getByText('Documentación técnica de Narvis pendiente.')).toBeVisible();
+    expect(images.getByText('Sin ejecuciones registradas para este conector.')).toBeVisible();
+    expect(images.queryByRole('button', { name: /Ejecutar|Reintentar/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalle de TecDoc' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'TecDoc' })).getByText(
+        'Licencia de TecDoc pendiente.',
+      ),
+    ).toBeVisible();
   });
   it('filters real local accounts and opens the selected user without pretending identity writes are available', () => {
     render(
@@ -278,7 +324,22 @@ describe('Reference operations layouts', () => {
     });
     render(
       <IntegrationsReferenceView
-        workspace={{ ...workspace, slug: 'integrations' }}
+        workspace={{
+          ...workspace,
+          slug: 'integrations',
+          rows: [
+            {
+              id: 'manufacturers',
+              values: {
+                system: 'Fabricantes por marca',
+                configured: false,
+                state: 'Sin conexión',
+                operation: 'Consultar catálogos del fabricante.',
+                dependency: 'Fuente autorizada por marca y acceso pendientes.',
+              },
+            },
+          ],
+        }}
         view="sources"
       />,
     );
@@ -296,9 +357,19 @@ describe('Reference operations layouts', () => {
     const drawer = within(screen.getByRole('dialog', { name: 'TecDoc' }));
     expect(drawer.getByText('SKU: SKU-REAL')).toBeVisible();
     expect(drawer.getByRole('button', { name: 'Consultar SKU en TecDoc' })).toBeDisabled();
-    expect(drawer.getByText(/No se ha ejecutado una consulta/)).toBeVisible();
+    expect(
+      drawer.getByText(/contrato, licencia, documentación técnica y credenciales/),
+    ).toBeVisible();
     expect(
       screen.queryByText('La consulta de candidatos de fuentes todavía no está disponible.'),
     ).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('heading', { name: 'Otros conectores' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver requisitos por marca' }));
+    const manufacturer = within(screen.getByRole('dialog', { name: 'Fabricante' }));
+    expect(manufacturer.getByText(/CDR/)).toBeVisible();
+    expect(
+      manufacturer.getByText('Fuente autorizada por marca y acceso pendientes.'),
+    ).toBeVisible();
   });
 });

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   assets: vi.fn(),
   render: vi.fn(),
   download: vi.fn(),
+  downloadCsv: vi.fn(),
 }));
 vi.mock('@/lib/pdf-design-api', () => ({
   fetchPdfDesignSettings: mocks.load,
@@ -35,6 +36,7 @@ vi.mock('@/lib/dynamic-catalog-api', () => ({
 }));
 vi.mock('@/lib/product-assets-api', () => ({ listProductAssets: mocks.assets }));
 vi.mock('@/lib/technical-sheet-pdf', () => ({ createTechnicalSheetPdf: mocks.render }));
+vi.mock('@/lib/tabular-export', () => ({ downloadCsv: mocks.downloadCsv }));
 vi.mock('@/lib/zip-export', () => ({
   downloadBinary: mocks.download,
   technicalSheetFilename: (sku: string) => `${sku}.pdf`,
@@ -100,6 +102,7 @@ beforeEach(() => {
   ]);
   mocks.workbook.mockResolvedValue({
     items: [{ id: 'product-real', sku: 'REAL-1200', name: 'Producto real', brand: 'SKF' }],
+    facets: { brands: ['SKF'] },
   });
   mocks.sheet.mockResolvedValue({
     product: { id: 'product-real', sku: 'REAL-1200', brand: 'SKF' },
@@ -230,10 +233,55 @@ describe('PDF design workspace', () => {
     );
     expect(mocks.save).not.toHaveBeenCalled();
   });
+  it('exports names accepted by bulk upload, including brands outside the preview page', async () => {
+    mocks.workbook.mockResolvedValue({
+      items: [{ id: 'product-real', sku: 'REAL-1200', name: 'Producto real', brand: 'SKF' }],
+      facets: { brands: ['SKF', 'Águila/EC', 'Marca "Especial"', 'A/B', 'A B'] },
+    });
+    render(<PdfDesignWorkspace canManage />);
+    const download = await screen.findByRole('button', { name: 'Lista de marcas (CSV)' });
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.change(screen.getByRole('combobox', { name: 'Mostrar' }), {
+      target: { value: 'none' },
+    });
+    fireEvent.click(download);
+
+    expect(mocks.downloadCsv).toHaveBeenCalledWith(
+      {
+        headers: ['Marca', 'Archivo sugerido'],
+        rows: [
+          ['A B', 'A B.png'],
+          ['A/B', null],
+          ['Águila/EC', 'Águila EC.png'],
+          ['Marca "Especial"', 'Marca Especial.png'],
+          ['SCHAEFFLER', 'SCHAEFFLER.png'],
+          ['SKF', 'SKF.png'],
+        ],
+      },
+      'marcas_logotipos',
+    );
+  });
+  it('exports registered brands with an availability notice if the product catalog fails', async () => {
+    mocks.workbook.mockRejectedValue(new Error('Productos indisponibles'));
+    render(<PdfDesignWorkspace canManage />);
+    await screen.findByText(/La consulta de marcas de los SKU está temporalmente indisponible/);
+    fireEvent.click(screen.getByRole('button', { name: 'Lista de marcas (CSV)' }));
+    expect(mocks.downloadCsv).toHaveBeenCalledWith(
+      {
+        headers: ['Marca', 'Archivo sugerido'],
+        rows: [
+          ['SCHAEFFLER', 'SCHAEFFLER.png'],
+          ['SKF', 'SKF.png'],
+        ],
+      },
+      'marcas_logotipos',
+    );
+  });
   it('keeps consultation read only while allowing a real preview download', async () => {
     render(<PdfDesignWorkspace canManage={false} />);
     expect(await screen.findByLabelText('Nombre')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Duplicar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Lista de marcas (CSV)' })).not.toBeInTheDocument();
     await screen.findByText('PDF real listo');
     expect(screen.getByRole('button', { name: 'Descargar muestra' })).toBeEnabled();
     expect(mocks.save).not.toHaveBeenCalled();

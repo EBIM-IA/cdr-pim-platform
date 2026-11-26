@@ -22,6 +22,34 @@ describe('designer homolog reference metadata', () => {
     await database.sql`INSERT INTO equivalence_groups (id,code,name,kind) VALUES (${groupId},'META-QA','QA','interchange')`;
   });
   afterAll(() => database?.close());
+
+  it('samples approved homolog codes across brands with a stable cap and exact brand filter', async () => {
+    const productId = assertUuid('10000000-0000-4000-8000-000000000001');
+    const orphanGroupId = assertUuid('20000000-0000-4000-8000-000000000002');
+    await database.sql`INSERT INTO products (id,sku,name) VALUES (${productId},'SKU-CDR','Artículo')`;
+    await database.sql`INSERT INTO equivalence_group_members (group_id,product_id)
+      VALUES (${groupId},${productId})`;
+    await database.sql`INSERT INTO equivalence_groups (id,code,name)
+      VALUES (${orphanGroupId},'ORPHAN-QA','Sin artículos')`;
+    await database.sql`INSERT INTO external_homologs (id,equivalence_group_id,external_code,external_brand,approval_status)
+      SELECT gen_random_uuid(), ${groupId}, 'HOM-' || n, 'MAYORITARIA', 'approved'
+      FROM generate_series(1,65) AS n`;
+    await database.sql`INSERT INTO external_homologs (id,equivalence_group_id,external_code,external_brand,approval_status,active)
+      VALUES (gen_random_uuid(),${groupId},'MINORITARIO','MUESTRA %_','approved',TRUE),
+        (gen_random_uuid(),${groupId},'PENDIENTE','MUESTRA %_','pending',TRUE),
+        (gen_random_uuid(),${groupId},'INACTIVO','MUESTRA %_','approved',FALSE),
+        (gen_random_uuid(),${groupId},'OTRA-MARCA','MUESTRA AB','approved',TRUE),
+        (gen_random_uuid(),${orphanGroupId},'SIN-ARTICULO','MUESTRA %_','approved',TRUE)`;
+
+    const repository = new DrizzleExternalHomologRepository(database.db);
+    const minority = { code: 'MINORITARIO', brand: 'MUESTRA %_' };
+    const broadSample = await repository.sampleApprovedCodes();
+    expect(broadSample).toHaveLength(60);
+    expect(broadSample).toContainEqual(minority);
+    expect(await repository.sampleApprovedCodes()).toEqual(broadSample);
+    expect(await repository.sampleApprovedCodes('muestra %_')).toEqual([minority]);
+  });
+
   it('finds approved active homolog names literally and expands only those references to real SKUs', async () => {
     const productId = assertUuid('10000000-0000-4000-8000-000000000001');
     await database.sql`INSERT INTO products (id,sku,name,status)

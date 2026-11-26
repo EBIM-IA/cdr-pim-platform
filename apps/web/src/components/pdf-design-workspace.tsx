@@ -37,7 +37,9 @@ import {
   matchLogoFilename,
   normalizeLogoBrand,
   resolvePdfBrandLogo,
+  suggestedLogoFilename,
 } from '@/lib/pdf-designs';
+import { downloadCsv } from '@/lib/tabular-export';
 import { downloadBinary, technicalSheetFilename } from '@/lib/zip-export';
 import styles from './pdf-design-workspace.module.css';
 
@@ -275,6 +277,7 @@ export function PdfDesignWorkspace({
     [templateDetails, setTemplateDetails] = useState<AdminTemplateDto | null>(null),
     [templateNotice, setTemplateNotice] = useState(''),
     [brands, setBrands] = useState<CatalogParameterDto[]>([]),
+    [catalogBrandNames, setCatalogBrandNames] = useState<string[] | 'unavailable' | null>(null),
     [samples, setSamples] = useState<CatalogWorkbookProductDto[]>([]),
     [query, setQuery] = useState(''),
     [skuId, setSkuId] = useState(''),
@@ -296,6 +299,7 @@ export function PdfDesignWorkspace({
   current.current = config;
   const brandsRef = useRef(brands);
   brandsRef.current = brands;
+  const productBrandNames = Array.isArray(catalogBrandNames) ? catalogBrandNames : null;
   useEffect(() => {
     const controller = new AbortController();
     setError('');
@@ -330,14 +334,17 @@ export function PdfDesignWorkspace({
         )
           .then((result) => {
             if (controller.signal.aborted) return;
+            setCatalogBrandNames(result.facets.brands);
             setSamples(result.items);
             setSkuId((previous) => previous || result.items[0]?.id || '');
           })
           .catch((failure: unknown) => {
-            if (!controller.signal.aborted)
+            if (!controller.signal.aborted) {
+              setCatalogBrandNames((previous) => previous ?? 'unavailable');
               setPreviewError(
                 failure instanceof Error ? failure.message : 'No se pudieron consultar productos.',
               );
+            }
           });
       }, 250);
     return () => {
@@ -569,7 +576,7 @@ export function PdfDesignWorkspace({
       }
       change(target);
     });
-  const brandNames = [
+  const listedBrandNames = [
     ...new Set([
       ...brands.filter((brand) => brand.active).map((brand) => brand.value),
       ...config.brandLogos.map((logo) => logo.brand),
@@ -577,13 +584,27 @@ export function PdfDesignWorkspace({
       'SCHAEFFLER',
     ]),
   ].sort((a, b) => a.localeCompare(b, 'es'));
+  const brandNames = [...new Set([...listedBrandNames, ...(productBrandNames ?? [])])].sort(
+    (a, b) => a.localeCompare(b, 'es'),
+  );
+  const downloadBrandNames = () =>
+    downloadCsv(
+      {
+        headers: ['Marca', 'Archivo sugerido'],
+        rows: brandNames.map((brand) => {
+          const filename = suggestedLogoFilename(brand);
+          return [brand, matchLogoFilename(filename, brandNames) === brand ? filename : null];
+        }),
+      },
+      'marcas_logotipos',
+    );
   const canonicalLogos = {
     ...config,
     brandLogos: brands
       .filter((brand) => brand.active && brand.logoDataUrl)
       .map((brand) => ({ brand: brand.value, dataUrl: brand.logoDataUrl! })),
   };
-  const logoRows = brandNames
+  const logoRows = listedBrandNames
     .map((brand) => ({
       brand,
       own: brands.find((row) => normalizeLogoBrand(row.value) === normalizeLogoBrand(brand))
@@ -1118,8 +1139,15 @@ export function PdfDesignWorkspace({
               <b>Carga masiva</b>
               <p className={styles.note}>
                 Arrastra imágenes o un ZIP. El nombre del archivo indica la marca: SKF.png, OKAMI
-                FRENOS.jpg. Revisa las coincidencias antes de cargar.
+                FRENOS.jpg. Revisa las coincidencias antes de cargar y asigna manualmente las marcas
+                sin archivo sugerido en el CSV.
               </p>
+              {catalogBrandNames === 'unavailable' ? (
+                <p className={styles.note} role="status">
+                  El CSV incluye las marcas de Catálogos y del diseñador. La consulta de marcas de
+                  los SKU está temporalmente indisponible.
+                </p>
+              ) : null}
             </div>
             <div className={styles.actions}>
               <label className={styles.upload}>
@@ -1151,6 +1179,16 @@ export function PdfDesignWorkspace({
                   }}
                 />
               </label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!catalogBrandNames}
+                onClick={downloadBrandNames}
+              >
+                <Download className="size-4" />
+                Lista de marcas (CSV)
+              </Button>
             </div>
           </div>
         ) : null}
@@ -1216,7 +1254,7 @@ export function PdfDesignWorkspace({
         <div className={styles.brandbar}>
           <p className={styles.note}>
             {brands.filter((brand) => brand.active && brand.logoDataUrl).length} logotipos propios ·{' '}
-            {brandNames.length} marcas
+            {listedBrandNames.length} marcas
           </p>
           <label className={styles.field}>
             Mostrar
