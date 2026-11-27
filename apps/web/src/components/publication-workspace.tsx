@@ -11,9 +11,10 @@ import type {
   ProductExperienceDto,
   WorkspaceDto,
 } from '@cdr/contracts';
-import { CheckCircle2, Download, ImageIcon, Search } from 'lucide-react';
+import { CheckCircle2, Download, Search } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { EcommerceImagesWorkspace } from '@/components/ecommerce-images-workspace';
 import { StatePanel } from '@/components/state-panel';
 import { StatusBadge, statusLabel, statusTone } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -818,10 +819,14 @@ export function PublicationWorkspace({
   workspace,
   view,
   canManage = false,
+  canQueryImages = canManage,
+  canImportImages = canQueryImages && canManage,
 }: {
   workspace: WorkspaceDto;
   view: PublicationView;
   canManage?: boolean;
+  canQueryImages?: boolean;
+  canImportImages?: boolean;
 }) {
   const [data, setData] = useState<CatalogWorkbookResultDto | null>(null);
   const [query, setQuery] = useState('');
@@ -937,83 +942,14 @@ export function PublicationWorkspace({
 
   if (view === 'images')
     return (
-      <div className="space-y-4">
-        <section
-          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-          aria-label="Indicadores de migración de imágenes"
-        >
-          {['SKU analizados', 'Con imagen', 'Pendientes', 'Errores'].map((label) => (
-            <Card key={label} className="p-4">
-              <small className="text-muted-foreground">{label}</small>
-              <strong className="mt-1 block text-xl text-slate-400">—</strong>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sin historial de migración disponible
-              </p>
-            </Card>
-          ))}
-        </section>
-        <Panel title="Consulta de imágenes por SKU">
-          <div className="space-y-3">
-            {search}
-            {productPicker}
-            {productPagination}
-            <div className="flex items-start gap-3 rounded-lg border border-dashed p-4">
-              <ImageIcon className="size-5 shrink-0 text-primary" />
-              <div>
-                <h3 className="text-sm font-semibold">
-                  Consulta a PrestaShop pendiente de conexión
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Cuando el servicio esté configurado podrás recuperar las imágenes del SKU
-                  seleccionado.
-                </p>
-                <Button
-                  className="mt-3 mr-2"
-                  size="sm"
-                  disabled
-                  title="Requiere contrato y conexión al servicio del proveedor"
-                >
-                  Consultar imágenes en PrestaShop
-                </Button>
-                <Button asChild size="sm" variant="outline" className="mt-3">
-                  <a
-                    href={
-                      selected
-                        ? `/documents?productId=${encodeURIComponent(selected.id)}`
-                        : '/documents'
-                    }
-                  >
-                    Ver activos del SKU en PIM
-                  </a>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Panel>
-        <Panel title="Migración de imágenes por SKU">
-          <div className="overflow-auto">
-            <table className="w-full min-w-[650px] text-left text-xs">
-              <thead className="border-b bg-slate-50">
-                <tr>
-                  {['Lote', 'SKU', 'Imágenes', 'Portada', 'Fecha', 'Estado', 'Acción'].map(
-                    (label) => (
-                      <th key={label} className="p-3">
-                        {label}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                    Sin migraciones registradas.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+      <EcommerceImagesWorkspace
+        selected={selected}
+        canQuery={canQueryImages}
+        canImport={canImportImages}
+      >
+        {search}
+        {productPicker}
+        {productPagination}
         {error ? (
           <p role="alert" className="text-sm text-red-700">
             {error}{' '}
@@ -1022,7 +958,7 @@ export function PublicationWorkspace({
             </button>
           </p>
         ) : null}
-      </div>
+      </EcommerceImagesWorkspace>
     );
 
   if (view === 'prestashop')

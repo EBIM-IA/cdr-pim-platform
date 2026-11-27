@@ -502,7 +502,7 @@ describe('DocumentsWorkspace', () => {
     }));
     mocks.fetchDocumentsCatalog.mockResolvedValue({ products: [...products, second], assets: {} });
     window.history.replaceState({}, '', `/documents?productId=${second.id}`);
-    render(<DocumentsWorkspace canWrite />);
+    render(<DocumentsWorkspace canWrite canConsultStorePhotos />);
     const selector = await screen.findByRole('combobox', { name: 'SKU en contexto' });
     expect(selector).toHaveValue(second.id);
     expect(screen.getByRole('tab', { name: `SKU en contexto · ${second.sku}` })).toHaveAttribute(
@@ -514,6 +514,9 @@ describe('DocumentsWorkspace', () => {
       'href',
       `/products/${second.id}`,
     );
+    expect(
+      screen.getByRole('link', { name: 'Consultar imágenes del ecommerce →' }),
+    ).toHaveAttribute('href', '/publication?view=images');
     expect(mocks.fetchDocumentsCatalog).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(mocks.fetchProduct).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('tab', { name: /Todos los SKU/ }));
@@ -557,6 +560,9 @@ describe('DocumentsWorkspace', () => {
     render(<DocumentsWorkspace canWrite />);
     await screen.findByText(asset.filename);
     fireEvent.click(screen.getByRole('tab', { name: /SKU en contexto/ }));
+    expect(
+      screen.queryByRole('link', { name: 'Consultar imágenes del ecommerce →' }),
+    ).not.toBeInTheDocument();
     const selector = screen.getByRole('combobox', { name: 'SKU en contexto' });
     fireEvent.change(selector, { target: { value: second.id } });
     expect(window.location.search).toContain(`productId=${second.id}`);

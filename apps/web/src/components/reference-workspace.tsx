@@ -60,6 +60,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspaceData } from '@/components/use-workspace-data';
+import { canConsultEcommerceImages } from '@/lib/auth';
 import type { ModuleDefinition, ModuleSlug } from '@/lib/module-definitions';
 import {
   filterWorkspaceRows,
@@ -200,7 +201,7 @@ const workspaceViews: Partial<Record<ModuleSlug, readonly WorkspaceView[]>> = {
       label: 'Migración de imágenes',
       title: 'Migración de imágenes PrestaShop',
       description:
-        'Seguimiento de activos por SKU sin convertir precio o stock en datos maestros PIM.',
+        'Consulta las fotos del ecommerce y añade las seleccionadas a la galería del SKU en el PIM.',
       icon: ImageIcon,
       mode: 'capabilities',
     },
@@ -565,6 +566,8 @@ export function ReferenceWorkspace({
     window.history.replaceState({}, '', `${url.pathname}${url.search}`);
   };
   const pdfDesignerActive = definition.slug === 'administration' && active.id === 'pdf-design';
+  const ecommerceImagesActive = definition.slug === 'publication' && active.id === 'images';
+  const canQueryImages = canConsultEcommerceImages(actor?.capabilities ?? []);
   const navigation =
     definition.slug !== 'catalogs' ? (
       <nav
@@ -625,12 +628,24 @@ export function ReferenceWorkspace({
           )
         }
       />
-      <ScreenGuide
-        objective={definition.objective}
-        actions={definition.actions}
-        dataSource={definition.dataSource}
-        limitation={definition.limitation}
-      />
+      {ecommerceImagesActive ? (
+        <ScreenGuide
+          objective="Recupera fotografías del ecommerce para completar la galería del SKU en el PIM."
+          actions={[
+            'Consulta un SKU o arma un lote de hasta 100 referencias.',
+            'Si el SKU del ecommerce difiere del código PIM, ingrésalo tal como aparece en la tienda.',
+            'Selecciona las fotos que quieras incorporar y revisa los resultados en el historial.',
+          ]}
+          dataSource="Narviz devuelve las fotografías disponibles. El PIM registra los archivos importados en el historial."
+        />
+      ) : (
+        <ScreenGuide
+          objective={definition.objective}
+          actions={definition.actions}
+          dataSource={definition.dataSource}
+          limitation={definition.limitation}
+        />
+      )}
 
       {!pdfDesignerActive ? navigation : null}
 
@@ -667,6 +682,10 @@ export function ReferenceWorkspace({
             workspace={workspace}
             view={active.id as 'channels' | 'prestashop' | 'images'}
             canManage={actor?.capabilities.includes('administration:manage') ?? false}
+            canQueryImages={canQueryImages}
+            canImportImages={
+              canQueryImages && actor?.capabilities.includes('catalog:write') === true
+            }
           />
         ) : definition.slug === 'integrations' ? (
           <IntegrationsReferenceView

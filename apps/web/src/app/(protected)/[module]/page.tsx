@@ -11,6 +11,7 @@ import { ReferenceWorkspace } from '@/components/reference-workspace';
 import { ReportsWorkspace } from '@/components/reports-workspace';
 import { StatePanel } from '@/components/state-panel';
 import { TemplatesAdminWorkspace } from '@/components/templates-admin-workspace';
+import { canConsultEcommerceImages } from '@/lib/auth';
 import {
   isModuleSlug,
   moduleDefinitions,
@@ -98,7 +99,12 @@ export default async function ModulePage({ params }: ModulePageProps) {
     );
   }
   if (module === 'documents') {
-    return <DocumentsWorkspace canWrite={capabilities.has('catalog:write')} />;
+    return (
+      <DocumentsWorkspace
+        canWrite={capabilities.has('catalog:write')}
+        canConsultStorePhotos={canConsultEcommerceImages(actor?.capabilities ?? [])}
+      />
+    );
   }
   if (
     module === 'quality' ||

@@ -95,6 +95,20 @@ const apiOnlySchema = z.object({
   AX_INTEGRATION_AUTH_MODE: z.enum(['disabled', 'static_bearer']).default('disabled'),
   AX_INTEGRATION_TOKEN: z.string().min(43).max(512).optional(),
 
+  /** Read-only Narviz bridge for the initial PIM image migration. */
+  ECOMMERCE_IMAGES_BASE_URL: z
+    .string()
+    .url()
+    .regex(
+      /^https:\/\/[^/?#@\\\s]+\/pim-bridge\/v1$/u,
+      'must be an HTTPS base URL ending in /pim-bridge/v1, without credentials, query or fragment',
+    )
+    .optional(),
+  ECOMMERCE_IMAGES_TOKEN: z
+    .string()
+    .regex(/^[A-Za-z0-9._~+/-]+=*$/u, 'must be a valid Bearer token')
+    .optional(),
+
   QUEUE_DRIVER: queueDriverSchema.default('memory'),
   SQS_JOBS_QUEUE_URL: z.string().optional(),
 
@@ -249,6 +263,20 @@ export const apiEnvSchema = baseEnvSchema
         code: z.ZodIssueCode.custom,
         path: ['AX_INTEGRATION_TOKEN'],
         message: 'must not be set in prd',
+      });
+    }
+    if (env.ECOMMERCE_IMAGES_BASE_URL && !env.ECOMMERCE_IMAGES_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ECOMMERCE_IMAGES_TOKEN'],
+        message: 'is required when ECOMMERCE_IMAGES_BASE_URL is configured',
+      });
+    }
+    if (env.ECOMMERCE_IMAGES_TOKEN && !env.ECOMMERCE_IMAGES_BASE_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ECOMMERCE_IMAGES_BASE_URL'],
+        message: 'is required when ECOMMERCE_IMAGES_TOKEN is configured',
       });
     }
     // One variable per check, in this exact shape: cdr-pim-infrastructure derives its

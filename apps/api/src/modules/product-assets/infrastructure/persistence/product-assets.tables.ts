@@ -30,6 +30,7 @@ export const productAssets = pgTable(
     storageVersionId: text('storage_version_id'),
     position: integer('position'),
     source: text('source').notNull(),
+    ecommerceSku: text('ecommerce_sku'),
     uploadedBy: text('uploaded_by').notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
     replacesAssetId: uuid('replaces_asset_id'),
@@ -41,6 +42,9 @@ export const productAssets = pgTable(
     index('product_assets_product_active_idx')
       .on(table.productId, table.uploadedAt)
       .where(sql`${table.deletedAt} IS NULL`),
+    index('product_assets_narviz_history_idx')
+      .on(table.uploadedAt.desc(), table.id.desc())
+      .where(sql`${table.source} = 'narviz'`),
     uniqueIndex('product_assets_singleton_active_key')
       .on(table.productId, table.typeCode)
       .where(sql`${table.deletedAt} IS NULL AND ${table.typeCode} NOT IN ('FOTO', 'PLANO')`),

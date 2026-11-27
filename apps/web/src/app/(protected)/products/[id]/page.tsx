@@ -2,7 +2,7 @@ import { StatePanel } from '@/components/state-panel';
 import type { Metadata } from 'next';
 
 import { ProductDetailView } from '@/components/product-detail-view';
-import { isAdministrator, isSalesOnly } from '@/lib/auth';
+import { canConsultEcommerceImages, isAdministrator, isSalesOnly } from '@/lib/auth';
 import { getCurrentActor } from '@/lib/server-auth';
 
 interface ProductPageProps {
@@ -30,6 +30,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
       key={id}
       productId={id}
       canWriteAssets={actor?.capabilities.includes('catalog:write') ?? false}
+      canConsultStorePhotos={canConsultEcommerceImages(actor.capabilities)}
       canReassignTemplate={actor?.capabilities.includes('attributes:write') ?? false}
       canWriteApplications={actor?.capabilities.includes('applications:write') ?? false}
       canWriteEquivalences={actor?.capabilities.includes('equivalences:write') ?? false}

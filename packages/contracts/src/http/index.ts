@@ -18,6 +18,7 @@ export * from './workspace';
 export * from './product-naming';
 
 export * from './ecommerce';
+export * from './ecommerce-images';
 
 export * from './quality-governance';
 export * from './product-draft';

@@ -1295,8 +1295,11 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
       Boolean(this.env.AX_INTEGRATION_TOKEN);
     const axMappingDependency =
       'Sismetic debe entregar el mapeo actualizado de los dos campos informados. CDR debe aprobar las reglas de aplicación y sobrescritura antes de procesar los lotes.';
-    const ecommerceDependency =
-      'Falta confirmar la documentación técnica de Narvis y el contrato de PrestaShop, incluido el ambiente de pruebas, los accesos y el mapeo.';
+    const publicationDependency =
+      'Falta confirmar el contrato de publicación en PrestaShop, el ambiente de pruebas, los accesos y el mapeo.';
+    const ecommerceImagesConfigured = Boolean(
+      this.env.ECOMMERCE_IMAGES_BASE_URL && this.env.ECOMMERCE_IMAGES_TOKEN,
+    );
     const tecdocDependency =
       'El contrato requiere corrección, revisión legal y aprobación. La conexión necesita la licencia, la documentación técnica y las credenciales de TecDoc.';
     const rows: WorkspaceRow[] = [
@@ -1371,18 +1374,21 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
           configured: false,
           state: 'Sin conexión',
           operation: 'Publicación del catálogo del PIM en el canal e-commerce.',
-          dependency: ecommerceDependency,
+          dependency: publicationDependency,
         },
       },
       {
         id: 'ecommerce-images',
         values: {
           system: 'Imágenes e-commerce',
-          configured: false,
-          state: 'Sin conexión',
-          operation: 'Intercambio de imágenes de productos con el canal e-commerce.',
-          dependency:
-            'Falta la documentación técnica de Narvis para confirmar el origen de las imágenes, cómo vincularlas a los SKU y el acceso de pruebas.',
+          configured: ecommerceImagesConfigured,
+          state: ecommerceImagesConfigured
+            ? 'Configurado para consultar'
+            : 'Configuración pendiente',
+          operation: 'Consulta y descarga de imágenes de Narviz para la migración inicial al PIM.',
+          dependency: ecommerceImagesConfigured
+            ? null
+            : 'Configurar la URL del servicio y la credencial de Narviz recibida por el canal seguro.',
         },
       },
       {
@@ -1477,7 +1483,7 @@ export class PostgresWorkspaceReadModel implements WorkspaceReadModelPort {
                 'El receptor provisional está deshabilitado. Solo puede activarse en local/test con una credencial de máquina dedicada.',
               ),
           blockedAction('sync-ax', 'Aplicar lotes AX al catálogo', axMappingDependency),
-          blockedAction('publish-prestashop', 'Probar PrestaShop', ecommerceDependency),
+          blockedAction('publish-prestashop', 'Probar PrestaShop', publicationDependency),
           blockedAction('query-tecdoc', 'Consultar TecDoc', tecdocDependency),
         ],
       }),
