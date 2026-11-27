@@ -23,6 +23,7 @@ export type UpdateTechnicalSheetVisibilityInput = z.infer<
 
 /** Limits enforced by both the HTTP boundary and the asset application service. */
 export const PRODUCT_ASSET_MAX_BYTES = 20 * 1024 * 1024;
+export const ECOMMERCE_PHOTO_MAX_BYTES = 30_000_000;
 export const PRODUCT_ASSET_ZIP_MAX_BYTES = 100 * 1024 * 1024;
 export const PRODUCT_ASSET_ZIP_MAX_FILES = 250;
 
@@ -32,22 +33,28 @@ export type ProductAssetType = z.infer<typeof productAssetTypeSchema>;
 export const productAssetKindSchema = z.enum(['image', 'document']);
 export type ProductAssetKind = z.infer<typeof productAssetKindSchema>;
 
-export const productAssetSchema = z.object({
-  id: uuidSchema,
-  productId: uuidSchema,
-  sku: z.string().min(1).max(64),
-  kind: productAssetKindSchema,
-  type: productAssetTypeSchema,
-  filename: z.string().min(1).max(180),
-  mimeType: z.string().min(1).max(120),
-  size: z.number().int().positive().max(PRODUCT_ASSET_MAX_BYTES),
-  checksum: z.string().min(1).max(128),
-  position: z.number().int().positive().nullable(),
-  source: z.enum(['manual', 'bulk']),
-  uploadedBy: z.string().min(1).max(200),
-  uploadedAt: z.string().datetime(),
-  replacesAssetId: uuidSchema.nullable(),
-});
+export const productAssetSchema = z
+  .object({
+    id: uuidSchema,
+    productId: uuidSchema,
+    sku: z.string().min(1).max(64),
+    kind: productAssetKindSchema,
+    type: productAssetTypeSchema,
+    filename: z.string().min(1).max(180),
+    mimeType: z.string().min(1).max(120),
+    size: z.number().int().positive().max(ECOMMERCE_PHOTO_MAX_BYTES),
+    checksum: z.string().min(1).max(128),
+    position: z.number().int().positive().nullable(),
+    source: z.enum(['manual', 'bulk', 'narviz']),
+    uploadedBy: z.string().min(1).max(200),
+    uploadedAt: z.string().datetime(),
+    replacesAssetId: uuidSchema.nullable(),
+  })
+  .refine(
+    (asset) =>
+      asset.source === 'narviz' ? asset.type === 'FOTO' : asset.size <= PRODUCT_ASSET_MAX_BYTES,
+    { message: 'El tipo o tamaño del archivo no corresponde a su origen.' },
+  );
 export type ProductAssetDto = z.infer<typeof productAssetSchema>;
 
 export const productAssetListSchema = z.array(productAssetSchema);

@@ -2298,6 +2298,7 @@ function ProductVariantPicker({
 export function ProductDetailView({
   productId,
   canWriteAssets = false,
+  canConsultStorePhotos = false,
   canReassignTemplate = false,
   canWriteApplications = false,
   canWriteEquivalences = false,
@@ -2308,6 +2309,7 @@ export function ProductDetailView({
 }: {
   productId: string;
   canWriteAssets?: boolean;
+  canConsultStorePhotos?: boolean;
   canReassignTemplate?: boolean;
   canWriteApplications?: boolean;
   canWriteEquivalences?: boolean;
@@ -2760,6 +2762,7 @@ export function ProductDetailView({
         return (
           <DocumentsWorkspace
             canWrite
+            canConsultStorePhotos={canConsultStorePhotos}
             embeddedProductId={product.id}
             embeddedSku={product.sku}
             onChanged={reload}
@@ -2797,6 +2800,7 @@ export function ProductDetailView({
     auditLoading,
     auditTotal,
     canWriteAssets,
+    canConsultStorePhotos,
     handleAssetUploaded,
     reload,
     canReassignTemplate,

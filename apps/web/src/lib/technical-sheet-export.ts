@@ -1,4 +1,6 @@
 import {
+  ECOMMERCE_PHOTO_MAX_BYTES,
+  PRODUCT_ASSET_MAX_BYTES,
   type PdfDesignConfig,
   type ProductAssetDto,
   type ProductAttributeSheetDto,
@@ -98,14 +100,18 @@ export function technicalSheetDocument(
     })),
   };
 }
-async function bytesFromPrivateUrl(url: string, signal?: AbortSignal): Promise<Uint8Array> {
+async function bytesFromPrivateUrl(
+  url: string,
+  signal?: AbortSignal,
+  maxBytes = PRODUCT_ASSET_MAX_BYTES,
+): Promise<Uint8Array> {
   const response = await authenticatedBffFetch(url, { cache: 'no-store', signal });
   if (!response.ok)
     throw new Error('No se pudo descargar un activo de la ficha. Actualiza y vuelve a intentar.');
-  if (Number(response.headers.get('content-length') ?? 0) > 20 * 1024 * 1024)
-    throw new Error('Un activo supera los 20 MB permitidos.');
+  if (Number(response.headers.get('content-length') ?? 0) > maxBytes)
+    throw new Error('Un activo supera el tamaño permitido.');
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > 20 * 1024 * 1024) throw new Error('Un activo supera los 20 MB permitidos.');
+  if (bytes.length > maxBytes) throw new Error('Un activo supera el tamaño permitido.');
   return bytes;
 }
 async function webpToPng(bytes: Uint8Array): Promise<Uint8Array> {
@@ -154,7 +160,11 @@ export async function technicalSheetMedia(
           mimeType: asset.mimeType,
           bytes: new Uint8Array(),
         };
-      const bytes = await bytesFromPrivateUrl(productAssetDownloadUrl(asset.id), signal);
+      const bytes = await bytesFromPrivateUrl(
+        productAssetDownloadUrl(asset.id),
+        signal,
+        asset.source === 'narviz' ? ECOMMERCE_PHOTO_MAX_BYTES : PRODUCT_ASSET_MAX_BYTES,
+      );
       return {
         kind: asset.type === 'FOTO' ? ('photo' as const) : ('plan' as const),
         name: asset.filename,

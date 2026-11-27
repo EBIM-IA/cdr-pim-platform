@@ -3,6 +3,7 @@ import {
   authMeResponseSchema,
   loginRequestSchema as apiLoginRequestSchema,
   loginResponseSchema,
+  type AuthCapability,
   type AuthenticatedActorDto,
 } from '@cdr/contracts';
 import { z } from 'zod';
@@ -17,6 +18,14 @@ export function authCookieName(production: boolean): string {
 export const authActorSchema = authenticatedActorSchema;
 export { authMeResponseSchema, loginResponseSchema };
 export type AuthActor = AuthenticatedActorDto;
+
+export function canConsultEcommerceImages(capabilities: readonly AuthCapability[]): boolean {
+  return (
+    capabilities.includes('menu:publication:view') &&
+    capabilities.includes('catalog:read') &&
+    capabilities.includes('publication:execute')
+  );
+}
 
 export const loginRequestSchema = apiLoginRequestSchema.extend({
   returnTo: z.string().optional(),

@@ -31,6 +31,7 @@ import { ImportsController } from '../../src/modules/imports/presentation/import
 import { AX_MOCK_BATCH_STORE } from '../../src/modules/integrations/domain/ports/ax-mock-batch-store.port';
 import { ERP_PRODUCT_SOURCE } from '../../src/modules/integrations/domain/ports/erp-product-source.port';
 import { AxMockController } from '../../src/modules/integrations/presentation/ax-mock.controller';
+import { EcommerceImagesController } from '../../src/modules/product-assets/presentation/ecommerce-images.controller';
 import { PRODUCT_VECTOR_INDEX } from '../../src/modules/search/domain/ports/product-vector-index.port';
 import { SearchController } from '../../src/modules/search/presentation/search.controller';
 import { WORKSPACE_READ_MODEL } from '../../src/modules/workspaces/domain/ports/workspace-read-model.port';
@@ -92,6 +93,8 @@ describe('AppModule bootstrap', () => {
 
   beforeAll(async () => {
     Object.assign(process.env, TEST_ENV);
+    vi.stubEnv('ECOMMERCE_IMAGES_BASE_URL', undefined);
+    vi.stubEnv('ECOMMERCE_IMAGES_TOKEN', undefined);
 
     // This single call is the regression guard: it resolves every provider in every module
     // through the Nest injector, using the same decorator metadata production uses.
@@ -113,6 +116,7 @@ describe('AppModule bootstrap', () => {
 
   afterAll(async () => {
     await app?.close();
+    vi.unstubAllEnvs();
   });
 
   it('resolves the whole dependency graph', () => {
@@ -132,6 +136,7 @@ describe('AppModule bootstrap', () => {
     ['AxMockController', AxMockController],
     ['WorkspacesController', WorkspacesController],
     ['AxSyncController', AxSyncController],
+    ['EcommerceImagesController', EcommerceImagesController],
   ])('resolves %s with its type-injected dependencies', (_name, controller) => {
     expect(app.get(controller)).toBeInstanceOf(controller);
   });
@@ -467,6 +472,31 @@ describe('AppModule bootstrap', () => {
       message: 'Insufficient capability',
       details: { required: ['catalog:write'] },
     });
+  });
+
+  it('exposes the configuration of image migration only to actors with publication access', async () => {
+    const tokens = app.get<TokenServicePort>(TOKEN_SERVICE);
+    const admin = await tokens.issue({
+      id: 'admin',
+      email: 'admin@example.test',
+      roles: [Role.Admin],
+    });
+    const viewer = await tokens.issue({
+      id: 'viewer',
+      email: 'viewer@example.test',
+      roles: [Role.Viewer],
+    });
+    const path = '/api/v1/assets/ecommerce/status';
+
+    const response = await request(app.getHttpServer())
+      .get(path)
+      .set('authorization', `Bearer ${admin.accessToken}`)
+      .expect(200);
+    expect(response.body).toEqual({ configured: false });
+    await request(app.getHttpServer())
+      .get(path)
+      .set('authorization', `Bearer ${viewer.accessToken}`)
+      .expect(403);
   });
 
   it('authenticates the local account and exposes the current actor', async () => {

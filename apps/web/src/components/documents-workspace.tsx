@@ -99,11 +99,13 @@ const PHOTO_GUIDANCE =
 
 export function DocumentsWorkspace({
   canWrite,
+  canConsultStorePhotos = false,
   embeddedProductId,
   embeddedSku,
   onChanged,
 }: {
   canWrite: boolean;
+  canConsultStorePhotos?: boolean;
   embeddedProductId?: string;
   embeddedSku?: string;
   onChanged?: () => void;
@@ -807,7 +809,10 @@ export function DocumentsWorkspace({
                     'Pendientes',
                     selectedCoverage ? selectedCoverage.total - selectedCoverage.present : '—',
                   ],
-                  ['Imágenes PrestaShop', 'Sin conexión'],
+                  [
+                    'Fotografías en PIM',
+                    selectedAssets.filter((asset) => asset.type === 'FOTO').length,
+                  ],
                 ].map(([label, value]) => (
                   <Card key={label} className="p-4">
                     <span className="text-xs text-muted-foreground">{label}</span>
@@ -819,7 +824,11 @@ export function DocumentsWorkspace({
                 <Card className="min-w-0 p-5">
                   <div className={styles.contextTitle}>
                     <h2>Imágenes</h2>
-                    <Link href="/publication?view=images">Imágenes PrestaShop →</Link>
+                    {canConsultStorePhotos ? (
+                      <Link href="/publication?view=images">
+                        Consultar imágenes del ecommerce →
+                      </Link>
+                    ) : null}
                   </div>
                   <p className="mb-4 text-xs text-muted-foreground">
                     Fotografías registradas del SKU y plano técnico.

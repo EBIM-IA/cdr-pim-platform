@@ -9,14 +9,22 @@ import type { AuditEntry } from '../../../audit/domain/entities/audit-entry';
 import { products } from '../../../catalog/infrastructure/persistence/catalog.tables';
 import { ProductAsset, type ProductAssetSnapshot } from '../../domain/entities/product-asset';
 import type {
+  EcommercePhotoRepositoryPort,
+  ImportedEcommercePhoto,
+} from '../../domain/ports/ecommerce-photo-repository.port';
+import type {
   AssetSlot,
   ProductAssetRepositoryPort,
 } from '../../domain/ports/product-asset-repository.port';
 import { productAssets, type ProductAssetRow } from './product-assets.tables';
 import { recordAssetAuditWithin } from './record-asset-audit-within-transaction';
 
+type DatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
 @Injectable()
-export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort {
+export class DrizzleProductAssetRepository
+  implements ProductAssetRepositoryPort, EcommercePhotoRepositoryPort
+{
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   async listByProductId(productId: Uuid): Promise<ProductAsset[]> {
@@ -92,6 +100,122 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
     return (row?.position ?? 0) + 1;
   }
 
+  findActivePhotoByChecksum(productId: Uuid, checksum: string): Promise<Uuid | null> {
+    return this.findPhotoByChecksum(this.database, productId, checksum);
+  }
+
+  async appendEcommercePhoto({
+    photo,
+    ecommerceSku,
+    assertObjectAvailable,
+    audit,
+  }: Parameters<EcommercePhotoRepositoryPort['appendEcommercePhoto']>[0]): Promise<{
+    assetId: Uuid;
+    inserted: boolean;
+  }> {
+    return this.database.transaction(async (transaction) => {
+      await lockFileObject(transaction, photo.objectKey);
+      await this.lockGallery(transaction, photo.productId);
+      const existing = await this.findPhotoByChecksum(transaction, photo.productId, photo.checksum);
+      if (existing) return { assetId: existing, inserted: false };
+      await assertObjectAvailable();
+      const [row] = await transaction
+        .select({ position: max(productAssets.position) })
+        .from(productAssets)
+        .where(
+          and(
+            eq(productAssets.productId, photo.productId),
+            eq(productAssets.typeCode, 'FOTO'),
+            isNull(productAssets.deletedAt),
+          ),
+        );
+      const asset = ProductAsset.create({ ...photo, position: (row?.position ?? 0) + 1 });
+      await this.insertAsset(transaction, asset.toSnapshot(), ecommerceSku);
+      await recordAssetAuditWithin(transaction, audit(asset));
+      return { assetId: photo.id, inserted: true };
+    });
+  }
+
+  async listRecentEcommercePhotos(): Promise<ImportedEcommercePhoto[]> {
+    const rows = await this.database
+      .select({
+        productId: productAssets.productId,
+        pimSku: products.sku,
+        ecommerceSku: productAssets.ecommerceSku,
+        assetId: productAssets.id,
+        filename: productAssets.originalFilename,
+        importedAt: productAssets.uploadedAt,
+        deletedAt: productAssets.deletedAt,
+      })
+      .from(productAssets)
+      .innerJoin(products, eq(productAssets.productId, products.id))
+      .where(eq(productAssets.source, 'narviz'))
+      .orderBy(desc(productAssets.uploadedAt), desc(productAssets.id))
+      .limit(100);
+    return rows.map(({ assetId, productId, ecommerceSku, deletedAt, ...photo }) => ({
+      ...photo,
+      assetId: assetId as Uuid,
+      productId: productId as Uuid,
+      ecommerceSku: ecommerceSku!,
+      active: deletedAt === null,
+    }));
+  }
+
+  private async findPhotoByChecksum(
+    database: Pick<Database, 'select'>,
+    productId: Uuid,
+    checksum: string,
+  ): Promise<Uuid | null> {
+    const [row] = await database
+      .select({ id: productAssets.id })
+      .from(productAssets)
+      .where(
+        and(
+          eq(productAssets.productId, productId),
+          eq(productAssets.typeCode, 'FOTO'),
+          eq(productAssets.checksumSha256, checksum),
+          isNull(productAssets.deletedAt),
+        ),
+      )
+      .orderBy(asc(productAssets.position))
+      .limit(1);
+    return row ? (row.id as Uuid) : null;
+  }
+
+  private async lockGallery(transaction: DatabaseTransaction, productId: Uuid): Promise<void> {
+    await transaction
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.id, productId))
+      .for('update');
+  }
+
+  private async insertAsset(
+    transaction: DatabaseTransaction,
+    snapshot: ProductAssetSnapshot,
+    ecommerceSku?: string,
+  ): Promise<void> {
+    await transaction.insert(productAssets).values({
+      id: snapshot.id,
+      productId: snapshot.productId,
+      kind: snapshot.kind,
+      typeCode: snapshot.type,
+      originalFilename: snapshot.filename,
+      objectKey: snapshot.objectKey,
+      bucket: snapshot.bucket,
+      mimeType: snapshot.mimeType,
+      sizeBytes: snapshot.size,
+      checksumSha256: snapshot.checksum,
+      storageVersionId: snapshot.storageVersionId,
+      position: snapshot.position,
+      source: snapshot.source,
+      ecommerceSku,
+      uploadedBy: snapshot.uploadedBy,
+      uploadedAt: snapshot.uploadedAt,
+      replacesAssetId: snapshot.replacesAssetId,
+    });
+  }
+
   async reorder(
     productId: Uuid,
     type: 'FOTO' | 'PLANO',
@@ -99,11 +223,7 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
     audit: (before: readonly string[]) => AuditEntry,
   ): Promise<void> {
     await this.database.transaction(async (transaction) => {
-      await transaction
-        .select({ id: products.id })
-        .from(products)
-        .where(eq(products.id, productId))
-        .for('update');
+      await this.lockGallery(transaction, productId);
       const rows = await transaction
         .select()
         .from(productAssets)
@@ -157,11 +277,7 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
         await lockFileObject(transaction, snapshot.objectKey);
         await assertObjectAvailable?.();
         // All asset-slot mutations for a product serialize on its catalog row.
-        await transaction
-          .select({ id: products.id })
-          .from(products)
-          .where(eq(products.id, snapshot.productId))
-          .for('update');
+        await this.lockGallery(transaction, snapshot.productId);
         const slotPosition =
           snapshot.position === null
             ? isNull(productAssets.position)
@@ -197,26 +313,8 @@ export class DrizzleProductAssetRepository implements ProductAssetRepositoryPort
         }
 
         const replacesAssetId = current ? (current.asset.id as Uuid) : null;
-        await transaction.insert(productAssets).values({
-          id: snapshot.id,
-          productId: snapshot.productId,
-          kind: snapshot.kind,
-          typeCode: snapshot.type,
-          originalFilename: snapshot.filename,
-          objectKey: snapshot.objectKey,
-          bucket: snapshot.bucket,
-          mimeType: snapshot.mimeType,
-          sizeBytes: snapshot.size,
-          checksumSha256: snapshot.checksum,
-          storageVersionId: snapshot.storageVersionId,
-          position: snapshot.position,
-          source: snapshot.source,
-          uploadedBy: snapshot.uploadedBy,
-          uploadedAt: snapshot.uploadedAt,
-          replacesAssetId,
-        });
-
         const saved = ProductAsset.rehydrate({ ...snapshot, replacesAssetId });
+        await this.insertAsset(transaction, saved.toSnapshot());
         const replaced = current ? this.toDomain(current.asset, current.sku) : null;
         await recordAssetAuditWithin(transaction, audit(saved, replaced));
         return {

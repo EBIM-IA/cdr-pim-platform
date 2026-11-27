@@ -1,6 +1,7 @@
 import type {
   AdminTemplateAttributeDto,
   CatalogWorkbookProductDto,
+  EcommerceImageDto,
   WorkspaceDto,
 } from '@cdr/contracts';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -18,6 +19,10 @@ const api = vi.hoisted(() => ({
   experience: vi.fn(),
   downloadWorkbook: vi.fn(),
   downloadBinary: vi.fn(),
+  imageStatus: vi.fn(),
+  imageLookup: vi.fn(),
+  imageImport: vi.fn(),
+  imageHistory: vi.fn(),
 }));
 vi.mock('@/lib/tabular-export', () => ({ downloadWorkbookXlsx: api.downloadWorkbook }));
 vi.mock('@/lib/zip-export', () => ({ downloadBinary: api.downloadBinary }));
@@ -34,6 +39,12 @@ vi.mock('@/lib/catalog-admin-api', () => ({
 }));
 vi.mock('@/lib/product-experience-api', () => ({ fetchProductExperience: api.experience }));
 vi.mock('@/lib/product-assets-api', () => ({ listProductAssets: api.assets }));
+vi.mock('@/lib/ecommerce-images-api', () => ({
+  fetchEcommerceImageStatus: api.imageStatus,
+  lookupEcommerceImages: api.imageLookup,
+  importEcommerceImage: api.imageImport,
+  fetchEcommerceImageHistory: api.imageHistory,
+}));
 
 import { PublicationWorkspace, publicationReadiness } from './publication-workspace';
 
@@ -82,6 +93,24 @@ const workspace: WorkspaceDto = {
   notices: [],
   actions: [],
 };
+const photo: EcommerceImageDto = {
+  assetId: 'asset-a',
+  position: 1,
+  cover: false,
+  filename: 'lateral.jpg',
+  mimeType: 'image/jpeg',
+  sizeBytes: 100,
+  checksumSha256: 'a'.repeat(64),
+  canImport: true,
+};
+const cover: EcommerceImageDto = {
+  ...photo,
+  assetId: 'asset-b',
+  position: 2,
+  cover: true,
+  filename: 'portada.jpg',
+  checksumSha256: 'b'.repeat(64),
+};
 beforeEach(() => {
   vi.resetAllMocks();
   api.experience.mockResolvedValue({ nombreGeneral: 'Rodamiento', variants: [], fields: [] });
@@ -104,6 +133,8 @@ beforeEach(() => {
     product: { ...product, attributes: { diametro: { value: 0 } } },
   });
   api.assets.mockResolvedValue([]);
+  api.imageStatus.mockResolvedValue({ configured: true });
+  api.imageHistory.mockResolvedValue({ items: [] });
 });
 afterEach(cleanup);
 
@@ -301,6 +332,151 @@ describe('PublicationWorkspace', () => {
         '/documents?productId=product-1',
       ),
     );
+  });
+
+  it('looks up an exact ecommerce SKU and imports selected photos cover first using the looked-up checksum', async () => {
+    const ecommerceSku = 'nvZ-00577';
+    const target = { productId: product.id, ecommerceSku };
+    const identity = { ...target, pimSku: product.sku };
+    api.imageLookup.mockResolvedValue({
+      items: [
+        {
+          ...identity,
+          status: 'found',
+          images: [
+            photo,
+            cover,
+            { ...photo, assetId: 'asset-c', filename: 'animada.gif', canImport: false },
+          ],
+        },
+      ],
+    });
+    api.imageImport.mockImplementation(async ({ assets }) => {
+      const image = assets[0].assetId === cover.assetId ? cover : photo;
+      return {
+        ...identity,
+        items: [
+          {
+            assetId: image.assetId,
+            filename: image.filename,
+            status: image.cover ? 'imported' : 'existing',
+            productAssetId: `pim-${image.assetId}`,
+          },
+        ],
+      };
+    });
+    api.imageHistory.mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({
+      items: [
+        {
+          ...identity,
+          assetId: 'pim-asset-b',
+          filename: cover.filename,
+          importedAt: '2026-11-27T18:00:00Z',
+          active: true,
+        },
+      ],
+    });
+    render(<PublicationWorkspace workspace={workspace} view="images" canManage />);
+    const lookup = await screen.findByRole('button', { name: 'Consultar imágenes' });
+    await waitFor(() => expect(lookup).toBeEnabled());
+    fireEvent.change(screen.getByRole('textbox', { name: 'SKU ecommerce (opcional)' }), {
+      target: { value: ecommerceSku },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Imágenes a consultar' }), {
+      target: { value: 'own' },
+    });
+    fireEvent.click(lookup);
+    const selectAll = await screen.findByRole('button', {
+      name: 'Seleccionar imágenes disponibles',
+    });
+    expect(api.imageLookup).toHaveBeenCalledWith(
+      { targets: [target], mode: 'own' },
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByText('Portada')).toBeVisible();
+    expect(screen.queryByRole('checkbox', { name: /animada\.gif/ })).not.toBeInTheDocument();
+    fireEvent.click(selectAll);
+    fireEvent.click(screen.getByRole('button', { name: 'Importar selección al PIM (2)' }));
+    expect(await screen.findByText('2 de 2 imágenes procesadas.')).toBeVisible();
+    expect(api.imageImport).toHaveBeenNthCalledWith(
+      1,
+      {
+        target,
+        mode: 'own',
+        assets: [{ assetId: cover.assetId, checksumSha256: cover.checksumSha256 }],
+      },
+      expect.any(AbortSignal),
+    );
+    expect(api.imageImport).toHaveBeenNthCalledWith(
+      2,
+      {
+        target,
+        mode: 'own',
+        assets: [{ assetId: photo.assetId, checksumSha256: photo.checksumSha256 }],
+      },
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByText('Importada al PIM')).toBeVisible();
+    expect(screen.getByText('Ya estaba en el PIM')).toBeVisible();
+    expect(await screen.findByText('En galería')).toBeVisible();
+  });
+
+  it('keeps batch lookups in order with a separate failure per SKU and hides imports for read-only actors', async () => {
+    const missing = { ...product, id: 'product-2', sku: 'SKU-SIN-TIENDA' };
+    api.workbook.mockResolvedValue({ items: [product, missing], total: 2, page: 1, pageSize: 25 });
+    api.imageLookup.mockResolvedValue({
+      items: [
+        {
+          productId: product.id,
+          pimSku: product.sku,
+          ecommerceSku: product.sku,
+          status: 'found',
+          images: [cover],
+        },
+        {
+          productId: missing.id,
+          pimSku: missing.sku,
+          ecommerceSku: missing.sku,
+          status: 'error',
+          error: {
+            code: 'ECOMMERCE_NOT_FOUND',
+            message: 'SKU no disponible en el ecommerce.',
+            correlationId: 'Narviz-123',
+          },
+        },
+      ],
+    });
+    render(<PublicationWorkspace workspace={workspace} view="images" canQueryImages />);
+    const add = await screen.findByRole('button', { name: 'Añadir SKU al lote' });
+    await waitFor(() => expect(add).toBeEnabled());
+    fireEvent.click(add);
+    fireEvent.change(screen.getByRole('combobox', { name: 'SKU en contexto' }), {
+      target: { value: missing.id },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir SKU al lote' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Consultar lote' }));
+    expect(
+      await screen.findByText('SKU no disponible en el ecommerce. Referencia Narviz-123.'),
+    ).toBeVisible();
+    expect(api.imageLookup).toHaveBeenCalledWith(
+      {
+        targets: [{ productId: product.id }, { productId: missing.id }],
+        mode: 'resolved',
+      },
+      expect.any(AbortSignal),
+    );
+    expect(screen.queryByRole('button', { name: /Importar selección/ })).not.toBeInTheDocument();
+    expect(api.imageImport).not.toHaveBeenCalled();
+  });
+
+  it('keeps ecommerce queries unavailable until the backend is configured', async () => {
+    api.imageStatus.mockResolvedValue({ configured: false });
+    render(<PublicationWorkspace workspace={workspace} view="images" canManage />);
+    expect(
+      await screen.findByText('La integración con Narviz está pendiente de configuración.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Consultar imágenes' })).not.toBeInTheDocument();
+    expect(api.imageLookup).not.toHaveBeenCalled();
   });
 
   it('preserves the selected product when opening commercial enrichment', async () => {

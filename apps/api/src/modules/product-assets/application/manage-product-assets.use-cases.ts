@@ -50,7 +50,7 @@ export interface ProductAssetUpload {
   readonly filename: string;
   readonly declaredMimeType: string;
   readonly content: Uint8Array;
-  readonly source?: ProductAssetSource;
+  readonly source?: Exclude<ProductAssetSource, 'narviz'>;
   readonly position?: number;
   readonly replacesAssetId?: string;
 }

@@ -146,6 +146,60 @@ describe('product asset repository unit of work', () => {
       (await repository.listByProductId(productId)).map((asset) => asset.toSnapshot().id),
     ).toEqual([first.toSnapshot().id]);
   });
+
+  it('appends Narviz photos once even with concurrent imports and retains their history after removal', async () => {
+    const manual = makeAsset('FOTO', 1);
+    await repository.saveReplacing(manual, 'admin', now, (saved) =>
+      auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+    );
+
+    const append = () => {
+      const photo = makeAsset('FOTO', 1).toSnapshot();
+      return repository.appendEcommercePhoto({
+        photo: {
+          ...photo,
+          filename: 'portada.jpg',
+          mimeType: 'image/jpeg',
+          checksum: 'new-checksum',
+          source: 'narviz',
+          size: 30_000_000,
+        },
+        ecommerceSku: '00577a',
+        assertObjectAvailable: async () => undefined,
+        audit: (saved) => auditEntry(newUuid(), saved.toSnapshot().id, 'created'),
+      });
+    };
+
+    const results = await Promise.all([append(), append()]);
+    const winner = results.find((result) => result.inserted)!;
+    expect(results.filter((result) => result.inserted)).toHaveLength(1);
+    expect(results.map((result) => result.assetId)).toEqual([winner.assetId, winner.assetId]);
+    expect(await repository.findActivePhotoByChecksum(productId, 'new-checksum')).toBe(
+      winner.assetId,
+    );
+    expect(
+      (await repository.listByProductId(productId)).map((asset) => asset.toSnapshot().position),
+    ).toEqual([1, 2]);
+    expect(await repository.listRecentEcommercePhotos()).toEqual([
+      {
+        assetId: winner.assetId,
+        productId,
+        pimSku: '6205-2RS1',
+        ecommerceSku: '00577a',
+        filename: 'portada.jpg',
+        importedAt: now,
+        active: true,
+      },
+    ]);
+
+    await repository.softDelete(winner.assetId, 'admin', now, (deleted) =>
+      auditEntry(newUuid(), deleted.toSnapshot().id, 'deleted'),
+    );
+    expect(await repository.findActivePhotoByChecksum(productId, 'new-checksum')).toBeNull();
+    expect(await repository.listRecentEcommercePhotos()).toMatchObject([
+      { assetId: winner.assetId, active: false },
+    ]);
+  });
 });
 
 function makeAsset(

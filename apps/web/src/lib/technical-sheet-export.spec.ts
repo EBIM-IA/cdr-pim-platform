@@ -1,6 +1,10 @@
-import type { ProductAttributeSheetDto } from '@cdr/contracts';
+import type { ProductAssetDto, ProductAttributeSheetDto } from '@cdr/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { authorizeBulkTechnicalSheets, technicalSheetDocument } from './technical-sheet-export';
+import {
+  authorizeBulkTechnicalSheets,
+  technicalSheetDocument,
+  technicalSheetMedia,
+} from './technical-sheet-export';
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/lib/bff-client', () => ({ authenticatedBffFetch: mocks.fetch }));
@@ -180,4 +184,31 @@ describe('Bulk technical sheet authorization', () => {
       'No se pudo comprobar el permiso de fichas técnicas.',
     );
   });
+});
+
+it('accepts a Narviz gallery photo above the manual-upload limit when preparing PDF media', async () => {
+  const photo: ProductAssetDto = {
+    id: '11111111-1111-4111-8111-111111111111',
+    productId: sheet.product.id,
+    sku: sheet.product.sku,
+    kind: 'image',
+    type: 'FOTO',
+    filename: 'portada.jpg',
+    mimeType: 'image/jpeg',
+    size: 22_000_000,
+    checksum: 'test-checksum',
+    position: 1,
+    source: 'narviz',
+    uploadedBy: 'admin',
+    uploadedAt: '2026-11-27T00:00:00.000Z',
+    replacesAssetId: null,
+  };
+  const content = new Uint8Array(photo.size);
+  mocks.fetch.mockResolvedValue(
+    new Response(content, {
+      headers: { 'content-length': String(photo.size) },
+    }),
+  );
+  const [item] = await technicalSheetMedia([photo]);
+  expect(item?.bytes.byteLength).toBe(photo.size);
 });

@@ -19,6 +19,10 @@ graph LR
     comport --> pa["PrestashopPublisherAdapter<br/><i>stub</i>"]
     pa --> presta[PrestaShop]
 
+    narviz[Narviz ecommerce images] --> imageAdapter["Narviz HTTPS adapter"]
+    imageAdapter --> imagePort[["EcommerceImageSourcePort"]]
+    imagePort --> images["PIM image lookup and import"]
+
     pub --> ordport[["OrderChannelPublisherPort"]]
     ordport --> oa["OrdersPublisherAdapter<br/><i>stub</i>"]
     oa --> orders[Order-taking app]
@@ -26,16 +30,17 @@ graph LR
 
 ## Status — and what is blocking each one
 
-| Integration      | Port                           | Adapter                                           | Blocked on                                           |
-| ---------------- | ------------------------------ | ------------------------------------------------- | ---------------------------------------------------- |
-| Dynamics AX pull | `ErpProductSourcePort` ✅      | Legacy stub; not used by the confirmed direction  | Kept only until ADR-008 is superseded                |
-| AX inbound v1.1  | `AxInboxRepositoryPort` ✅     | Persistent PostgreSQL inbox + M2M REST controller | Catalog mapping, production M2M and VPN              |
-| AX PUSH mock     | `AxMockBatchStorePort` ✅      | Local-only, volatile simulator (`draft-0`)        | Retained for isolated developer tests                |
-| PrestaShop       | `CommercePublisherPort` ✅     | Stub that throws                                  | Version, API access, field mapping, network location |
-| Order-taking app | `OrderChannelPublisherPort` ✅ | Stub that throws                                  | Which system it is, and whether it has an API        |
-| OpenAI           | 3 ports ✅                     | Implemented + deterministic fakes                 | Nothing — an API key switches it on                  |
-| S3               | `ObjectStoragePort` ✅         | Implemented (`S3StorageAdapter`) + in-memory      | Nothing                                              |
-| SQS              | `QueuePort` ✅                 | Implemented (`SqsQueueAdapter`) + in-memory       | Nothing                                              |
+| Integration             | Port                           | Adapter                                           | Blocked on                                                         |
+| ----------------------- | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------ |
+| Dynamics AX pull        | `ErpProductSourcePort` ✅      | Legacy stub; not used by the confirmed direction  | Kept only until ADR-008 is superseded                              |
+| AX inbound v1.1         | `AxInboxRepositoryPort` ✅     | Persistent PostgreSQL inbox + M2M REST controller | Catalog mapping, production M2M and VPN                            |
+| AX PUSH mock            | `AxMockBatchStorePort` ✅      | Local-only, volatile simulator (`draft-0`)        | Retained for isolated developer tests                              |
+| PrestaShop publication  | `CommercePublisherPort` ✅     | Stub that throws                                  | Consumer contract, identities, field mapping and publication rules |
+| Narviz ecommerce images | `EcommerceImageSourcePort` ✅  | HTTPS lookup, batch lookup and verified downloads | Narviz Bearer token and SKU reconciliation before the initial load |
+| Order-taking app        | `OrderChannelPublisherPort` ✅ | Stub that throws                                  | Which system it is, and whether it has an API                      |
+| OpenAI                  | 3 ports ✅                     | Implemented + deterministic fakes                 | Nothing — an API key switches it on                                |
+| S3                      | `ObjectStoragePort` ✅         | Implemented (`S3StorageAdapter`) + in-memory      | Nothing                                                            |
+| SQS                     | `QueuePort` ✅                 | Implemented (`SqsQueueAdapter`) + in-memory       | Nothing                                                            |
 
 The three stubs **throw a documented `DependencyUnavailableError`** rather than returning
 empty results. Silence would be worse: an adapter that quietly returns nothing looks like
@@ -113,13 +118,20 @@ None of this is invented. Each item blocks a specific piece of work.
 4. **Volume and cadence** — maximum batch size, changes per day and retry window.
 5. **Network** — final VPN/internal ALB route for production.
 
-### PrestaShop
+### PrestaShop publication
 
 1. Version, and whether the Webservice API is enabled.
 2. API key and base URL.
 3. Field mapping onto PrestaShop's product/attribute/category model.
 4. Network location — internal (VPN) or internet-reachable.
 5. Behaviour when a product is unpublished in the PIM.
+
+### Narviz image migration
+
+The Narviz bridge supplies existing ecommerce photos for the initial migration to the PIM. The API
+uses the configured URL and Bearer credential to look up exact SKU references and verify the
+downloaded content before storing photos as PIM assets. The teams will reconcile SKU associations and
+galleries before PrestaShop switches to PIM images. See the [Narviz setup and verification guide](../integrations/narviz/IMAGENES_ECOMMERCE.md).
 
 ### Order-taking application
 

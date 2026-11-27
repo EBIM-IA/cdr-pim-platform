@@ -351,6 +351,69 @@ describe('AX inbound integration', () => {
   });
 });
 
+describe('Narviz ecommerce images', () => {
+  const baseUrl = 'https://store.example.test/pim-bridge/v1';
+  const token = 'fixture-token';
+
+  it('leaves the connector unconfigured by default', () => {
+    const env = loadApiEnv(minimal);
+    expect(env.ECOMMERCE_IMAGES_BASE_URL).toBeUndefined();
+    expect(env.ECOMMERCE_IMAGES_TOKEN).toBeUndefined();
+  });
+
+  it('accepts the bridge and Bearer credential together', () => {
+    const env = loadApiEnv({
+      ...minimal,
+      ECOMMERCE_IMAGES_BASE_URL: baseUrl,
+      ECOMMERCE_IMAGES_TOKEN: token,
+    });
+    expect(env.ECOMMERCE_IMAGES_BASE_URL).toBe(baseUrl);
+    expect(env.ECOMMERCE_IMAGES_TOKEN).toBe(token);
+  });
+
+  it('requires the endpoint and credential to be set together', () => {
+    expect(() => loadApiEnv({ ...minimal, ECOMMERCE_IMAGES_BASE_URL: baseUrl })).toThrow(
+      /ECOMMERCE_IMAGES_TOKEN.*is required/,
+    );
+    expect(() => loadApiEnv({ ...minimal, ECOMMERCE_IMAGES_TOKEN: token })).toThrow(
+      /ECOMMERCE_IMAGES_BASE_URL.*is required/,
+    );
+  });
+
+  it.each([
+    'http://store.example.test/pim-bridge/v1',
+    'https://store.example.test/pim-bridge/v1/',
+    'https://store.example.test/v1',
+    'https://user@store.example.test/pim-bridge/v1',
+    'https://store.example.test/pim-bridge/v1?option=1',
+    'https://store.example.test/pim-bridge/v1#fragment',
+  ])('rejects an invalid bridge URL (%s)', (invalidUrl) => {
+    expect(() =>
+      loadApiEnv({
+        ...minimal,
+        ECOMMERCE_IMAGES_BASE_URL: invalidUrl,
+        ECOMMERCE_IMAGES_TOKEN: token,
+      }),
+    ).toThrow(/ECOMMERCE_IMAGES_BASE_URL/);
+  });
+
+  it('rejects malformed credentials without echoing their value', () => {
+    const invalidToken = 'Bearer fixture-token';
+    try {
+      loadApiEnv({
+        ...minimal,
+        ECOMMERCE_IMAGES_BASE_URL: baseUrl,
+        ECOMMERCE_IMAGES_TOKEN: invalidToken,
+      });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvironmentValidationError);
+      expect((error as Error).message).toContain('ECOMMERCE_IMAGES_TOKEN');
+      expect((error as Error).message).not.toContain(invalidToken);
+    }
+  });
+});
+
 describe('boolean environment variables', () => {
   it('treats the string "false" as false, not as a truthy string', () => {
     // Regression guard: z.coerce.boolean() gets this wrong and would enable TLS against a

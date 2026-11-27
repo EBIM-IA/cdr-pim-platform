@@ -7,6 +7,7 @@ import { importExecutions } from '../../modules/imports/infrastructure/persisten
 import { identityModulePolicies } from '../../modules/identity/infrastructure/module-policy.tables';
 import { catalogHomeSettings } from '../../modules/catalog-schema/infrastructure/persistence/catalog-home-settings.tables';
 import { productTechnicalSheetVisibility } from '../../modules/product-assets/infrastructure/persistence/technical-sheet-visibility.tables';
+import { narvizRequestBudget } from '../../modules/product-assets/infrastructure/persistence/narviz-request-budget.tables';
 import { unifiedCodeRequests } from '../../modules/equivalences/infrastructure/persistence/unified-code-requests.tables';
 import { catalogParameters } from '../../modules/catalog-schema/infrastructure/persistence/catalog-parameters.tables';
 import {
@@ -81,6 +82,7 @@ export const schema = {
   categoryDynamicAttributes,
   importExecutions,
   productTechnicalSheetVisibility,
+  narvizRequestBudget,
   identityModulePolicies,
   unifiedCodeRequests,
   catalogParameters,
@@ -131,6 +133,7 @@ export {
   catalogCategoryErpCodes,
   categoryDynamicAttributes,
   productTechnicalSheetVisibility,
+  narvizRequestBudget,
   identityModulePolicies,
   unifiedCodeRequests,
   catalogParameters,

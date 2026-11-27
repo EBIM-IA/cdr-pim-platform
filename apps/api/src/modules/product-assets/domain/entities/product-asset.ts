@@ -3,7 +3,7 @@ import { PRODUCT_ASSET_MAX_BYTES } from '@cdr/contracts';
 import { type Uuid, ValidationError, newUuid } from '@cdr/shared';
 
 export type ProductAssetKind = 'image' | 'document';
-export type ProductAssetSource = 'manual' | 'bulk';
+export type ProductAssetSource = 'manual' | 'bulk' | 'narviz';
 
 export interface ProductAssetSnapshot {
   readonly id: Uuid;
@@ -91,18 +91,24 @@ export class ProductAsset {
   }
 }
 
-export function validateAssetFile(input: {
-  readonly filename: string;
-  readonly declaredMimeType: string;
-  readonly content: Uint8Array;
-  readonly type: ProductAssetType;
-}): ValidatedAssetFile {
+export function validateAssetFile(
+  input: {
+    readonly filename: string;
+    readonly declaredMimeType: string;
+    readonly content: Uint8Array;
+    readonly type: ProductAssetType;
+  },
+  maxBytes = PRODUCT_ASSET_MAX_BYTES,
+): ValidatedAssetFile {
   const filename = normalizeFilename(input.filename);
   if (input.content.byteLength === 0) throw new ValidationError('The uploaded file is empty');
-  if (input.content.byteLength > PRODUCT_ASSET_MAX_BYTES) {
-    throw new ValidationError('The uploaded file exceeds the 20 MB limit', {
-      maxBytes: PRODUCT_ASSET_MAX_BYTES,
-    });
+  if (input.content.byteLength > maxBytes) {
+    throw new ValidationError(
+      maxBytes === PRODUCT_ASSET_MAX_BYTES
+        ? 'The uploaded file exceeds the 20 MB limit'
+        : 'The imported image exceeds the 30 MB limit',
+      { maxBytes },
+    );
   }
 
   const detectedMimeType = detectProductAssetMimeType(input.content);

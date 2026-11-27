@@ -40,10 +40,11 @@ describe('PostgresWorkspaceReadModel', () => {
   let database: TestDatabase;
   let readModel: PostgresWorkspaceReadModel;
   let catalogQuery: ProductCatalogQueryPort;
+  let env: ReturnType<typeof loadApiEnv>;
 
   beforeAll(async () => {
     database = await createTestDatabase();
-    const env = loadApiEnv({
+    env = loadApiEnv({
       NODE_ENV: 'test',
       APP_ENV: 'test',
       DATABASE_URL: testDatabaseUrl(),
@@ -336,8 +337,8 @@ describe('PostgresWorkspaceReadModel', () => {
           id: 'ecommerce-images',
           values: expect.objectContaining({
             configured: false,
-            state: 'Sin conexión',
-            dependency: expect.stringContaining('Narvis'),
+            state: 'Configuración pendiente',
+            dependency: expect.stringContaining('credencial de Narviz'),
           }),
         }),
         expect.objectContaining({
@@ -361,6 +362,38 @@ describe('PostgresWorkspaceReadModel', () => {
         expect.objectContaining({ id: 'query-tecdoc', availability: 'blocked' }),
       ]),
     );
+  });
+
+  it('reports the Narviz bridge configuration separately from PrestaShop publication', async () => {
+    const token = 'fixture-token';
+    const baseUrl = 'https://store.example.test/pim-bridge/v1';
+    const configured = new PostgresWorkspaceReadModel(
+      database.sql,
+      { ...env, ECOMMERCE_IMAGES_BASE_URL: baseUrl, ECOMMERCE_IMAGES_TOKEN: token },
+      catalogQuery,
+      new ModulePolicyUseCase(new PostgresModulePolicyAdapter(database.sql)),
+    );
+
+    const integrations = await configured.read('integrations', actor);
+
+    expect(integrations.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ecommerce-images',
+          values: expect.objectContaining({
+            configured: true,
+            state: 'Configurado para consultar',
+            dependency: null,
+          }),
+        }),
+        expect.objectContaining({
+          id: 'prestashop',
+          values: expect.objectContaining({ configured: false, state: 'Sin conexión' }),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(integrations)).not.toContain(token);
+    expect(JSON.stringify(integrations)).not.toContain(baseUrl);
   });
 
   it('publishes the provisional AX receiver only when local mock mode is explicit', async () => {
